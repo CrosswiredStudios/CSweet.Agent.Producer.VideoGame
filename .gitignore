@@ -1,0 +1,24 @@
+## .NET build artifacts
+**/bin/
+**/obj/
+
+## IDE and editor files
+.vs/
+.vscode/*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## Environment and secrets
+.env
+!.env.example
+
+## Generated packages and temporary output
+/artifacts
+/.artifacts
+/.tmp
+
+## Model files
+**/*.gguf
+**/*.bin
+**/*.safetensors

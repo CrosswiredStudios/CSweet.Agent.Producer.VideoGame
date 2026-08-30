@@ -1,0 +1,14 @@
+<Project>
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <CSweetAgentSdkRepositoryRoot Condition="'$(CSweetAgentSdkRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)..\\CSweetAgentSdk</CSweetAgentSdkRepositoryRoot>
+    <UseLocalCSweetAgentSdk Condition="'$(UseLocalCSweetAgentSdk)' == '' and Exists('$(CSweetAgentSdkRepositoryRoot)\\src\\CSweet.Agent.SDK\\CSweet.Agent.SDK.csproj')">true</UseLocalCSweetAgentSdk>
+    <UseLocalCSweetAgentSdk Condition="'$(UseLocalCSweetAgentSdk)' == ''">false</UseLocalCSweetAgentSdk>
+    <CSweetVideoGameRepositoryRoot Condition="'$(CSweetVideoGameRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)..\\CSweet.Agent.CreativeDirector.VideoGame</CSweetVideoGameRepositoryRoot>
+    <UseLocalVideoGameAgentKit Condition="'$(UseLocalVideoGameAgentKit)' == '' and Exists('$(CSweetVideoGameRepositoryRoot)\\src\\CSweet.VideoGame.AgentKit\\CSweet.VideoGame.AgentKit.csproj')">true</UseLocalVideoGameAgentKit>
+    <UseLocalVideoGameAgentKit Condition="'$(UseLocalVideoGameAgentKit)' == ''">false</UseLocalVideoGameAgentKit>
+  </PropertyGroup>
+</Project>

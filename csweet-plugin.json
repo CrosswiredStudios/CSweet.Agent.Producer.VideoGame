@@ -1,0 +1,107 @@
+{
+  "$schema": "https://raw.githubusercontent.com/CrosswiredStudios/CSweetAgentSdk/main/schemas/csweet-plugin.v2.schema.json",
+  "manifestVersion": "2.0",
+  "kind": "agent",
+  "rolePolicy": {
+    "profile": "manager.v1",
+    "declaredRoleKeys": ["game-producer"],
+    "specializationKeys": ["video-game-development"]
+  },
+  "id": "com.csweet.video-game-producer",
+  "name": "Video Game Producer",
+  "version": "1.0.0",
+  "publisher": { "id": "com.csweet", "name": "C-Sweet" },
+  "runtime": {
+    "type": "dotnet-project",
+    "projectPath": "src/CSweet.Agent.Producer.VideoGame/CSweet.Agent.Producer.VideoGame.csproj",
+    "targetFramework": "net10.0",
+    "defaultActivationMode": "OnDemand",
+    "defaultTickFrequencySeconds": 300,
+    "supportsMultipleInstallations": true,
+    "maximumConcurrentJobs": 1
+  },
+  "protocol": { "minimumVersion": "2.0", "maximumVersion": "2.x" },
+  "provides": [
+    {
+      "name": "video-game.producer.execute.v1",
+      "description": "Leads project delivery, boards, sprints, schedules, budgets, dependencies, staffing, risks, and status reporting.",
+      "inputSchema": {
+        "type": "object",
+        "required": ["context", "assignmentRevision", "roleKey", "taskTypeKey", "instructions", "documents", "evidence", "producerOrganizationUserId", "creativeDirectorOrganizationUserId"],
+        "properties": {
+          "context": { "type": "object" },
+          "assignmentRevision": { "type": "integer", "minimum": 1 },
+          "roleKey": { "type": "string" },
+          "taskTypeKey": { "type": "string" },
+          "instructions": { "type": "string", "minLength": 1 },
+          "documents": { "type": "array", "items": { "type": "object" } },
+          "evidence": { "type": "array", "items": { "type": "object" } },
+          "producerOrganizationUserId": { "type": "string", "format": "uuid" },
+          "creativeDirectorOrganizationUserId": { "type": "string", "format": "uuid" }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        },
+        "required": ["message"],
+        "additionalProperties": false
+      },
+      "executionTimeoutSeconds": 30,
+      "idempotency": "work-item",
+      "riskClass": "standard"
+    },
+    {
+      "name": "agent.configuration.describe.v1",
+      "description": "Describe specialist configuration.",
+      "inputSchema": { "type": "object", "additionalProperties": false },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "executionTimeoutSeconds": 30,
+      "idempotency": "none",
+      "riskClass": "standard"
+    },
+    {
+      "name": "agent.configuration.update.v1",
+      "description": "Update specialist configuration.",
+      "inputSchema": { "type": "object", "additionalProperties": true },
+      "outputSchema": { "type": "object", "additionalProperties": true },
+      "executionTimeoutSeconds": 30,
+      "idempotency": "work-item",
+      "riskClass": "standard"
+    }
+  ],
+  "requires": [
+    { "name": "platform.llm.chat-stream.v1", "scope": "organization", "purpose": "Produce grounded role-owned deliverables from exact project evidence." },
+    { "name": "work.item.read", "scope": "organization", "purpose": "Read only the authoritative assigned board item." },
+    { "name": "work.item.comment", "scope": "organization", "purpose": "Record progress, blockers, findings, and evidence on the authoritative item." },
+    { "name": "work.item.start", "scope": "organization", "purpose": "Start typed assigned work." },
+    { "name": "work.item.complete", "scope": "organization", "purpose": "Complete work only after durable evidence exists." },
+    { "name": "platform.artifact.read.v1", "scope": "organization", "purpose": "Read authorized exact document revisions and hashes." },
+    { "name": "platform.artifact.create.v1", "scope": "organization", "purpose": "Create the role-owned durable deliverable." },
+    { "name": "platform.artifact.submit.v1", "scope": "organization", "purpose": "Submit the exact deliverable revision for accountable review." },
+    { "name": "communication.chat.create.v1", "scope": "team", "purpose": "Open contextual direct collaboration with the Producer." },
+    { "name": "communication.message.send.v1", "scope": "team", "purpose": "Report completion or blockers to the Producer in project context." },
+    { "name": "platform.agent-operating-state.read.v1", "scope": "organization", "purpose": "Recover project/work-item state and duplicate-delivery outcomes after restart." },
+    { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item." }
+  ],
+  "events": { "subscribes": [] },
+  "configuration": [
+    { "key": "llmProviderId", "type": "provider", "label": "LLM provider", "required": true, "secret": false },
+    { "key": "llmModel", "type": "model", "label": "Model", "required": true, "secret": false, "dependsOnFieldKey": "llmProviderId" }
+  ],
+  "credentials": [],
+  "webAccess": { "mode": "None", "rules": [] },
+  "ui": [],
+  "catalog": {
+    "summary": "Leads project delivery, boards, sprints, schedules, budgets, dependencies, staffing, risks, and status reporting.",
+    "category": "Production",
+    "role": { "key": "game-producer", "name": "Video Game Producer" },
+    "license": { "spdxId": "MIT" },
+    "iconUrls": [],
+    "roleAliases": [],
+    "keywords": [],
+    "documentationUrl": "README.md"
+  }
+}
