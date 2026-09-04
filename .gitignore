@@ -1,13 +1,40 @@
 ## .NET build artifacts
 **/bin/
 **/obj/
+**/.codex-build/
+[Dd]ebug/
+[Rr]elease/
+
+## Test and coverage output
+[Tt]est[Rr]esult*/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+
+## NuGet and build diagnostics
+**/[Pp]ackages/*
+*.nupkg
+*.snupkg
+*.binlog
+*.log
 
 ## IDE and editor files
 .vs/
-.vscode/*.suo
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.rsuser
+*.suo
 *.user
 *.userosscache
 *.sln.docstates
+*.sln.iml
+*.DotSettings.user
 
 ## Environment and secrets
 .env
@@ -17,6 +44,11 @@
 /artifacts
 /.artifacts
 /.tmp
+
+## Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
 
 ## Model files
 **/*.gguf

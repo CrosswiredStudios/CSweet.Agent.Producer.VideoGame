@@ -1,5 +1,6 @@
 using CSweet.Agent.SDK;
 using CSweet.VideoGame.AgentKit;
+using System.Text.Json;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
 
@@ -24,6 +25,18 @@ public sealed class ManifestTests
         Assert.True(File.Exists(Path.Combine(
             root,
             manifest.Runtime.ProjectPath!.Replace('/', Path.DirectorySeparatorChar))));
+
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        var required = json.RootElement.GetProperty("requires").EnumerateArray()
+            .Select(x => x.GetProperty("name").GetString()).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("work.item.create", required);
+        Assert.Contains("communication.coordination.start-board.v1", required);
+        Assert.Contains("work.personal-todo.add.v1", required);
+        Assert.Contains("work.personal-todo.defer.v1", required);
+        Assert.Contains("platform.artifact-package.submit.v1", required);
+        Assert.Contains("com.csweet.work.personal-todo.available.v1",
+            json.RootElement.GetProperty("events").GetProperty("subscribes").EnumerateArray()
+                .Select(x => x.GetString()));
     }
 
     private static string RepositoryRoot()

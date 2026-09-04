@@ -6,8 +6,8 @@ This repository contains one standalone C-Sweet protocol-v2 agent. Its purpose i
 
 ## Invariants
 
-- Keep `com.csweet.video-game-producer` and version `1.0.0` synchronized between agent code,
-  `csweet-plugin.json`, tests, and releases.
+- Keep `com.csweet.video-game-producer` and the current package version synchronized between agent
+  code, `csweet-plugin.json`, tests, and releases.
 - The root manifest is the reviewed authority request. Keep `provides`, `requires`, events,
   configuration, credentials, web access, and UI contributions synchronized with implementation
   and tests.
