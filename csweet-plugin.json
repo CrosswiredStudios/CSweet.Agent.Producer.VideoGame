@@ -9,7 +9,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Video Game Producer",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "publisher": { "id": "com.csweet", "name": "C-Sweet" },
   "runtime": {
     "type": "dotnet-project",

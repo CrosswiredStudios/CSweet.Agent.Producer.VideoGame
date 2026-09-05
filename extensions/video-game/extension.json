@@ -1,0 +1,11 @@
+{
+  "extensionId": "com.crosswiredstudios.video-game",
+  "version": "1.0.0",
+  "sourceRepository": "https://github.com/CrosswiredStudios/CSweet.Agent.CreativeDirector.VideoGame",
+  "sourcePath": "extensions/video-game",
+  "files": {
+    "VideoGameContracts.cs": "cc70bda54039bd30ebdbff26d35c9562cb7aff5f98d9efa456255750bf495e7a",
+    "VideoGameAgentKit.cs": "f1cf0f634b545b67009cf87c766fe5b8a8a5a11b4eee11d6c638e9955cfb1712",
+    "README.md": "cf4c658d94729568e569c51f940dd15a407b7cc3be47e21e984a96613af8e93a"
+  }
+}
