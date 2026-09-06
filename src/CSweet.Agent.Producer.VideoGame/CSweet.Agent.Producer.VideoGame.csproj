@@ -1,11 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>2.1.1</Version>
+    <Version>2.2.0</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CSweet.Agent.SDK" Version="3.27.0" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <PackageReference Include="CSweet.Agent.SDK" Version="3.28.0" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
     <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\\src\\CSweet.Agent.SDK\\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
   </ItemGroup>
   <ItemGroup>
@@ -15,4 +15,5 @@
   <ItemGroup>
     <Compile Include="../../extensions/video-game/*.cs" Link="Extension/%(Filename)%(Extension)" />
   </ItemGroup>
+  <ItemGroup><InternalsVisibleTo Include="CSweet.Agent.Producer.VideoGame.Tests" /></ItemGroup>
 </Project>

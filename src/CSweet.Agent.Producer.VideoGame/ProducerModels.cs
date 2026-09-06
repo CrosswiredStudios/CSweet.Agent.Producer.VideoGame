@@ -77,7 +77,10 @@ public sealed record ProducerPlanningCycleState(
     string? DesignerProposalDigest,
     string? TechnicalProposalDigest,
     string? ReconciledDigest,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
+}
 
 public static class ProducerPhaseResolver
 {
@@ -170,7 +173,7 @@ public sealed record ProducerCapacityAssessment(
 public static class ProducerPolicyFingerprint
 {
     public static string ForPlanning(Guid workstreamId, long teamRevision, string profileDigest, string handoffDigest) =>
-        Digest($"{workstreamId:D}|{teamRevision}|{profileDigest}|{handoffDigest}");
+        Digest($"{workstreamId:D}|{profileDigest}|{handoffDigest}");
 
     public static string Digest(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();

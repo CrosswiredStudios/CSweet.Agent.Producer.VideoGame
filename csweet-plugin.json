@@ -9,7 +9,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Video Game Producer",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "publisher": { "id": "com.csweet", "name": "C-Sweet" },
   "runtime": {
     "type": "dotnet-project",
@@ -124,7 +124,10 @@
     { "name": "work.personal-todo.defer.v1", "scope": "organization", "purpose": "Wait durably for another principal, deadline, or platform event." },
     { "name": "work.personal-todo.update.v1", "scope": "organization", "purpose": "Refresh source context and management commitment details." },
     { "name": "platform.agent-operating-state.read.v1", "scope": "organization", "purpose": "Recover project/work-item state and duplicate-delivery outcomes after restart." },
-    { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item." }
+    { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item." },
+    {"name": "communication.chat.read.v1", "scope": "team", "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."},
+    {"name": "communication.chat.create.v1", "scope": "team", "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."},
+    {"name": "communication.message.send.v1", "scope": "team", "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."}
   ],
   "events": {
     "subscribes": [
@@ -134,7 +137,11 @@
       "com.csweet.management.review.due.v1",
       "com.csweet.management.resource-change.decided.v1",
       "com.csweet.workstream.changed.v1",
-      "sprint.completed"
+      "sprint.completed",
+      "com.csweet.workforce.changed.v1",
+      "com.csweet.hiring-recommendation.fulfilled.v1",
+      "com.csweet.workstream.changed.v2",
+      "com.csweet.work.item.changed.v1"
     ]
   },
   "configuration": [

@@ -57,7 +57,8 @@ public sealed class ProducerPolicyTests
         var changedRoster = ProducerPolicyFingerprint.ForPlanning(workstreamId, 4, new string('a', 64), new string('b', 64));
 
         Assert.Equal(first, replay);
-        Assert.NotEqual(first, changedRoster);
+        Assert.Equal(first, changedRoster);
+        Assert.NotEqual(first, ProducerPolicyFingerprint.ForPlanning(workstreamId, 4, new string('a', 64), new string('c', 64)));
         Assert.Equal(64, first.Length);
     }
 

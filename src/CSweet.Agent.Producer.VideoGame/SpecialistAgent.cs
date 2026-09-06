@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
-public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
+public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
 {
     private const string VisionBriefArtifactType = "creative-direction.game-vision-brief.v1";
     private const string VisionAcknowledgementArtifactType = "video-game.production.game-vision-acknowledgement.v1";
@@ -16,7 +16,7 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.1.1";
+    public override string Version => "2.2.0";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -107,7 +107,13 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
         if (item.CorrelationId?.StartsWith(SprintReadinessCommitmentPrefix, StringComparison.Ordinal) == true)
             return await ReconcileSprintReadinessAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(StaffingGapCommitmentPrefix, StringComparison.Ordinal) == true)
-            return PersonalTodoResult.Blocked("A required exact role, skill, capability, or eligible runtime installation is not currently staffed.");
+        {
+            if (item.WorkContext?.BoardId is not { } gapBoard || item.WorkContext.WorkItemId is not { } gapItem)
+                return PersonalTodoResult.Blocked("Staffing follow-up requires an authoritative ticket.");
+            var ticket = (await context.Platform.Work.ReadBoardAsync(gapBoard, cancellationToken)).Items.Single(x => x.Id == gapItem);
+            return ticket.StageAssignments.Count > 0 ? PersonalTodoResult.Completed("The existing ticket now has an eligible owner.")
+                : PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "Waiting for the approved delivery coverage.");
+        }
         return PersonalTodoResult.Blocked("This Producer personal commitment has no supported authoritative correlation.");
     }
 
@@ -168,12 +174,16 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
             if (entry.ActiveTeam is not null &&
                 accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var handoff) == true)
             {
+                var activeRoster = (await context.Platform.ReadTeamRosterAsync(
+                    new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 200), cancellationToken)).Team;
+                if (activeRoster is not null)
+                    await BindAvailableWorkAsync(board.Id, activeRoster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
                 var fingerprint = ProducerPolicyFingerprint.ForPlanning(
                     workstream.Id, entry.ActiveTeam.Revision, workstream.ProfileDefinitionDigest ?? string.Empty,
                     handoff.HandoffDigest);
                 _ = await EnsureCommitmentAsync(
                     $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
-                    "Complete Designer / Technical Director backlog planning",
+                    "Reconcile scope, technical backlog and delivery staffing",
                     "Reconcile player outcomes with technical feasibility, publish only provenance-bound canonical tickets, and leave unready work in Backlog.",
                     "High",
                     new PersonalTodoWorkContext
@@ -204,7 +214,7 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
             {
                 var planned = sprints.Where(x => x.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
                     .OrderBy(x => x.Sequence).ThenBy(x => x.StartsAt).FirstOrDefault();
-                if (planned is not null)
+                if (planned is not null && planned.CapacityPoints > 0 && (await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken)).Items.Any(x => x.SprintId == planned.Id))
                 {
                     var planningRevision = (await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken))
                         .Items.Where(x => x.SprintId == planned.Id).Select(x => x.PlanningRevision).DefaultIfEmpty(0).Max();
@@ -223,12 +233,12 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
                         },
                         context, cancellationToken);
                 }
-                else if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
-                         !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest))
+                if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
+                         !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest) && planningCycle.OutstandingAuthorityQuestions.Count == 0)
                 {
                     var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
                     var candidateExists = detail.Items.Any(x =>
-                        x.ExecutionMode == WorkItemExecutionModes.Executable && x.SprintId is null &&
+                        x.ExecutionMode == WorkItemExecutionModes.Executable && (x.SprintId is null || sprints.Any(s => s.Id == x.SprintId && s.Status == "Planned")) &&
                         x.StageAssignments.Count == 1 && x.ProposalProvenance is not null);
                     if (candidateExists)
                     {
@@ -317,6 +327,12 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (message.EventType is "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
+            "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1")
+        {
+            await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt, message.OccurredAt.AddMinutes(5), message.EventType), context, cancellationToken);
+            return;
+        }
         if (message.EventType != ManagementEvents.ReviewDue && message.EventType != "sprint.completed" &&
             message.EventType != ManagementEvents.ResourceChangeDecided)
             return;
@@ -352,7 +368,7 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
                 {
                     return await context.Platform.PersonalTodo.RequeueAsync(
                         new RequeuePersonalTodoItemRequest(existing.Id, existing.Revision,
-                            $"producer-requeue:{existing.Id:N}:{workContext.SourceFingerprint}"), cancellationToken);
+                            $"producer-requeue:{existing.Id:N}:{existing.Revision}:{workContext.SourceFingerprint}"), cancellationToken);
                 }
                 catch (PlatformCapabilityException exception) when (exception.Code == PlatformCapabilityErrorCode.Conflict)
                 {
@@ -429,9 +445,14 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
             return PersonalTodoResult.Blocked("The active team roster is unavailable.");
         var designer = SelectRoleMember(roster, VideoGameRoleKeys.GameDesigner);
         var technicalDirector = SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector);
-        if (designer is null || technicalDirector is null)
-            return PersonalTodoResult.Blocked(
-                "Detailed backlog publication requires active, available Game Designer and Technical Director installations with exact declared roles.");
+        await EnsureDraftSprintAsync(boardId, handoff.RevisionDigest, context, cancellationToken);
+        if (technicalDirector is null)
+        {
+            await ProposeCoverageAsync(workstreamId, boardId, roster,
+                [TechnicalLeadershipRequirement()], context, cancellationToken);
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "Milestones and a draft sprint are available. Technical decomposition is waiting for the proposed technical lead.");
+        }
 
         operatingState.PlanningCycles.TryGetValue(workstreamId, out var priorCycle);
         ArtifactPackage package;
@@ -456,14 +477,14 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
             workstream.ProfileDefinitionDigest ?? string.Empty, package.Id, package.Version, packageDigest,
             workstream.LifecycleStage, TargetMilestone(workstream.LifecycleStage), source.SourceFingerprint);
 
-        var designerSession = await EnsurePlanningSessionAsync(designer, boardId, cycle,
-            "Player-outcome and game-design backlog proposal",
-            "Define player outcomes, mechanics, content, design constraints, testable acceptance criteria, and creative decisions without inventing technical feasibility or estimates.",
-            "video-game.production.designer-backlog-proposal.v1", context, cancellationToken);
         var technicalSession = await EnsurePlanningSessionAsync(technicalDirector, boardId, cycle,
             "Technical delivery and decomposition proposal",
-            "Assess feasibility and provide architecture, dependencies, sequencing, exact accountable roles, required skills, and capabilities without changing creative direction or inventing estimates.",
+            "Decompose the accepted brief into a lean complete backlog, including containers, technical discovery, implementation, QA and packaging. Justify specialist roles with actual work; do not require a full studio roster.",
             "video-game.production.technical-delivery-proposal.v1", context, cancellationToken);
+        var designerSession = designer is null ? technicalSession : await EnsurePlanningSessionAsync(designer, boardId, cycle,
+            "Player-outcome and game-design backlog proposal",
+            "Define player outcomes and testable acceptance criteria within the accepted brief. Coordinate technical feasibility separately.",
+            "video-game.production.designer-backlog-proposal.v1", context, cancellationToken);
         priorCycle = (priorCycle ?? new ProducerPlanningCycleState(workstreamId, boardId, teamId,
             source.SourceFingerprint, package.Id, null, null, null, null, null, DateTimeOffset.UtcNow)) with
         {
@@ -485,13 +506,23 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
             x.Artifact?.Type == "video-game.production.designer-backlog-proposal.v1")?.Artifact;
         var technicalArtifact = technicalSession.Turns.LastOrDefault(x =>
             x.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1")?.Artifact;
-        var designerProposal = designerArtifact?.Payload.Deserialize<GameDesignerBacklogProposalV1>();
         var technicalProposal = technicalArtifact?.Payload.Deserialize<GameTechnicalDeliveryProposalV1>();
+        // An accepted creative brief supplies design constraints when no dedicated designer is justified.
+        // All published leaves still have technical-authority provenance and exact role requirements.
+        if (designer is null) designerArtifact = technicalArtifact;
+        var designerProposal = designer is null
+            ? new GameDesignerBacklogProposalV1(cycle, [], ["Preserve the exact accepted creative brief and its non-goals."], [], handoff.RevisionDigest)
+            : designerArtifact?.Payload.Deserialize<GameDesignerBacklogProposalV1>();
         if (designerProposal is null || technicalProposal is null ||
             designerProposal.Cycle.PlanningFingerprint != cycle.PlanningFingerprint ||
             technicalProposal.Cycle.PlanningFingerprint != cycle.PlanningFingerprint)
             return PersonalTodoResult.Blocked("The completed planning sessions do not contain current, correlated proposal artifacts.");
 
+        var questions = designerProposal.OpenCreativeDecisions.Concat(technicalProposal.OpenFeasibilityDecisions).ToList();
+        if (questions.Count > 0 && Guid.TryParse(context.Identity?.ManagerEmployeeId, out var creativeDirectorId))
+            await context.Platform.Communication.SendDirectAgentMessageAsync(creativeDirectorId,
+                $"Planning for workstream {workstreamId:D} needs your input: {string.Join("; ", questions)}. The Producer is drafting the backlog; affected scope remains uncommitted.",
+                $"producer-planning-questions:{cycle.PlanningFingerprint}", cancellationToken);
         var published = await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigest,
             designerSession, designerArtifact!, designerProposal,
             technicalSession, technicalArtifact!, technicalProposal,
@@ -503,8 +534,10 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
             DesignerProposalDigest = designerArtifact.Digest,
             TechnicalProposalDigest = technicalArtifact.Digest,
             ReconciledDigest = reconciledDigest,
+            OutstandingAuthorityQuestions = questions,
             UpdatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
+        await BindAvailableWorkAsync(boardId, roster, cycle.ProfileDigest, context, cancellationToken);
         var currentBoard = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var unassigned = currentBoard.Items.Where(x =>
                 x.ExecutionMode == WorkItemExecutionModes.Executable &&
@@ -521,7 +554,11 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
                 source with { WorkItemId = gap.Id, SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
         }
-        if (unassigned.Count == 0)
+        await ProposeCoverageAsync(workstreamId, boardId, roster,
+            unassigned.SelectMany(x => x.Planning?.DelegationRecommendations ?? []).ToList(), context, cancellationToken);
+        await EnsureDraftSprintAsync(boardId, reconciledDigest, context, cancellationToken);
+        await PopulateDraftScopeAsync(boardId, context, cancellationToken);
+        if (questions.Count == 0 && currentBoard.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable && x.StageAssignments.Count == 1))
         {
             _ = await EnsureCommitmentAsync(
                 $"{EstimationCommitmentPrefix}{boardId:N}:{reconciledDigest}:1",
@@ -531,7 +568,9 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
                 source with { SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
         }
-        return PersonalTodoResult.Completed($"Published {published} canonical Backlog items from reconciled Designer and Technical Director evidence.");
+        return questions.Count == 0
+            ? PersonalTodoResult.Completed($"Published {published} canonical Backlog items from the accepted brief and technical planning evidence.")
+            : PersonalTodoResult.Blocked("Draft backlog and staffing proposal are recorded. Resolve the escalated authority questions in an updated accepted brief before committing this scope.");
     }
 
     private static async Task<PersonalTodoResult> ReconcileEstimatesAndQaReadinessAsync(
@@ -549,20 +588,29 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
         var roster = rosterResponse.Team;
         if (roster is null)
             return PersonalTodoResult.Blocked("The current team roster is unavailable.");
+        var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
+        var planningState = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), cancellationToken);
+        if (planningState?.Payload.PlanningCycles.TryGetValue(workstreamId, out var currentCycle) != true ||
+            currentCycle is null || currentCycle.ReconciledDigest != source.SourceFingerprint || currentCycle.OutstandingAuthorityQuestions.Count > 0)
+            return PersonalTodoResult.Blocked("The candidate planning evidence changed or has unresolved authority questions.");
+        await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        var plannedSprints = (await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken)).Where(x => x.Status == "Planned").Select(x => x.Id).ToHashSet();
         var candidates = board.Items.Where(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                x.SprintId is null && x.ProposalProvenance is not null)
+                (x.SprintId is null || plannedSprints.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null)
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
         if (candidates.Count == 0)
             return PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope.");
-        if (candidates.Any(x => x.StageAssignments.Count != 1 || x.StageAssignments[0].Requirements is null ||
-                                x.StageAssignments[0].SelectionEvidence is null))
-            return PersonalTodoResult.Blocked("Candidate scope contains an unassigned role, skill, capability, or runtime gap and remains in Backlog.");
+        candidates = EligibleCandidateScope(candidates, board.Items).ToList();
+        if (candidates.Count == 0)
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "The draft sprint remains available; no dependency-consistent staffed leaves can be committed yet.");
 
         var planningRevision = candidates.Max(x => x.PlanningRevision);
         var planningDigest = source.SourceFingerprint;
         var roleProposals = new List<(AgentCoordinationSession Session, AgentCoordinationArtifact Artifact,
             GameRoleEstimateCapacityProposalV1 Proposal)>();
+        var pendingRoles = new List<string>();
         foreach (var group in candidates.GroupBy(x => x.StageAssignments[0].Requirements!.RequiredRoleKey,
                      StringComparer.Ordinal).OrderBy(x => x.Key, StringComparer.Ordinal))
         {
@@ -583,11 +631,11 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
                     "Capacity and blockers are explicit."],
                 "video-game.production.role-estimate-request.v1", requestFingerprint, estimateRequest,
                 $"producer-estimation-session:{requestFingerprint}", context, cancellationToken);
-            if (session.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
-                return PersonalTodoResult.Blocked($"{group.Key} estimation is blocked and must be reconciled.");
             if (session.Status != AgentCoordinationStatuses.Completed)
-                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                    $"Waiting for the {group.Key} role-owned estimate and capacity proposal.");
+            {
+                pendingRoles.Add($"{group.Key} ({session.Status})");
+                continue; // Start every role's estimation and keep independent completed proposals usable.
+            }
             var artifact = session.Turns.LastOrDefault(x =>
                 x.Artifact?.Type == "video-game.production.role-estimate-capacity-proposal.v1")?.Artifact;
             var proposal = artifact?.Payload.Deserialize<GameRoleEstimateCapacityProposalV1>();
@@ -601,6 +649,9 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
             roleProposals.Add((session, artifact, proposal));
         }
 
+        if (roleProposals.Count == 0)
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                $"Role estimation is pending: {string.Join(", ", pendingRoles)}.");
         foreach (var sourceProposal in roleProposals)
         {
             foreach (var estimate in sourceProposal.Proposal.Estimates)
@@ -674,7 +725,7 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
         }
 
         var sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
-        var sprint = sprints.FirstOrDefault(x => x.Status == "Planned" && x.Goal.Contains(planningDigest, StringComparison.Ordinal));
+        var sprint = sprints.Where(x => x.Status == "Planned").OrderBy(x => x.Sequence).FirstOrDefault();
         if (sprint is null)
         {
             var sequence = sprints.Select(x => x.Sequence ?? 0).DefaultIfEmpty().Max() + 1;
@@ -683,6 +734,10 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
                 DateTimeOffset.UtcNow.Date, DateTimeOffset.UtcNow.Date.AddDays(14),
                 $"producer-sprint:{boardId:N}:{planningDigest}") { Sequence = sequence }, cancellationToken);
         }
+        // Tentative draft tickets that cannot be committed return to the unscheduled backlog.
+        foreach (var deferred in board.Items.Where(x => x.SprintId == sprint.Id && !selectedCandidates.Any(s => s.Id == x.Id)))
+            await context.Platform.Work.SetItemSprintAsync(new SetWorkItemSprintRequest(boardId, deferred.Id, null,
+                deferred.Revision, $"producer-defer-draft:{sprint.Id:N}:{deferred.Id:N}:{qaArtifact.Digest}"), cancellationToken);
         var totalCapacity = roleProposals.Sum(x => x.Proposal.AvailableSprintCapacity);
         if (sprint.CapacityPoints != totalCapacity)
             sprint = await context.Platform.Work.SetSprintCapacityAsync(new SetWorkSprintCapacityRequest(boardId,
@@ -715,6 +770,8 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
         if (sprint is null) return PersonalTodoResult.Blocked("The authoritative sprint no longer exists.");
         if (!string.Equals(sprint.Status, "Planned", StringComparison.OrdinalIgnoreCase))
             return PersonalTodoResult.Completed($"Sprint {sprint.Name} is already {sprint.Status}.");
+        if (!(sprint.CapacityPoints > 0))
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "This sprint is still a provisional draft awaiting estimates and QA readiness.");
         var start = new StartWorkSprintExecutionRequest(boardId, sprintId, sprint.Revision,
             $"producer-readiness:{sprintId:N}:{sprint.Revision}");
         var preflight = await context.Platform.Work.PreflightSprintAsync(start, cancellationToken);
@@ -915,7 +972,7 @@ public sealed class SpecialistAgent : VideoGameSpecialistAgentBase
                             proposal.ProposalKey, selected.Teammate.AgentInstallationId, roster.Revision,
                             cycle.ProfileDigest, requirements, matched
                         }));
-                        assignments = [new WorkStageAssignment("specialist-execution", "Agent", userId,
+                        assignments = [new WorkStageAssignment("specialist-execution", "AgentInstallation", userId,
                             selected.Teammate.AgentInstallationId)
                         {
                             Requirements = requirements,
