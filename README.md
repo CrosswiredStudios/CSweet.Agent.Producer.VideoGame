@@ -25,7 +25,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.3.2`
+- Version: `2.3.3`
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
 - Requested platform/provider capabilities: typed planning, work management, governed staffing, communication, artifacts and brokered model access (see manifest).
@@ -54,7 +54,7 @@ Built with `CSweet.Agent.SDK` 3.31.1 and the bundled video-game extension source
 
 Game-specific payload helpers and decision logic live in the bundled `extensions/video-game` source snapshot under the publisher-owned `CrosswiredStudios.VideoGame` namespace. They are compiled into this agent, not published as C-Sweet platform contracts. The snapshot has versioned SHA-256 provenance and needs no sibling checkout or domain NuGet feed. C-Sweet handles generic coordination envelopes and profile metadata; agent permissions and existing wire type IDs remain unchanged.
 
-## Progressive delivery (2.3.2)
+## Progressive delivery (2.3.3)
 
 The Producer drafts a sprint before implementation staffing is complete, proposes a technical lead when
 needed, and requests further roles only for uncovered backlog responsibilities. Approved unfulfilled slots
@@ -97,3 +97,11 @@ for sharing at every coordination start; package import alone does not update th
 ## Provider queue handling
 
 Uses SDK 3.31.1 for acknowledged LLM waiting, conversation activity, and host-authoritative deadline updates. Deploy the matching C-Sweet AgentHost and reimport this package to enable the private polling protocol.
+
+## Hiring kickoff
+
+Onboarding contacts the authoritative Creative Director, introduces the Producer in the owner's
+conversation, and persists the kickoff before acknowledging the lifecycle event. Stable message
+keys and durable state prevent duplicate introductions on retries. Project setup must be ready
+before the existing exact-document pitch refinement workflow begins. That workflow retains the
+shared brief and accepted handoff before the Producer proposes workload-backed staffing.

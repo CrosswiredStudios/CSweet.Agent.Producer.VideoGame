@@ -29,6 +29,9 @@ public sealed class ManifestTests
         using var json = JsonDocument.Parse(await File.ReadAllTextAsync(path));
         var required = json.RootElement.GetProperty("requires").EnumerateArray()
             .Select(x => x.GetProperty("name").GetString()).ToHashSet(StringComparer.Ordinal);
+        Assert.Contains("agent.onboarding.complete.v1", required);
+        Assert.Contains(AgentLifecycleEvents.Onboarded,
+            json.RootElement.GetProperty("events").GetProperty("subscribes").EnumerateArray().Select(x => x.GetString()));
         Assert.Contains("work.item.create", required);
         Assert.Contains("communication.coordination.start-board.v1", required);
         Assert.Contains("work.personal-todo.add.v1", required);
