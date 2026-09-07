@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.3.3";
+    public override string Version => "2.3.4";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -79,6 +79,13 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 [request.SessionId.ToString("D")] = latest.Digest
             },
             $"producer-vision-ack:{workstreamId:N}:{refinedRevision.ContentSha256}", cancellationToken);
+
+        // Completing the collaboration must leave executable planning work, even before the next attention review.
+        var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
+        if (request.WorkContext.TeamId is not { } teamId || request.WorkContext.BoardId is not { } boardId)
+            return AgentCoordinationTurnResult.Blocked("The accepted brief requires a project team and board before planning can be scheduled.");
+        _ = await EnsurePlanningCommitmentAsync(workstream, teamId, boardId, request.SessionId,
+            refinedRevision.ContentSha256, context, cancellationToken);
 
         var acknowledgement = new GameVisionAcknowledgement(
             brief.AcceptedPitchDigest, true, [], DateTimeOffset.UtcNow)
@@ -149,7 +156,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 {
                     TeamId = entry.ActiveTeam.TeamId,
                     WorkstreamId = workstream.Id,
-                    Key = $"VG-{workstream.Id:N}"[..11],
+                    Key = $"VG{workstream.Id:N}"[..12].ToUpperInvariant(),
                     ProfileKey = "video-game-production-board.v2"
                 }, cancellationToken);
                 commitments.Add($"Created the authoritative delivery board for {workstream.Name}.");
@@ -178,23 +185,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), cancellationToken)).Team;
                 if (activeRoster is not null)
                     await BindAvailableWorkAsync(board.Id, activeRoster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
-                var fingerprint = ProducerPolicyFingerprint.ForPlanning(
-                    workstream.Id, entry.ActiveTeam.Revision, workstream.ProfileDefinitionDigest ?? string.Empty,
-                    handoff.HandoffDigest);
-                _ = await EnsureCommitmentAsync(
-                    $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
-                    "Reconcile scope, technical backlog and delivery staffing",
-                    "Reconcile player outcomes with technical feasibility, publish only provenance-bound canonical tickets, and leave unready work in Backlog.",
-                    "High",
-                    new PersonalTodoWorkContext
-                    {
-                        WorkstreamId = workstream.Id,
-                        TeamId = entry.ActiveTeam.TeamId,
-                        BoardId = board.Id,
-                        CoordinationSessionId = handoff.CoordinationSessionId,
-                        SourceFingerprint = fingerprint
-                    },
-                    context, cancellationToken);
+                _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board.Id,
+                    handoff.CoordinationSessionId, handoff.HandoffDigest, context, cancellationToken);
             }
 
             var metrics = await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(board.Id)
@@ -350,6 +342,22 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         _ = await context.Platform.InvokeAsync<ManagementStatusReport, JsonElement>(
             "platform.management.status-report.v1",
             BuildManagementReport(cycleId, null, state.Payload), cancellationToken);
+    }
+
+    private static Task<PersonalTodoItem> EnsurePlanningCommitmentAsync(
+        WorkstreamDetail workstream, Guid teamId, Guid boardId, Guid sessionId, string handoffDigest,
+        AgentRuntimeContext context, CancellationToken cancellationToken)
+    {
+        var fingerprint = ProducerPolicyFingerprint.ForPlanning(
+            workstream.Id, 0, workstream.ProfileDefinitionDigest ?? string.Empty, handoffDigest);
+        return EnsureCommitmentAsync(
+            $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
+            "Reconcile scope, technical backlog and delivery staffing",
+            "Use the accepted production brief to propose the smallest justified delivery team to the Creative Director, reconcile technical feasibility, and publish provenance-bound planning work.",
+            "High", new PersonalTodoWorkContext {
+                WorkstreamId = workstream.Id, TeamId = teamId, BoardId = boardId,
+                CoordinationSessionId = sessionId, SourceFingerprint = fingerprint
+            }, context, cancellationToken);
     }
 
     private static async Task<PersonalTodoItem> EnsureCommitmentAsync(

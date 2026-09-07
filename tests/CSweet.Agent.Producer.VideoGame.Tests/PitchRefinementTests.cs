@@ -17,7 +17,7 @@ public sealed class PitchRefinementTests
         fixture.SeedModel(1, new(false, ["How many levels are in the MVP?"], "Level count affects workload.", Markdown));
         var first = await new SpecialistAgent().HandleCoordinationTurnAsync(fixture.Request(1), fixture.Context, default);
         Assert.Equal(AgentCoordinationDispositions.Continue, first.Disposition);
-        Assert.Equal(0, fixture.PackageCreates); Assert.Equal(0, fixture.Submits);
+        Assert.Equal(0, fixture.PackageCreates); Assert.Equal(0, fixture.Submits); Assert.Empty(fixture.Todos);
         var repeated = await new SpecialistAgent().HandleCoordinationTurnAsync(fixture.Request(1), fixture.Context, default);
         Assert.Equal(first.Artifact!.Payload.GetRawText(), repeated.Artifact!.Payload.GetRawText()); Assert.Equal(1, fixture.Creates);
         var review = first.Artifact.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
@@ -38,6 +38,14 @@ public sealed class PitchRefinementTests
         Assert.Equal(1, fixture.PackageCreates); Assert.Contains(fixture.PackageMembers!, x => x.ArtifactId == ready.DocumentId && x.AcceptedRevisionId == ready.RevisionId);
         Assert.Equal("video-game.production-plan.v1", fixture.PackageMembers![0].RequiredDocumentType);
         Assert.Contains(fixture.States.Keys, x => x.Contains("producer"));
+        var task = Assert.Single(fixture.Todos);
+        Assert.Contains("delivery staffing", task.Title);
+        Assert.Equal(fixture.Request(5).WorkContext!.WorkstreamId, task.WorkContext!.WorkstreamId);
+        Assert.Equal(fixture.Request(5).WorkContext!.BoardId, task.WorkContext.BoardId);
+        Assert.Equal(fixture.Request(5).SessionId, task.WorkContext.CoordinationSessionId);
+        Assert.StartsWith("producer-planning:", task.CorrelationId);
+        await new SpecialistAgent().HandleCoordinationTurnAsync(fixture.Request(5), fixture.Context, default);
+        Assert.Single(fixture.Todos);
     }
 
     [Fact]
@@ -71,6 +79,8 @@ public sealed class PitchRefinementTests
         public Dictionary<string, AgentOperatingStateResponse> States { get; } = [];
         public AgentRuntimeContext Context { get; }
         public int Creates, Revises, Submits, PackageCreates;
+        public List<PersonalTodoItem> Todos { get; } = [];
+        private Guid Board { get; } = Guid.NewGuid();
         public IReadOnlyList<ArtifactPackageMember>? PackageMembers;
         public Fixture()
         {
@@ -81,6 +91,17 @@ public sealed class PitchRefinementTests
                 { HighLevelGddArtifactId = document, HighLevelGddAcceptedRevisionId = revision, HighLevelGddRevisionSha256 = "source-hash" };
             Add(Director, PitchProtocol.Artifact(PitchProtocol.BriefType, Digest, new PitchBrief(vision, document, revision, "source-hash")));
             var runtime = new AgentTestRuntime()
+                .RegisterCapability<ReadWorkstreamRequest, WorkstreamDetail>(WorkstreamCapabilityNames.ReadV1,
+                    (request, _) => Task.FromResult(new WorkstreamDetail(Workstream, "Game", "Ship the accepted game", [], "concept", "Active",
+                        Producer, null, null, null, "video-game-production.v2", 4, null, "profile-digest", 1)))
+                .RegisterCapability<JsonElement, PersonalTodoDirectory>(PersonalTodoCapabilities.Read,
+                    (_, _) => Task.FromResult(new PersonalTodoDirectory([new(Guid.NewGuid(), Producer, "Producer", Director, "Director", 1, Todos)], Producer)))
+                .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Add, (request, _) => {
+                    var todo = new PersonalTodoItem(Guid.NewGuid(), Guid.NewGuid(), Producer, Producer, "Producer", request.Title,
+                        request.Description!, PersonalTodoStatuses.Ready, request.Priority, 1, 1, null, null, null, [], null, null,
+                        DateTimeOffset.UtcNow, DateTimeOffset.UtcNow) { CorrelationId = request.CorrelationId, WorkContext = request.WorkContext };
+                    Todos.Add(todo); return Task.FromResult(todo);
+                })
                 .RegisterCapability<JsonElement, ArtifactDocument>(PlatformCapabilities.ArtifactRead,
                     (request, _) => Task.FromResult(Documents[request.GetProperty("artifactId").GetGuid()]))
                 .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
@@ -107,7 +128,7 @@ public sealed class PitchRefinementTests
             speaker, "Continue", content, DateTimeOffset.UtcNow, new(artifact.Type, artifact.SchemaVersion, artifact.Key, 1, true, artifact.Payload, "transport-digest")));
         public AgentCoordinationTurnRequest Request(int turn) => new(Session, turn, turn, "Pitch", "Refine pitch", [],
             new(Producer, Guid.NewGuid(), "Producer", "Producer"), new(Director, Guid.NewGuid(), "Director", "Director"), false, Transcript.ToList())
-            { WorkContext = new(Guid.NewGuid(), Workstream, Team, Guid.NewGuid(), null, null, null, Guid.NewGuid(), null, null) };
+            { WorkContext = new(Guid.NewGuid(), Workstream, Team, Board, null, null, null, Guid.NewGuid(), null, null) };
         public void SeedModel(int turn, ProducerReview review) { var key = $"pitch-producer:{Session:N}:{turn}"; States[key] = State(key, JsonSerializer.SerializeToElement(review), 1); }
         public void Accept(PitchReview review) { var doc = Documents[review.DocumentId]; Documents[doc.Id] = doc with { AcceptedRevisionId = review.RevisionId,
             Revisions = doc.Revisions.Select(x => x.Id == review.RevisionId ? x with { Status = "Accepted" } : x).ToList() }; }
