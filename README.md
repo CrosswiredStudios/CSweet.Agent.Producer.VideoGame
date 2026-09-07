@@ -25,7 +25,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.2.0`
+- Version: `2.2.1`
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
 - Requested platform/provider capabilities: typed planning, work management, governed staffing, communication, artifacts and brokered model access (see manifest).
@@ -54,7 +54,7 @@ Built with `CSweet.Agent.SDK` 3.28.0 and the bundled video-game extension source
 
 Game-specific payload helpers and decision logic live in the bundled `extensions/video-game` source snapshot under the publisher-owned `CrosswiredStudios.VideoGame` namespace. They are compiled into this agent, not published as C-Sweet platform contracts. The snapshot has versioned SHA-256 provenance and needs no sibling checkout or domain NuGet feed. C-Sweet handles generic coordination envelopes and profile metadata; agent permissions and existing wire type IDs remain unchanged.
 
-## Progressive delivery (2.2.0)
+## Progressive delivery (2.2.1)
 
 The Producer drafts a sprint before implementation staffing is complete, proposes a technical lead when
 needed, and requests further roles only for uncovered backlog responsibilities. Approved unfulfilled slots
@@ -66,3 +66,7 @@ QA-reviewed scope is committed for execution; tentative tickets outside that sco
 and require an updated accepted brief before commitment. Periodic review and workforce/work-item events
 resume useful work. Dedicated specialist roles remain capability boundaries; there is no implicit role aliasing.
 Communication chat read/create/send permissions support those scoped conversations and staffing proposals.
+
+Roster reads respect the platform limit of 100 entries per page. Bootstrap handoff requires
+the host roster fix allowing the active team lead's direct manager to inspect the team before
+Workstream creation, and including provided work capabilities in roster eligibility.
