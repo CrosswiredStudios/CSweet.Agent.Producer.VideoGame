@@ -46,6 +46,17 @@ public sealed class PitchRefinementTests
         Assert.StartsWith("producer-planning:", task.CorrelationId);
         await new SpecialistAgent().HandleCoordinationTurnAsync(fixture.Request(5), fixture.Context, default);
         Assert.Single(fixture.Todos);
+        // No board, sprint or metrics capabilities are registered. Initial hiring must not require them.
+        await new SpecialistAgent().HandlePersonalTodoAsync(task, fixture.Context, default);
+        var staffing = Assert.Single(fixture.StaffingProposals);
+        Assert.Equal("game-technical-director", Assert.Single(staffing.Roles).RoleKey);
+        Assert.Equal(task.WorkContext.WorkstreamId, staffing.WorkstreamId);
+        Assert.Contains(staffing.Evidence, x => x.SourceRevision == ready.RevisionSha256);
+        fixture.HireTechnicalDirector();
+        await new SpecialistAgent().HandlePersonalTodoAsync(task, fixture.Context, default);
+        Assert.Single(fixture.TeamBoards);
+        Assert.Single(fixture.Sprints);
+        Assert.Single(fixture.StaffingProposals);
     }
 
     [Fact]
@@ -80,7 +91,38 @@ public sealed class PitchRefinementTests
         public AgentRuntimeContext Context { get; }
         public int Creates, Revises, Submits, PackageCreates;
         public List<PersonalTodoItem> Todos { get; } = [];
-        private Guid Board { get; } = Guid.NewGuid();
+        public List<ResourceChangeProposalRequest> StaffingProposals { get; } = [];
+        private Guid? Board => null;
+        private AgentTestRuntime Runtime { get; set; } = null!;
+        private bool TechnicalDirectorHired;
+        private Guid TechnicalDirector { get; } = Guid.NewGuid();
+        public List<WorkBoardSummary> TeamBoards { get; } = [];
+        public List<WorkSprint> Sprints { get; } = [];
+        public void HireTechnicalDirector()
+        {
+            TechnicalDirectorHired = true;
+            Runtime.RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(WorkBoardCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>(TeamBoards.ToList()));
+            Runtime.RegisterCapability<CreateWorkBoardRequest, WorkBoardSummary>(WorkBoardCapabilities.Create, (r, _) => {
+                Assert.Equal(Team, r.TeamId); Assert.Equal(Workstream, r.WorkstreamId);
+                Assert.Matches("^[A-Z][A-Z0-9]{1,11}$", r.Key!);
+                var board = new WorkBoardSummary(Guid.NewGuid(), r.Name, r.Description!, false, false, 1, []) {
+                    WorkstreamId = Workstream, TeamId = Team };
+                TeamBoards.Add(board); return Task.FromResult(board);
+            });
+            Runtime.RegisterCapability<ConfigureProfileOrchestrationRequest, JsonElement>(WorkOrchestrationCapabilities.ConfigureProfile,
+                (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new {})));
+            Runtime.RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>(Sprints));
+            Runtime.RegisterCapability<CreateWorkSprintRequest, WorkSprint>(WorkSprintCapabilities.Create, (r, _) => {
+                var sprint = new WorkSprint(Guid.NewGuid(), r.BoardId, r.Name, r.Goal!, "Planned", r.StartsAt, r.EndsAt,
+                    null, null, null, 0, 0, 0, 0, 1);
+                Sprints.Add(sprint); return Task.FromResult(sprint);
+            });
+            Runtime.RegisterCapability<JsonElement, ArtifactPackage>(PlatformCapabilities.ArtifactPackageRead,
+                (r, _) => Task.FromResult(new ArtifactPackage(r.GetProperty("packageId").GetGuid(), "Planning", "planning", 1,
+                    "Submitted", PackageMembers!, null)));
+        }
         public IReadOnlyList<ArtifactPackageMember>? PackageMembers;
         public Fixture()
         {
@@ -90,7 +132,17 @@ public sealed class PitchRefinementTests
             var vision = new GameVisionBrief(Digest, "outcome", "loop", "platform", "art", "MVP", [], "criteria", [])
                 { HighLevelGddArtifactId = document, HighLevelGddAcceptedRevisionId = revision, HighLevelGddRevisionSha256 = "source-hash" };
             Add(Director, PitchProtocol.Artifact(PitchProtocol.BriefType, Digest, new PitchBrief(vision, document, revision, "source-hash")));
-            var runtime = new AgentTestRuntime()
+            var runtime = Runtime = new AgentTestRuntime()
+                .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.TeamRosterReadV2,
+                    (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { team = new { teamId = Team.ToString(), revision = 1, members = TechnicalDirectorHired ? new object[] { new { employeeId = TechnicalDirector.ToString(), agentInstallationId = Guid.NewGuid(), isAvailable = true, runtimeEligibility = "Eligible", declaredRoleKeys = new[] { "game-technical-director" } } } : Array.Empty<object>() } })))
+                .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
+                    (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
+                .RegisterCapability<ResourceChangeProposalRequest, JsonElement>(PlatformCapabilities.ResourceChangePropose,
+                    (request, _) => { StaffingProposals.Add(request); return Task.FromResult(JsonSerializer.SerializeToElement(new { id = Guid.NewGuid() })); })
+                .RegisterCapability<JsonElement, JsonElement>("communication.chat.create.v1",
+                    (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { succeeded = true, chat = new { id = Guid.NewGuid(), participants = new[] { new { organizationUserId = Director, employeeType = "Agent", displayName = "Director", role = "Member" } } } })))
+                .RegisterCapability<JsonElement, JsonElement>("communication.message.send.v1",
+                    (request, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { id = Guid.NewGuid(), chatId = request.GetProperty("chatId").GetGuid(), chatTurnId = Guid.NewGuid() })))
                 .RegisterCapability<ReadWorkstreamRequest, WorkstreamDetail>(WorkstreamCapabilityNames.ReadV1,
                     (request, _) => Task.FromResult(new WorkstreamDetail(Workstream, "Game", "Ship the accepted game", [], "concept", "Active",
                         Producer, null, null, null, "video-game-production.v2", 4, null, "profile-digest", 1)))

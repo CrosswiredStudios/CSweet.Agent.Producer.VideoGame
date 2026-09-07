@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.3.4";
+    public override string Version => "2.3.5";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -82,9 +82,9 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
 
         // Completing the collaboration must leave executable planning work, even before the next attention review.
         var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
-        if (request.WorkContext.TeamId is not { } teamId || request.WorkContext.BoardId is not { } boardId)
-            return AgentCoordinationTurnResult.Blocked("The accepted brief requires a project team and board before planning can be scheduled.");
-        _ = await EnsurePlanningCommitmentAsync(workstream, teamId, boardId, request.SessionId,
+        if (request.WorkContext.TeamId is not { } teamId)
+            return AgentCoordinationTurnResult.Blocked("The accepted brief requires a project team before staffing discovery can be scheduled.");
+        _ = await EnsurePlanningCommitmentAsync(workstream, teamId, request.WorkContext.BoardId, request.SessionId,
             refinedRevision.ContentSha256, context, cancellationToken);
 
         var acknowledgement = new GameVisionAcknowledgement(
@@ -148,23 +148,21 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             var workstream = entry.Workstream;
             phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
             var board = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
-            if (board is null && entry.ActiveTeam is not null)
+            var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
+                ProjectStateKeys.Portfolio("producer"), cancellationToken);
+            if (entry.ActiveTeam is not null &&
+                accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var planningHandoff) == true)
             {
-                board = await context.Platform.Work.CreateBoardAsync(new CreateWorkBoardRequest(
-                    workstream.Name, $"Producer-managed delivery for {workstream.Outcome}",
-                    $"producer-board:{workstream.Id:N}")
-                {
-                    TeamId = entry.ActiveTeam.TeamId,
-                    WorkstreamId = workstream.Id,
-                    Key = $"VG{workstream.Id:N}"[..12].ToUpperInvariant(),
-                    ProfileKey = "video-game-production-board.v2"
-                }, cancellationToken);
-                commitments.Add($"Created the authoritative delivery board for {workstream.Name}.");
+                _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board?.Id,
+                    planningHandoff.CoordinationSessionId, planningHandoff.HandoffDigest, context, cancellationToken);
+                var staffingRoster = (await context.Platform.ReadTeamRosterAsync(
+                    new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), cancellationToken)).Team;
+                if (staffingRoster is not null && SelectRoleMember(staffingRoster, VideoGameRoleKeys.TechnicalDirector) is not null)
+                    board ??= await EnsureProductionBoardAsync(workstream, entry.ActiveTeam.TeamId, context, cancellationToken);
             }
-
             if (board is null)
             {
-                risks.Add($"{workstream.Name}: no active team or delivery board.");
+                commitments.Add($"{workstream.Name}: complete documentation and initial hiring before the Technical Director and Producer plan the team board.");
                 continue;
             }
 
@@ -176,8 +174,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                         $"producer-profile:{workstream.Id:N}:{workstream.ProfileDefinitionDigest}"), cancellationToken);
             }
 
-            var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
-                ProjectStateKeys.Portfolio("producer"), cancellationToken);
+
             if (entry.ActiveTeam is not null &&
                 accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var handoff) == true)
             {
@@ -345,7 +342,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     }
 
     private static Task<PersonalTodoItem> EnsurePlanningCommitmentAsync(
-        WorkstreamDetail workstream, Guid teamId, Guid boardId, Guid sessionId, string handoffDigest,
+        WorkstreamDetail workstream, Guid teamId, Guid? boardId, Guid sessionId, string handoffDigest,
         AgentRuntimeContext context, CancellationToken cancellationToken)
     {
         var fingerprint = ProducerPolicyFingerprint.ForPlanning(
@@ -440,8 +437,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     {
         var source = item.WorkContext;
         if (source?.WorkstreamId is not { } workstreamId || source.TeamId is not { } teamId ||
-            source.BoardId is not { } boardId || string.IsNullOrWhiteSpace(source.SourceFingerprint))
-            return PersonalTodoResult.Blocked("The planning commitment is missing authoritative workstream, team, board, or fingerprint context.");
+            string.IsNullOrWhiteSpace(source.SourceFingerprint))
+            return PersonalTodoResult.Blocked("The planning commitment is missing authoritative workstream, team, or fingerprint context.");
 
         var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
         var stateStore = new RevisionSafeProjectState(context.Platform);
@@ -458,15 +455,17 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             return PersonalTodoResult.Blocked("The active team roster is unavailable.");
         var designer = SelectRoleMember(roster, VideoGameRoleKeys.GameDesigner);
         var technicalDirector = SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector);
-        await EnsureDraftSprintAsync(boardId, handoff.RevisionDigest, context, cancellationToken);
+
         if (technicalDirector is null)
         {
-            await ProposeCoverageAsync(workstreamId, boardId, roster,
-                [TechnicalLeadershipRequirement()], context, cancellationToken);
+            await ProposeCoverageAsync(workstreamId, source.BoardId, roster,
+                [TechnicalLeadershipRequirement()], context, cancellationToken, handoff.RevisionDigest);
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                "Milestones and a draft sprint are available. Technical decomposition is waiting for the proposed technical lead.");
+                "The hiring proposal is awaiting a Technical Director. Team-board planning starts after that hire.");
         }
 
+        var boardId = source.BoardId ?? (await EnsureProductionBoardAsync(workstream, teamId, context, cancellationToken)).Id;
+        await EnsureDraftSprintAsync(boardId, handoff.RevisionDigest, context, cancellationToken);
         operatingState.PlanningCycles.TryGetValue(workstreamId, out var priorCycle);
         ArtifactPackage package;
         if (priorCycle?.ArtifactPackageId is not { } packageId)

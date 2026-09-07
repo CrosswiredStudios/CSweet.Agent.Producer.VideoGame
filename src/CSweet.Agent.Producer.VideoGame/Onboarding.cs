@@ -27,7 +27,7 @@ public sealed partial class SpecialistAgent
                 "I have joined as Producer and am ready to understand the project. Please share the accepted pitch and GDD " +
                 "through our project handoff. I will clarify scope, success criteria, constraints, risks and delivery needs " +
                 "with you, retain the shared production brief and accepted understanding in durable state, then propose " +
-                "the smallest team justified by the work. Please surface any project setup blocker while we prepare the handoff.",
+                "the smallest team justified by the work. If documentation is missing, please create personal tasks to prepare and share it. Team-board planning will wait for the Technical Director hire.",
                 $"{key}:manager", cancellationToken);
             await context.Platform.Communication.SendMessageAsync(onboarded.ConversationId,
                 "I have contacted the Creative Director to begin the project handoff. I will build and retain our shared " +

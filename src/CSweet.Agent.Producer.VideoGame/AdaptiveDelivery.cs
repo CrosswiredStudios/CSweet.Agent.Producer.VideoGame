@@ -7,6 +7,24 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
+    private static async Task<WorkBoardSummary> EnsureProductionBoardAsync(
+        WorkstreamDetail workstream, Guid teamId, AgentRuntimeContext context, CancellationToken token)
+    {
+        var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: token);
+        var board = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
+        board ??= await context.Platform.Work.CreateBoardAsync(new CreateWorkBoardRequest(
+            workstream.Name, $"Producer-managed delivery for {workstream.Outcome}", $"producer-board:{workstream.Id:N}")
+        {
+            TeamId = teamId, WorkstreamId = workstream.Id,
+            Key = $"VG{workstream.Id:N}"[..12].ToUpperInvariant(), ProfileKey = "video-game-production-board.v2"
+        }, token);
+        if (!string.IsNullOrWhiteSpace(workstream.ProfileDefinitionDigest))
+            _ = await context.Platform.Work.ConfigureProfileOrchestrationAsync(new ConfigureProfileOrchestrationRequest(
+                workstream.Id, board.Id, board.Revision, workstream.ProfileDefinitionDigest,
+                $"producer-profile:{workstream.Id:N}:{workstream.ProfileDefinitionDigest}"), token);
+        return board;
+    }
+
     private static WorkTechnicalDelegationRecommendation TechnicalLeadershipRequirement() =>
         new("specialist-execution", VideoGameRoleKeys.TechnicalDirector, ["work.execution.run.v1"], null, true,
             "Assess the accepted brief, identify technical risks, and decompose deliverable work before implementation hiring.")
@@ -39,8 +57,8 @@ public sealed partial class SpecialistAgent
                 item.Revision, $"producer-draft-scope:{sprint.Id:N}:{item.Id:N}"), token);
     }
 
-    private static async Task ProposeCoverageAsync(Guid workstreamId, Guid boardId, AgentTeamContext roster,
-        IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token)
+    private static async Task ProposeCoverageAsync(Guid workstreamId, Guid? boardId, AgentTeamContext roster,
+        IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null)
     {
         var missing = requirements.Where(r => RoleTaxonomy.SelectAssignment(roster.Members,
                 new WorkAssignmentRequirements(r.RequiredRoleKey, r.RequiredSpecializationKeys,
@@ -72,13 +90,15 @@ public sealed partial class SpecialistAgent
             proposed = true;
         }
         if (!proposed) return;
-        var metrics = await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(boardId)
-            { WorkstreamId = workstreamId, TeamId = Guid.Parse(roster.TeamId) }, token);
+        var evidenceRevision = boardId.HasValue
+            ? (await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(boardId.Value)
+                { WorkstreamId = workstreamId, TeamId = Guid.Parse(roster.TeamId) }, token)).SourceRevision
+            : acceptedBriefDigest ?? throw new InvalidOperationException("Initial staffing requires the exact accepted production brief.");
         var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new
-            { workstreamId, roster.Revision, roles, metrics.SourceRevision }));
+            { workstreamId, roster.Revision, roles, evidenceRevision }));
         var chat = await context.Platform.Communication.SendDirectAgentMessageAsync(directorId,
             $"I propose delivery coverage for {string.Join(", ", missing.Select(x => x.Key))} on workstream {workstreamId:D}. " +
-            "The proposal is based on scoped work; backlog and sprint drafting continue during hiring.",
+            "The proposal is based on the accepted brief. Team-board planning begins when technical leadership is hired.",
             $"producer-coverage-chat:{fingerprint}", token);
         await context.Platform.ProposeResourceChangeAsync(new ResourceChangeProposalRequest(chat.ChatId, Guid.Empty,
             "Deliver the accepted game scope with the smallest team that covers its work.",
@@ -88,8 +108,8 @@ public sealed partial class SpecialistAgent
             approved?.Id, $"producer-coverage:{fingerprint}")
         {
             TeamId = Guid.Parse(roster.TeamId), WorkstreamId = workstreamId, ExpectedTeamRevision = roster.Revision,
-            Evidence = [new ResourceChangeEvidence("scope-capability-gap", metrics.SourceRevision,
-                $"Board {boardId:D}; missing roles: {string.Join(", ", missing.Select(x => x.Key))}.")],
+            Evidence = [new ResourceChangeEvidence("scope-capability-gap", evidenceRevision,
+                $"Accepted brief {acceptedBriefDigest ?? "linked through board planning"}; board {boardId?.ToString("D") ?? "deferred until technical leadership is hired"}; missing roles: {string.Join(", ", missing.Select(x => x.Key))}.")],
             AlternativesConsidered = ["Reuse qualified team installations.", "Sequence work before adding parallel capacity.", "Defer optional specialist work."],
             ExpectedEffect = "Unblock the named planning or backlog responsibilities; continue all independently ready work."
         }, token);
