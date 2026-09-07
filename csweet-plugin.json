@@ -9,7 +9,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Video Game Producer",
-  "version": "2.2.1",
+  "version": "2.3.1",
   "publisher": { "id": "com.csweet", "name": "C-Sweet" },
   "runtime": {
     "type": "dotnet-project",
@@ -72,6 +72,7 @@
     }
   ],
   "requires": [
+    { "name": "platform.artifact.revise.v1", "scope": "organization", "purpose": "Iterate the shared production brief with Creative Director feedback before staffing." },
     { "name": "platform.llm.chat-stream.v1", "scope": "organization", "purpose": "Produce grounded role-owned deliverables from exact project evidence." },
     { "name": "work.item.read", "scope": "organization", "purpose": "Read only the authoritative assigned board item." },
     { "name": "work.item.comment", "scope": "organization", "purpose": "Record progress, blockers, findings, and evidence on the authoritative item." },

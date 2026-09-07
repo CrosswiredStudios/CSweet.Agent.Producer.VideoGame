@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.2.1";
+    public override string Version => "2.3.1";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -27,31 +27,31 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
-        var latest = request.Transcript.LastOrDefault(x => x.Artifact is not null)?.Artifact;
-        if (latest is null || latest.Type != VisionBriefArtifactType)
-            return AgentCoordinationTurnResult.Blocked("An exact typed game-vision brief is required.");
-        var brief = latest.Payload.Deserialize<GameVisionBrief>();
-        if (brief is null || string.IsNullOrWhiteSpace(brief.AcceptedPitchDigest) ||
-            !string.Equals(latest.Key, brief.AcceptedPitchDigest, StringComparison.OrdinalIgnoreCase))
-            return AgentCoordinationTurnResult.Blocked("The vision brief does not bind to its coordination digest.");
-        if (request.WorkContext?.WorkstreamId is not { } workstreamId || workstreamId == Guid.Empty ||
-            brief.HighLevelGddArtifactId is not { } artifactId ||
-            brief.HighLevelGddAcceptedRevisionId is not { } revisionId)
-            return AgentCoordinationTurnResult.Blocked("The handoff requires workstream context and an exact accepted high-level GDD revision.");
+        return await RefinePitchAsync(request, context, cancellationToken);
+    }
 
-        var document = await context.Platform.Artifacts.GetAsync(artifactId, cancellationToken);
-        var revision = document.Revisions.SingleOrDefault(x => x.Id == revisionId);
-        if (revision is null || !string.Equals(revision.Status, "Accepted", StringComparison.OrdinalIgnoreCase))
-            return AgentCoordinationTurnResult.Blocked("The referenced high-level GDD revision is not authoritatively accepted.");
-        if (!string.IsNullOrWhiteSpace(brief.HighLevelGddRevisionSha256) &&
-            !string.Equals(brief.HighLevelGddRevisionSha256, revision.ContentSha256, StringComparison.OrdinalIgnoreCase))
-            return AgentCoordinationTurnResult.Blocked("The accepted high-level GDD revision digest does not match the handoff.");
-
+    private async Task<AgentCoordinationTurnResult> AcceptRefinedHandoffAsync(
+        AgentCoordinationTurnRequest request, AgentRuntimeContext context,
+        CrosswiredStudios.VideoGame.PitchCollaboration.PitchBrief pitchBrief, AgentCoordinationArtifact latest,
+        ArtifactDocument refinedDocument, ArtifactRevision refinedRevision,
+        ArtifactDocument pitchDocument, ArtifactDocument gddDocument, CancellationToken cancellationToken)
+    {
+        var brief = pitchBrief.Vision;
+        var workstreamId = request.WorkContext!.WorkstreamId;
+        var artifactId = brief.HighLevelGddArtifactId!.Value;
+        var revisionId = brief.HighLevelGddAcceptedRevisionId!.Value;
+        var revision = gddDocument.Revisions.Single(x => x.Id == revisionId);
+        // The approved collaborative document contains immutable exact pitch/GDD source appendices.
+        // Package the project-owned document rather than mixing intake and project file authorities.
+        var packageMembers = new List<ArtifactPackageMember>
+        {
+            new(refinedDocument.Id, 0, refinedDocument.DocumentType, refinedRevision.Id)
+        };
         var planningPackage = await context.Platform.Artifacts.CreatePackageAsync(
             new CreateArtifactPackage("Approved game-production planning inputs",
                 "video-game.production-planning-input.v1",
-                [new ArtifactPackageMember(artifactId, 0, VideoGameArtifactTypeKeys.GameDesignDocument, revisionId)],
-                $"producer-handoff-package:{workstreamId:N}:{revision.ContentSha256}"), cancellationToken);
+                packageMembers,
+                $"producer-handoff-package:{workstreamId:N}:{refinedRevision.ContentSha256}"), cancellationToken);
         planningPackage = await context.Platform.Artifacts.SubmitPackageAsync(planningPackage.Id,
             $"producer-handoff-package-submit:{planningPackage.Id:N}:{planningPackage.Version}", cancellationToken);
 
@@ -66,8 +66,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 AcceptedHandoffs = new Dictionary<Guid, ProducerAcceptedHandoff>(current?.AcceptedHandoffs ??
                     new Dictionary<Guid, ProducerAcceptedHandoff>())
                 {
-                    [workstreamId] = new(workstreamId, artifactId, revisionId, revision.ContentSha256,
-                        latest.Digest, request.SessionId, planningPackage.Id, planningPackage.Version,
+                    [workstreamId] = new(workstreamId, refinedDocument.Id, refinedRevision.Id, refinedRevision.ContentSha256,
+                        refinedRevision.ContentSha256, request.SessionId, planningPackage.Id, planningPackage.Version,
                         DateTimeOffset.UtcNow)
                 },
                 PhaseCommitments = ["Maintain the production plan and prepare the team and board from the accepted vision."],
@@ -78,7 +78,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 [revisionId.ToString("D")] = revision.ContentSha256,
                 [request.SessionId.ToString("D")] = latest.Digest
             },
-            $"producer-vision-ack:{workstreamId:N}:{brief.AcceptedPitchDigest}", cancellationToken);
+            $"producer-vision-ack:{workstreamId:N}:{refinedRevision.ContentSha256}", cancellationToken);
 
         var acknowledgement = new GameVisionAcknowledgement(
             brief.AcceptedPitchDigest, true, [], DateTimeOffset.UtcNow)
@@ -90,7 +90,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             PlanningPackageVersion = planningPackage.Version
         };
         return AgentCoordinationTurnResult.Completed(
-            "Accepted the exact game vision. Production planning and sprint-readiness reconciliation are now active.",
+            "We have refined the pitch into an accepted production brief. I have no remaining planning questions and will now prepare the workload-backed staffing proposal.",
             new AgentCoordinationArtifactSubmission(VisionAcknowledgementArtifactType, "1.0",
                 brief.AcceptedPitchDigest, 1, true, JsonSerializer.SerializeToElement(acknowledgement)));
     }
@@ -466,13 +466,19 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         else
             package = await context.Platform.Artifacts.GetPackageAsync(packageId, cancellationToken);
 
-        if (!string.Equals(package.Status, "Accepted", StringComparison.OrdinalIgnoreCase) || package.AcceptedAt is null)
+        if (package.Status is not ("Accepted" or "Approved") || package.AcceptedAt is null)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 "Waiting for creative authority to approve the exact planning artifact package.");
 
-        var memberDigest = new ArtifactPackageMemberDigest(handoff.ArtifactId, handoff.AcceptedRevisionId,
-            VideoGameArtifactTypeKeys.GameDesignDocument, handoff.RevisionDigest);
-        var packageDigest = ArtifactPackageDigestCalculator.Calculate(package.Id, package.Version, [memberDigest]);
+        var memberDigests = new List<ArtifactPackageMemberDigest>();
+        foreach (var member in package.Members)
+        {
+            var document = await context.Platform.Artifacts.GetAsync(member.ArtifactId, cancellationToken);
+            var accepted = document.Revisions.SingleOrDefault(x => x.Id == member.AcceptedRevisionId && x.Status == "Accepted")
+                ?? throw new InvalidOperationException("A planning package member no longer identifies an accepted revision.");
+            memberDigests.Add(new(document.Id, accepted.Id, member.RequiredDocumentType, accepted.ContentSha256));
+        }
+        var packageDigest = ArtifactPackageDigestCalculator.Calculate(package.Id, package.Version, memberDigests);
         var cycle = new GameProductionPlanningCycleV1(workstreamId, teamId, roster.Revision, boardId,
             workstream.ProfileDefinitionDigest ?? string.Empty, package.Id, package.Version, packageDigest,
             workstream.LifecycleStage, TargetMilestone(workstream.LifecycleStage), source.SourceFingerprint);
@@ -523,7 +529,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             await context.Platform.Communication.SendDirectAgentMessageAsync(creativeDirectorId,
                 $"Planning for workstream {workstreamId:D} needs your input: {string.Join("; ", questions)}. The Producer is drafting the backlog; affected scope remains uncommitted.",
                 $"producer-planning-questions:{cycle.PlanningFingerprint}", cancellationToken);
-        var published = await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigest,
+        var published = await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
             designerSession, designerArtifact!, designerProposal,
             technicalSession, technicalArtifact!, technicalProposal,
             context, cancellationToken);
@@ -914,7 +920,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         Guid boardId,
         AgentTeamContext roster,
         GameProductionPlanningCycleV1 cycle,
-        ArtifactPackageMemberDigest memberDigest,
+        IReadOnlyList<ArtifactPackageMemberDigest> memberDigests,
         AgentCoordinationSession designerSession,
         AgentCoordinationArtifact designerArtifact,
         GameDesignerBacklogProposalV1 designer,
@@ -940,7 +946,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             .Where(x => x.Key is not null).ToDictionary(x => x.Key!, x => x.Item, StringComparer.Ordinal);
         var remaining = proposals.Where(x => !byKey.ContainsKey(x.ProposalKey)).ToList();
         var package = new ArtifactPackageDigest(cycle.ApprovedPackageId, cycle.ApprovedPackageVersion,
-            cycle.ApprovedPackageDigest, DateTimeOffset.UtcNow, [memberDigest]);
+            cycle.ApprovedPackageDigest, DateTimeOffset.UtcNow, memberDigests);
         while (remaining.Count > 0)
         {
             var ready = remaining.Where(x => x.DependencyProposalKeys.All(byKey.ContainsKey) &&
