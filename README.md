@@ -25,7 +25,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.3.1`
+- Version: `2.3.2`
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
 - Requested platform/provider capabilities: typed planning, work management, governed staffing, communication, artifacts and brokered model access (see manifest).
@@ -47,14 +47,14 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.31.0 and the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.31.1 and the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
 
 Game-specific payload helpers and decision logic live in the bundled `extensions/video-game` source snapshot under the publisher-owned `CrosswiredStudios.VideoGame` namespace. They are compiled into this agent, not published as C-Sweet platform contracts. The snapshot has versioned SHA-256 provenance and needs no sibling checkout or domain NuGet feed. C-Sweet handles generic coordination envelopes and profile metadata; agent permissions and existing wire type IDs remain unchanged.
 
-## Progressive delivery (2.3.1)
+## Progressive delivery (2.3.2)
 
 The Producer drafts a sprint before implementation staffing is complete, proposes a technical lead when
 needed, and requests further roles only for uncovered backlog responsibilities. Approved unfulfilled slots
@@ -88,8 +88,12 @@ Reimport both agents to enable this protocol; legacy unrefined handoffs are bloc
 
 ## Shared collaboration SDK
 
-Uses CSweet.Agent.SDK 3.31.0 typed document references, explicit coordination read sharing,
+Uses CSweet.Agent.SDK 3.31.1 typed document references, explicit coordination read sharing,
 accepted-revision lookup, and handoff readiness checks. Pitch content and staffing judgment
 remain agent-specific. See the SDK's `docs/collaboration.md` for reusable documentation requests,
 clarification, review, and personal-work dependency waits. The matching C-Sweet host is required
 for sharing at every coordination start; package import alone does not update the host.
+
+## Provider queue handling
+
+Uses SDK 3.31.1 for acknowledged LLM waiting, conversation activity, and host-authoritative deadline updates. Deploy the matching C-Sweet AgentHost and reimport this package to enable the private polling protocol.
