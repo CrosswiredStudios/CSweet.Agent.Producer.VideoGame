@@ -1,11 +1,12 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>2.3.5</Version>
+    <Version>2.5.0</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CSweet.Agent.SDK" Version="3.31.1" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <PackageReference Include="CSweet.WorkManagement.Contracts" Version="3.19.0" />
+    <PackageReference Include="CSweet.Agent.SDK" Version="3.39.0" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
     <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\\src\\CSweet.Agent.SDK\\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
   </ItemGroup>
   <ItemGroup>

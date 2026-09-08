@@ -9,7 +9,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.3.5",
+  "version": "2.5.0",
   "publisher": { "id": "com.csweet", "name": "C-Sweet" },
   "runtime": {
     "type": "dotnet-project",
@@ -96,6 +96,7 @@
     { "name": "work.orchestration.profile.configure.v1", "scope": "team", "purpose": "Publish the pinned generic orchestration policy." },
     { "name": "work.orchestration.preflight", "scope": "team", "purpose": "Preflight a planned sprint before activation." },
     { "name": "work.orchestration.start", "scope": "team", "purpose": "Start only a successfully preflighted sprint." },
+    { "name": "work.orchestration.approval.decide", "scope": "team", "purpose": "Review exact delivery evidence and decide assigned board-manager acceptance stages." },
     { "name": "work.orchestration.read", "scope": "team", "purpose": "Reconcile authoritative execution state, blockers, and retries." },
     { "name": "work.orchestration.retry", "scope": "team", "purpose": "Retry an eligible blocked stage under policy." },
     { "name": "work.sprint.read", "scope": "team", "purpose": "Read sprint readiness and cadence." },

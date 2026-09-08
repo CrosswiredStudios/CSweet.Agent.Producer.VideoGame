@@ -121,39 +121,62 @@ public sealed partial class SpecialistAgent
         var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
         var planned = (await context.Platform.Work.ListSprintsAsync(boardId, token)).Where(x => x.Status == "Planned").Select(x => x.Id).ToHashSet();
         foreach (var item in board.Items.Where(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                     (x.SprintId is null || planned.Contains(x.SprintId.Value)) && x.StageAssignments.Count == 0 && x.ProposalProvenance is not null && x.Planning is not null))
+                     (x.SprintId is null || planned.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null && x.Planning is not null))
         {
-            var recommendation = item.Planning!.DelegationRecommendations.SingleOrDefault();
-            if (recommendation is null) continue;
-            var requirements = new WorkAssignmentRequirements(recommendation.RequiredRoleKey,
-                recommendation.RequiredSpecializationKeys, recommendation.PreferredSpecializationKeys,
-                recommendation.RequiredCapabilityKeys);
-            var selected = RoleTaxonomy.SelectAssignment(roster.Members, requirements);
-            if (selected is null || !Guid.TryParse(selected.Teammate.EmployeeId, out var owner)) continue;
-            var matched = requirements.RequiredSpecializationKeys.Concat(requirements.PreferredSpecializationKeys
-                .Where(x => selected.Teammate.SpecializationKeys.Contains(x))).Distinct().OrderBy(x => x).ToList();
-            var fingerprint = ProducerPolicyFingerprint.Digest($"{item.Id:N}:{item.PlanningRevision}:{roster.Revision}:{selected.Teammate.AgentInstallationId}");
-            await context.Platform.Work.RevisePlanningAsync(new ReviseWorkItemPlanningRequest(boardId, item.Id,
-                item.Title, item.Description, item.ParentItemId, item.Planning, item.Revision, item.PlanningRevision,
-                $"producer-bind:{fingerprint}")
+            var assignments = item.StageAssignments.ToList();
+            var owner = item.AccountableOrganizationUserId;
+            var changed = false;
+            foreach (var recommendation in MissingDelegations(item))
             {
-                ProposalProvenance = item.ProposalProvenance, AccountableOrganizationUserId = owner,
-                StageAssignments = [new WorkStageAssignment("specialist-execution", "AgentInstallation", owner, selected.Teammate.AgentInstallationId)
+                var requirements = new WorkAssignmentRequirements(recommendation.RequiredRoleKey,
+                    recommendation.RequiredSpecializationKeys, recommendation.PreferredSpecializationKeys, recommendation.RequiredCapabilityKeys);
+                var selected = RoleTaxonomy.SelectAssignment(roster.Members, requirements);
+                if (selected is null || !Guid.TryParse(selected.Teammate.EmployeeId, out var selectedOwner)) continue;
+                var matched = requirements.RequiredSpecializationKeys.Concat(requirements.PreferredSpecializationKeys
+                    .Where(x => selected.Teammate.SpecializationKeys.Contains(x))).Distinct().OrderBy(x => x).ToList();
+                var fingerprint = ProducerPolicyFingerprint.Digest($"{item.Id:N}:{recommendation.StageKey}:{item.PlanningRevision}:{roster.Revision}:{selected.Teammate.AgentInstallationId}");
+                assignments.RemoveAll(x => x.StageKey == recommendation.StageKey);
+                assignments.Add(new WorkStageAssignment(recommendation.StageKey, "AgentInstallation", selectedOwner, selected.Teammate.AgentInstallationId)
                 {
                     Requirements = requirements,
                     SelectionEvidence = new WorkAssignmentSelectionEvidence(selected.Teammate.AgentInstallationId!.Value,
                         roster.Revision, profileDigest, matched, fingerprint, DateTimeOffset.UtcNow)
-                }]
+                });
+                if (recommendation.StageKey == "specialist-execution") owner = selectedOwner;
+                changed = true;
+            }
+            if (!changed) continue;
+            var bindingKey = ProducerPolicyFingerprint.Digest($"{item.Id:N}:{item.Revision}:{roster.Revision}:" +
+                string.Join("|", assignments.OrderBy(x => x.StageKey).Select(x => $"{x.StageKey}:{x.AgentInstallationId}")));
+            await context.Platform.Work.RevisePlanningAsync(new ReviseWorkItemPlanningRequest(boardId, item.Id,
+                item.Title, item.Description, item.ParentItemId, item.Planning!, item.Revision, item.PlanningRevision,
+                $"producer-bind:{bindingKey}")
+            {
+                ProposalProvenance = item.ProposalProvenance, AccountableOrganizationUserId = owner,
+                StageAssignments = assignments
             }, token);
         }
     }
+
+    internal static WorkStageAssignment? PrimaryExecutionAssignment(WorkItem item)
+    {
+        var matches = item.StageAssignments.Where(x => x.StageKey == "specialist-execution").Take(2).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+
+    internal static bool HasStaffedExecution(WorkItem item) =>
+        PrimaryExecutionAssignment(item) is { AgentInstallationId: not null, Requirements: not null, SelectionEvidence: not null };
+
+    internal static IReadOnlyList<WorkTechnicalDelegationRecommendation> MissingDelegations(WorkItem item) =>
+        (item.Planning?.DelegationRecommendations ?? []).Where(r => !item.StageAssignments.Any(a =>
+            a.StageKey == r.StageKey && a.AgentInstallationId is not null && a.Requirements?.RequiredRoleKey == r.RequiredRoleKey &&
+            a.SelectionEvidence is not null)).ToArray();
 
     internal static IReadOnlyList<WorkItem> EligibleCandidateScope(IReadOnlyList<WorkItem> candidates, IReadOnlyList<WorkItem> allItems)
     {
         var completed = allItems.Where(x => x.Status.Equals("Done", StringComparison.OrdinalIgnoreCase) ||
             x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase)).Select(x => x.Id).ToHashSet();
-        var eligible = candidates.Where(x => !completed.Contains(x.Id) && x.StageAssignments.Count == 1 &&
-            x.StageAssignments[0].Requirements is not null && x.StageAssignments[0].SelectionEvidence is not null).ToList();
+        var eligible = candidates.Where(x => !completed.Contains(x.Id) && HasStaffedExecution(x) && MissingDelegations(x).Count == 0).ToList();
         while (true)
         {
             var ids = eligible.Select(x => x.Id).ToHashSet();

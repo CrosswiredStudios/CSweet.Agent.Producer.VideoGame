@@ -25,7 +25,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.3.5`
+- Version: `2.5.0`
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
 - Requested platform/provider capabilities: typed planning, work management, governed staffing, communication, artifacts and brokered model access (see manifest).
@@ -123,3 +123,12 @@ that initial proposal against the accepted brief. Only after the Technical Direc
 available does the Producer create/configure the team board and begin sprint/backlog planning.
 The regression follows questions, document refinement, acceptance, a hiring proposal with no
 board APIs available, and then board/sprint creation after technical leadership is hired.
+
+### Accepted planning recovery (2.5.0)
+
+Attention reviews discover workstreams from durable accepted handoffs as well as formal supervision assignments. The host filters reads against current team or management visibility. A Producer hired as a team member therefore continues planning after brief acceptance and subsequent staffing changes without being assigned Director approval authority.
+
+### Multi-stage staffing (2.5.0)
+Producer staffing binds each missing canonical delegation independently and preserves existing execution, review, QA and platform assignments. Estimates and implementation capacity use the specialist-execution owner explicitly. Candidate selection waits for all declared delegation stages to be staffed. Missing review or QA roles feed the normal staffing proposal path. Stage definitions and delegation recommendations must still be supplied by technical planning.
+
+Delivery acceptance reviews owned active-sprint Producer gates from exact worker output and document revision content, or matching technical/independent QA/merge evidence. Reviews cover every ticket acceptance criterion and are saved before idempotent approval submission. Missing evidence leaves a diagnostic comment and the approval pending. Requires work.orchestration.approval.decide; it grants no CEO hiring/spending authority.

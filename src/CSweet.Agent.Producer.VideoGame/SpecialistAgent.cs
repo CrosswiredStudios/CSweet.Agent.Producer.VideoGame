@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.3.5";
+    public override string Version => "2.5.0";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -118,7 +118,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             if (item.WorkContext?.BoardId is not { } gapBoard || item.WorkContext.WorkItemId is not { } gapItem)
                 return PersonalTodoResult.Blocked("Staffing follow-up requires an authoritative ticket.");
             var ticket = (await context.Platform.Work.ReadBoardAsync(gapBoard, cancellationToken)).Items.Single(x => x.Id == gapItem);
-            return ticket.StageAssignments.Count > 0 ? PersonalTodoResult.Completed("The existing ticket now has an eligible owner.")
+            return HasStaffedExecution(ticket) && MissingDelegations(ticket).Count == 0 ? PersonalTodoResult.Completed("The existing ticket now has an eligible owner.")
                 : PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "Waiting for the approved delivery coverage.");
         }
         return PersonalTodoResult.Blocked("This Producer personal commitment has no supported authoritative correlation.");
@@ -132,11 +132,17 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var assignments = context.Identity?.ManagedWorkstreams
             .Where(x => !x.EndsAt.HasValue || x.EndsAt > review.OccurredAt)
             .ToList() ?? [];
-        if (assignments.Count == 0)
+        var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
+            ProjectStateKeys.Portfolio("producer"), cancellationToken);
+        var workstreamIds = assignments.Select(x => x.WorkstreamId)
+            .Concat(accepted?.Payload.AcceptedHandoffs.Keys ?? Enumerable.Empty<Guid>()).Distinct().ToList();
+        if (workstreamIds.Count == 0)
             return;
 
+        // Accepted commitments survive invocations; the host still filters them against current visibility.
         var portfolio = await context.Platform.ReadPortfolioAsync(
-            new ReadPortfolioRequest(assignments.Select(x => x.WorkstreamId).Distinct().ToList()), cancellationToken);
+            new ReadPortfolioRequest(workstreamIds), cancellationToken);
+        if (portfolio.Workstreams.Count == 0) return;
         var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken);
         var snapshots = new List<ProducerMetricSnapshot>();
         var phases = new Dictionary<Guid, ProducerManagementPhase>();
@@ -148,8 +154,6 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             var workstream = entry.Workstream;
             phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
             var board = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
-            var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
-                ProjectStateKeys.Portfolio("producer"), cancellationToken);
             if (entry.ActiveTeam is not null &&
                 accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var planningHandoff) == true)
             {
@@ -165,6 +169,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 commitments.Add($"{workstream.Name}: complete documentation and initial hiring before the Technical Director and Producer plan the team board.");
                 continue;
             }
+
+            await ReviewBoardDeliveriesAsync(board, context, cancellationToken);
 
             if (!string.IsNullOrWhiteSpace(workstream.ProfileDefinitionDigest))
             {
@@ -228,7 +234,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
                     var candidateExists = detail.Items.Any(x =>
                         x.ExecutionMode == WorkItemExecutionModes.Executable && (x.SprintId is null || sprints.Any(s => s.Id == x.SprintId && s.Status == "Planned")) &&
-                        x.StageAssignments.Count == 1 && x.ProposalProvenance is not null);
+                        HasStaffedExecution(x) && x.ProposalProvenance is not null);
                     if (candidateExists)
                     {
                         var nextSequence = sprints.Select(x => x.Sequence ?? 0).DefaultIfEmpty().Max() + 1;
@@ -559,11 +565,11 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var currentBoard = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var unassigned = currentBoard.Items.Where(x =>
                 x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                x.ProposalProvenance is not null && x.StageAssignments.Count == 0)
+                x.ProposalProvenance is not null && MissingDelegations(x).Count > 0)
             .ToList();
         foreach (var gap in unassigned)
         {
-            var requiredRole = gap.Planning?.DelegationRecommendations.FirstOrDefault()?.RequiredRoleKey ?? "unknown-role";
+            var requiredRole = MissingDelegations(gap).FirstOrDefault()?.RequiredRoleKey ?? "unknown-role";
             _ = await EnsureCommitmentAsync(
                 $"{StaffingGapCommitmentPrefix}{teamId:N}:{requiredRole}:{reconciledDigest}",
                 $"Resolve {requiredRole} delivery coverage",
@@ -573,10 +579,10 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 context, cancellationToken);
         }
         await ProposeCoverageAsync(workstreamId, boardId, roster,
-            unassigned.SelectMany(x => x.Planning?.DelegationRecommendations ?? []).ToList(), context, cancellationToken);
+            unassigned.SelectMany(MissingDelegations).ToList(), context, cancellationToken);
         await EnsureDraftSprintAsync(boardId, reconciledDigest, context, cancellationToken);
         await PopulateDraftScopeAsync(boardId, context, cancellationToken);
-        if (questions.Count == 0 && currentBoard.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable && x.StageAssignments.Count == 1))
+        if (questions.Count == 0 && currentBoard.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable && HasStaffedExecution(x)))
         {
             _ = await EnsureCommitmentAsync(
                 $"{EstimationCommitmentPrefix}{boardId:N}:{reconciledDigest}:1",
@@ -629,10 +635,10 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var roleProposals = new List<(AgentCoordinationSession Session, AgentCoordinationArtifact Artifact,
             GameRoleEstimateCapacityProposalV1 Proposal)>();
         var pendingRoles = new List<string>();
-        foreach (var group in candidates.GroupBy(x => x.StageAssignments[0].Requirements!.RequiredRoleKey,
+        foreach (var group in candidates.GroupBy(x => PrimaryExecutionAssignment(x)!.Requirements!.RequiredRoleKey,
                      StringComparer.Ordinal).OrderBy(x => x.Key, StringComparer.Ordinal))
         {
-            var installationId = group.Select(x => x.StageAssignments[0].AgentInstallationId)
+            var installationId = group.Select(x => PrimaryExecutionAssignment(x)!.AgentInstallationId)
                 .Distinct().SingleOrDefault();
             var teammate = roster.Members.SingleOrDefault(x => x.AgentInstallationId == installationId);
             if (teammate is null)
@@ -862,7 +868,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
 
     private static GameSprintCandidateV1 ToSprintCandidate(WorkItem item)
     {
-        var assignment = item.StageAssignments.Single();
+        var assignment = PrimaryExecutionAssignment(item)!;
         return new GameSprintCandidateV1(item.Id, item.Title,
             assignment.Requirements!.RequiredRoleKey,
             item.Planning?.Requirements ?? [], item.Planning?.AcceptanceCriteria ?? [],
@@ -891,7 +897,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 if (candidate.Planning?.DependencyItemIds.Any(id => candidateIds.Contains(id) &&
                         !selectedIds.Contains(id)) == true)
                     continue;
-                var role = candidate.StageAssignments.Single().Requirements!.RequiredRoleKey;
+                var role = PrimaryExecutionAssignment(candidate)!.Requirements!.RequiredRoleKey;
                 var estimate = candidate.EstimatePoints ?? 0;
                 if (estimate <= 0 || !capacity.TryGetValue(role, out var available) || used[role] + estimate > available)
                 {
