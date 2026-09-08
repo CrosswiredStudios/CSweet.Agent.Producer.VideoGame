@@ -8,7 +8,7 @@
     "specializationKeys": ["video-game-development", "game-production", "sprint-planning", "delivery-forecasting", "dependency-risk-capacity-management", "management-reporting"]
   },
   "id": "com.csweet.video-game-producer",
-  "name": "Video Game Producer",
+  "name": "Gabriel Reyes",
   "version": "2.3.5",
   "publisher": { "id": "com.csweet", "name": "C-Sweet" },
   "runtime": {
@@ -155,6 +155,9 @@
   "webAccess": { "mode": "None", "rules": [] },
   "ui": [],
   "catalog": {
+    "imageUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.Producer.VideoGame/main/assets/branding/portrait-v1.jpg",
+    "companyLogoUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.Producer.VideoGame/main/assets/branding/csweet-icon.svg",
+    "accentColor": "#986537",
     "summary": "Leads project delivery, boards, sprints, schedules, budgets, dependencies, staffing, risks, and status reporting.",
     "category": "Production",
     "role": { "key": "game-producer", "name": "Video Game Producer" },
