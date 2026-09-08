@@ -413,7 +413,7 @@ public abstract class VideoGameSpecialistAgentBase : CSweetAgentBase
                 ?? throw new InvalidOperationException("A brokered LLM provider must be configured.");
             var client = context.CreateChatClient(new AgentLlmSelection(provider, Settings.GetString("llmModel"),
                 new AgentLlmInvocationContext(null, null, $"video-game-specialist:{RoleKey}")));
-            var response = await client.GetResponseAsync([
+            var response = await context.Platform.Calendar.GetResponseAsync(client, [
                 new ChatMessage(ChatRole.System, $"{RolePrompt}\nYou own only {RoleKey} accountability. Produce concrete, testable Markdown with explicit decisions, dependencies, acceptance evidence, and no placeholders. Do not absorb another specialist's accountability."),
                 new ChatMessage(ChatRole.User, $"Authoritative stage instructions:\n{assignment.Instructions}\n\nRequirements:\n{JsonSerializer.Serialize(canonicalInput.Planning.Requirements)}\n\nAcceptance criteria:\n{JsonSerializer.Serialize(canonicalInput.Planning.AcceptanceCriteria)}\n\nExact approved package {package.PackageId:D} v{package.Version} ({package.Sha256}):\n{JsonSerializer.Serialize(grounding)}\n\nPrior outcomes:\n{JsonSerializer.Serialize(assignment.PriorOutcomes)}\n\nExisting evidence:\n{JsonSerializer.Serialize(assignment.Evidence)}")
             ], cancellationToken: cancellationToken);

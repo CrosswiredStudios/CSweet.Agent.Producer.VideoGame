@@ -18,7 +18,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.5.1",
+  "version": "2.6.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -129,6 +129,11 @@
     }
   ],
   "requires": [
+    {"name": "work.calendar.read.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
+    {"name": "work.calendar.create.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
+    {"name": "work.calendar.update.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
+    {"name": "work.calendar.cancel.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
+    {"name": "work.calendar.schedule.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
     {
       "name": "agent.onboarding.complete.v1",
       "scope": "organization",
@@ -426,7 +431,7 @@
     }
   ],
   "events": {
-    "subscribes": [
+    "subscribes": ["com.csweet.calendar.reminder-due.v1", 
       "com.csweet.agent.onboarded.v1",
       "com.csweet.agent.attention.review-due.v1",
       "com.csweet.agent.coordination.turn-requested.v1",
