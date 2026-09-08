@@ -15,6 +15,8 @@ public sealed class ManifestTests
         var manifest = await AgentManifestLoader.LoadAsync(path, CancellationToken.None);
         var agent = new SpecialistAgent();
 
+        foreach (var name in new[] { "work.item.read", "work.item.comment" })
+            Assert.Contains(manifest.Requires, x => x.Name == name && x.Scope == "team");
         Assert.Equal(agent.AgentId, manifest.Id);
         Assert.Equal(agent.Version, manifest.Version);
         Assert.Contains(agent.PrimaryCapability, manifest.Capabilities);

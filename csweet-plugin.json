@@ -4,13 +4,25 @@
   "kind": "agent",
   "rolePolicy": {
     "profile": "manager.v1",
-    "declaredRoleKeys": ["game-producer"],
-    "specializationKeys": ["video-game-development", "game-production", "sprint-planning", "delivery-forecasting", "dependency-risk-capacity-management", "management-reporting"]
+    "declaredRoleKeys": [
+      "game-producer"
+    ],
+    "specializationKeys": [
+      "video-game-development",
+      "game-production",
+      "sprint-planning",
+      "delivery-forecasting",
+      "dependency-risk-capacity-management",
+      "management-reporting"
+    ]
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.5.0",
-  "publisher": { "id": "com.csweet", "name": "C-Sweet" },
+  "version": "2.5.1",
+  "publisher": {
+    "id": "com.csweet",
+    "name": "C-Sweet"
+  },
   "runtime": {
     "type": "dotnet-project",
     "projectPath": "src/CSweet.Agent.Producer.VideoGame/CSweet.Agent.Producer.VideoGame.csproj",
@@ -20,21 +32,48 @@
     "supportsMultipleInstallations": true,
     "maximumConcurrentJobs": 1
   },
-  "protocol": { "minimumVersion": "2.0", "maximumVersion": "2.x" },
+  "protocol": {
+    "minimumVersion": "2.0",
+    "maximumVersion": "2.x"
+  },
   "provides": [
     {
       "name": "work.execution.run.v1",
       "description": "Leads project delivery, boards, sprints, schedules, budgets, dependencies, staffing, risks, and status reporting.",
       "inputSchema": {
         "type": "object",
-        "required": ["sprintExecutionId", "itemExecutionId", "stageExecutionId", "attemptId", "organizationId", "boardId", "sprintId", "itemId", "assignmentRevision", "boardKey", "itemIdentifier", "policyRevisionId", "stageKey", "traversal", "attempt", "deadline", "instructions", "item", "input", "priorOutcomes", "evidence"],
+        "required": [
+          "sprintExecutionId",
+          "itemExecutionId",
+          "stageExecutionId",
+          "attemptId",
+          "organizationId",
+          "boardId",
+          "sprintId",
+          "itemId",
+          "assignmentRevision",
+          "boardKey",
+          "itemIdentifier",
+          "policyRevisionId",
+          "stageKey",
+          "traversal",
+          "attempt",
+          "deadline",
+          "instructions",
+          "item",
+          "input",
+          "priorOutcomes",
+          "evidence"
+        ],
         "properties": {},
         "additionalProperties": true
       },
       "outputSchema": {
         "type": "object",
         "properties": {
-          "message": { "type": "string" }
+          "message": {
+            "type": "string"
+          }
         },
         "required": [],
         "additionalProperties": true
@@ -46,8 +85,14 @@
     {
       "name": "management.check-in.v1",
       "description": "Return an evidence-backed delivery, risk, forecast, and capacity report for managed game workstreams.",
-      "inputSchema": { "type": "object", "additionalProperties": true },
-      "outputSchema": { "type": "object", "additionalProperties": true },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
       "executionTimeoutSeconds": 120,
       "idempotency": "work-item",
       "riskClass": "standard"
@@ -55,8 +100,14 @@
     {
       "name": "agent.configuration.describe.v1",
       "description": "Describe specialist configuration.",
-      "inputSchema": { "type": "object", "additionalProperties": true },
-      "outputSchema": { "type": "object", "additionalProperties": true },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
       "executionTimeoutSeconds": 30,
       "idempotency": "none",
       "riskClass": "standard"
@@ -64,73 +115,315 @@
     {
       "name": "agent.configuration.update.v1",
       "description": "Update specialist configuration.",
-      "inputSchema": { "type": "object", "additionalProperties": true },
-      "outputSchema": { "type": "object", "additionalProperties": true },
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": true
+      },
       "executionTimeoutSeconds": 30,
       "idempotency": "work-item",
       "riskClass": "standard"
     }
   ],
   "requires": [
-    { "name": "agent.onboarding.complete.v1", "scope": "organization", "purpose": "Acknowledge onboarding only after contacting the manager and retaining the kickoff state." },
-    { "name": "platform.artifact.revise.v1", "scope": "organization", "purpose": "Iterate the shared production brief with Creative Director feedback before staffing." },
-    { "name": "platform.llm.chat-stream.v1", "scope": "organization", "purpose": "Produce grounded role-owned deliverables from exact project evidence." },
-    { "name": "work.item.read", "scope": "organization", "purpose": "Read only the authoritative assigned board item." },
-    { "name": "work.item.comment", "scope": "organization", "purpose": "Record progress, blockers, findings, and evidence on the authoritative item." },
-    { "name": "platform.artifact.read.v1", "scope": "organization", "purpose": "Read authorized exact document revisions and hashes." },
-    { "name": "platform.artifact.create.v1", "scope": "organization", "purpose": "Create the role-owned durable deliverable." },
-    { "name": "platform.artifact.submit.v1", "scope": "organization", "purpose": "Submit the exact deliverable revision for accountable review." },
-    { "name": "platform.artifact-package.create.v1", "scope": "organization", "purpose": "Assemble the exact accepted handoff revisions into a governed planning package." },
-    { "name": "platform.artifact-package.read.v1", "scope": "organization", "purpose": "Revalidate the governed planning package before planning and publication." },
-    { "name": "platform.artifact-package.submit.v1", "scope": "organization", "purpose": "Submit the planning package to creative authority without self-approving it." },
-    { "name": "platform.management.portfolio.read.v1", "scope": "organization", "purpose": "Read only workstreams assigned to this Producer." },
-    { "name": "platform.workstream.read.v1", "scope": "organization", "purpose": "Verify authoritative lifecycle and profile revisions." },
-    { "name": "platform.team-roster.read.v2", "scope": "team", "purpose": "Verify exact team installations and role coverage." },
-    { "name": "work.board.create", "scope": "team", "purpose": "Create the managed game delivery board." },
-    { "name": "work.board.read", "scope": "team", "purpose": "Read managed boards and their revisions." },
-    { "name": "work.board.columns.configure", "scope": "team", "purpose": "Apply the pinned profile workflow." },
-    { "name": "work.item.create", "scope": "team", "purpose": "Publish provenance-bound containers and executable leaf tickets from reconciled planning." },
-    { "name": "work.item.planning.revise.v1", "scope": "team", "purpose": "Revise planning with optimistic concurrency when authoritative proposal evidence changes." },
-    { "name": "work.item.estimate", "scope": "team", "purpose": "Record only specialist-supplied estimates with coordination provenance." },
-    { "name": "work.item.move", "scope": "team", "purpose": "Pull fully ready executable leaves into Ready without moving containers." },
-    { "name": "work.orchestration.profile.configure.v1", "scope": "team", "purpose": "Publish the pinned generic orchestration policy." },
-    { "name": "work.orchestration.preflight", "scope": "team", "purpose": "Preflight a planned sprint before activation." },
-    { "name": "work.orchestration.start", "scope": "team", "purpose": "Start only a successfully preflighted sprint." },
-    { "name": "work.orchestration.approval.decide", "scope": "team", "purpose": "Review exact delivery evidence and decide assigned board-manager acceptance stages." },
-    { "name": "work.orchestration.read", "scope": "team", "purpose": "Reconcile authoritative execution state, blockers, and retries." },
-    { "name": "work.orchestration.retry", "scope": "team", "purpose": "Retry an eligible blocked stage under policy." },
-    { "name": "work.sprint.read", "scope": "team", "purpose": "Read sprint readiness and cadence." },
-    { "name": "work.sprint.create", "scope": "team", "purpose": "Create bounded planned sprints." },
-    { "name": "work.sprint.scope.manage", "scope": "team", "purpose": "Manage approved sprint scope and carryover." },
-    { "name": "work.sprint.capacity.manage", "scope": "team", "purpose": "Record specialist-supplied sprint capacity." },
-    { "name": "work.sprint.carryover", "scope": "team", "purpose": "Carry incomplete scope with lineage." },
-    { "name": "work.sprint.report.read", "scope": "team", "purpose": "Read authoritative sprint reports." },
-    { "name": "work.flow-metrics.read.v1", "scope": "team", "purpose": "Read trusted delivery flow, forecast, and capacity signals." },
-    { "name": "platform.management.status-report.v1", "scope": "organization", "purpose": "Publish management and weekly project reports." },
-    { "name": "platform.management.resource-change.propose.v1", "scope": "team", "purpose": "Propose evidence-backed team capacity changes for manager decision." },
-    { "name": "platform.management.resource-change.read.v1", "scope": "team", "purpose": "Reconcile resource-change decisions and deduplicate evidence." },
-    { "name": "platform.decision.request.v1", "scope": "organization", "purpose": "Escalate production decisions outside delegated authority." },
-    { "name": "platform.decision.read.v1", "scope": "organization", "purpose": "Reconcile authoritative production decisions." },
-    { "name": "communication.coordination.respond.v1", "scope": "team", "purpose": "Acknowledge exact Creative Director handoffs and coordination turns." },
-    { "name": "communication.coordination.read.v1", "scope": "team", "purpose": "Recover coordination state after restart." },
-    { "name": "communication.coordination.start.v1", "scope": "team", "purpose": "Start role-authority planning and estimation coordination." },
-    { "name": "communication.coordination.start-board.v1", "scope": "team", "purpose": "Start board-scoped Designer and Technical Director planning sessions." },
-    { "name": "communication.coordination.resume.v1", "scope": "team", "purpose": "Resume recoverable planning sessions after runtime or transport failure." },
-    { "name": "work.personal-todo.read.v1", "scope": "organization", "purpose": "Read the Producer management commitment board." },
-    { "name": "work.personal-todo.add.v1", "scope": "organization", "purpose": "Create deduplicated Producer-owned management commitments." },
-    { "name": "work.personal-todo.reorder.v1", "scope": "organization", "purpose": "Prioritize release blockers, gates, readiness, planning, then reports." },
-    { "name": "work.personal-todo.requeue.v1", "scope": "organization", "purpose": "Wake a correlated commitment when authoritative evidence changes." },
-    { "name": "work.personal-todo.claim.v1", "scope": "organization", "purpose": "Claim exactly one serialized Producer commitment." },
-    { "name": "work.personal-todo.complete.v1", "scope": "organization", "purpose": "Complete commitments only after authoritative evidence confirms the outcome." },
-    { "name": "work.personal-todo.block.v1", "scope": "organization", "purpose": "Expose missing authority, role, skill, or capability blockers." },
-    { "name": "work.personal-todo.release.v1", "scope": "organization", "purpose": "Release transient execution claims safely." },
-    { "name": "work.personal-todo.defer.v1", "scope": "organization", "purpose": "Wait durably for another principal, deadline, or platform event." },
-    { "name": "work.personal-todo.update.v1", "scope": "organization", "purpose": "Refresh source context and management commitment details." },
-    { "name": "platform.agent-operating-state.read.v1", "scope": "organization", "purpose": "Recover project/work-item state and duplicate-delivery outcomes after restart." },
-    { "name": "platform.agent-operating-state.write.v1", "scope": "organization", "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item." },
-    {"name": "communication.chat.read.v1", "scope": "team", "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."},
-    {"name": "communication.chat.create.v1", "scope": "team", "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."},
-    {"name": "communication.message.send.v1", "scope": "team", "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."}
+    {
+      "name": "agent.onboarding.complete.v1",
+      "scope": "organization",
+      "purpose": "Acknowledge onboarding only after contacting the manager and retaining the kickoff state."
+    },
+    {
+      "name": "platform.artifact.revise.v1",
+      "scope": "organization",
+      "purpose": "Iterate the shared production brief with Creative Director feedback before staffing."
+    },
+    {
+      "name": "platform.llm.chat-stream.v1",
+      "scope": "organization",
+      "purpose": "Produce grounded role-owned deliverables from exact project evidence."
+    },
+    {
+      "name": "work.item.read",
+      "scope": "team",
+      "purpose": "Read only the authoritative assigned board item."
+    },
+    {
+      "name": "work.item.comment",
+      "scope": "team",
+      "purpose": "Record progress, blockers, findings, and evidence on the authoritative item."
+    },
+    {
+      "name": "platform.artifact.read.v1",
+      "scope": "organization",
+      "purpose": "Read authorized exact document revisions and hashes."
+    },
+    {
+      "name": "platform.artifact.create.v1",
+      "scope": "organization",
+      "purpose": "Create the role-owned durable deliverable."
+    },
+    {
+      "name": "platform.artifact.submit.v1",
+      "scope": "organization",
+      "purpose": "Submit the exact deliverable revision for accountable review."
+    },
+    {
+      "name": "platform.artifact-package.create.v1",
+      "scope": "organization",
+      "purpose": "Assemble the exact accepted handoff revisions into a governed planning package."
+    },
+    {
+      "name": "platform.artifact-package.read.v1",
+      "scope": "organization",
+      "purpose": "Revalidate the governed planning package before planning and publication."
+    },
+    {
+      "name": "platform.artifact-package.submit.v1",
+      "scope": "organization",
+      "purpose": "Submit the planning package to creative authority without self-approving it."
+    },
+    {
+      "name": "platform.management.portfolio.read.v1",
+      "scope": "organization",
+      "purpose": "Read only workstreams assigned to this Producer."
+    },
+    {
+      "name": "platform.workstream.read.v1",
+      "scope": "organization",
+      "purpose": "Verify authoritative lifecycle and profile revisions."
+    },
+    {
+      "name": "platform.team-roster.read.v2",
+      "scope": "team",
+      "purpose": "Verify exact team installations and role coverage."
+    },
+    {
+      "name": "work.board.create",
+      "scope": "team",
+      "purpose": "Create the managed game delivery board."
+    },
+    {
+      "name": "work.board.read",
+      "scope": "team",
+      "purpose": "Read managed boards and their revisions."
+    },
+    {
+      "name": "work.board.columns.configure",
+      "scope": "team",
+      "purpose": "Apply the pinned profile workflow."
+    },
+    {
+      "name": "work.item.create",
+      "scope": "team",
+      "purpose": "Publish provenance-bound containers and executable leaf tickets from reconciled planning."
+    },
+    {
+      "name": "work.item.planning.revise.v1",
+      "scope": "team",
+      "purpose": "Revise planning with optimistic concurrency when authoritative proposal evidence changes."
+    },
+    {
+      "name": "work.item.estimate",
+      "scope": "team",
+      "purpose": "Record only specialist-supplied estimates with coordination provenance."
+    },
+    {
+      "name": "work.item.move",
+      "scope": "team",
+      "purpose": "Pull fully ready executable leaves into Ready without moving containers."
+    },
+    {
+      "name": "work.orchestration.profile.configure.v1",
+      "scope": "team",
+      "purpose": "Publish the pinned generic orchestration policy."
+    },
+    {
+      "name": "work.orchestration.preflight",
+      "scope": "team",
+      "purpose": "Preflight a planned sprint before activation."
+    },
+    {
+      "name": "work.orchestration.start",
+      "scope": "team",
+      "purpose": "Start only a successfully preflighted sprint."
+    },
+    {
+      "name": "work.orchestration.approval.decide",
+      "scope": "team",
+      "purpose": "Review exact delivery evidence and decide assigned board-manager acceptance stages."
+    },
+    {
+      "name": "work.orchestration.read",
+      "scope": "team",
+      "purpose": "Reconcile authoritative execution state, blockers, and retries."
+    },
+    {
+      "name": "work.orchestration.retry",
+      "scope": "team",
+      "purpose": "Retry an eligible blocked stage under policy."
+    },
+    {
+      "name": "work.sprint.read",
+      "scope": "team",
+      "purpose": "Read sprint readiness and cadence."
+    },
+    {
+      "name": "work.sprint.create",
+      "scope": "team",
+      "purpose": "Create bounded planned sprints."
+    },
+    {
+      "name": "work.sprint.scope.manage",
+      "scope": "team",
+      "purpose": "Manage approved sprint scope and carryover."
+    },
+    {
+      "name": "work.sprint.capacity.manage",
+      "scope": "team",
+      "purpose": "Record specialist-supplied sprint capacity."
+    },
+    {
+      "name": "work.sprint.carryover",
+      "scope": "team",
+      "purpose": "Carry incomplete scope with lineage."
+    },
+    {
+      "name": "work.sprint.report.read",
+      "scope": "team",
+      "purpose": "Read authoritative sprint reports."
+    },
+    {
+      "name": "work.flow-metrics.read.v1",
+      "scope": "team",
+      "purpose": "Read trusted delivery flow, forecast, and capacity signals."
+    },
+    {
+      "name": "platform.management.status-report.v1",
+      "scope": "organization",
+      "purpose": "Publish management and weekly project reports."
+    },
+    {
+      "name": "platform.management.resource-change.propose.v1",
+      "scope": "team",
+      "purpose": "Propose evidence-backed team capacity changes for manager decision."
+    },
+    {
+      "name": "platform.management.resource-change.read.v1",
+      "scope": "team",
+      "purpose": "Reconcile resource-change decisions and deduplicate evidence."
+    },
+    {
+      "name": "platform.decision.request.v1",
+      "scope": "organization",
+      "purpose": "Escalate production decisions outside delegated authority."
+    },
+    {
+      "name": "platform.decision.read.v1",
+      "scope": "organization",
+      "purpose": "Reconcile authoritative production decisions."
+    },
+    {
+      "name": "communication.coordination.respond.v1",
+      "scope": "team",
+      "purpose": "Acknowledge exact Creative Director handoffs and coordination turns."
+    },
+    {
+      "name": "communication.coordination.read.v1",
+      "scope": "team",
+      "purpose": "Recover coordination state after restart."
+    },
+    {
+      "name": "communication.coordination.start.v1",
+      "scope": "team",
+      "purpose": "Start role-authority planning and estimation coordination."
+    },
+    {
+      "name": "communication.coordination.start-board.v1",
+      "scope": "team",
+      "purpose": "Start board-scoped Designer and Technical Director planning sessions."
+    },
+    {
+      "name": "communication.coordination.resume.v1",
+      "scope": "team",
+      "purpose": "Resume recoverable planning sessions after runtime or transport failure."
+    },
+    {
+      "name": "work.personal-todo.read.v1",
+      "scope": "organization",
+      "purpose": "Read the Producer management commitment board."
+    },
+    {
+      "name": "work.personal-todo.add.v1",
+      "scope": "organization",
+      "purpose": "Create deduplicated Producer-owned management commitments."
+    },
+    {
+      "name": "work.personal-todo.reorder.v1",
+      "scope": "organization",
+      "purpose": "Prioritize release blockers, gates, readiness, planning, then reports."
+    },
+    {
+      "name": "work.personal-todo.requeue.v1",
+      "scope": "organization",
+      "purpose": "Wake a correlated commitment when authoritative evidence changes."
+    },
+    {
+      "name": "work.personal-todo.claim.v1",
+      "scope": "organization",
+      "purpose": "Claim exactly one serialized Producer commitment."
+    },
+    {
+      "name": "work.personal-todo.complete.v1",
+      "scope": "organization",
+      "purpose": "Complete commitments only after authoritative evidence confirms the outcome."
+    },
+    {
+      "name": "work.personal-todo.block.v1",
+      "scope": "organization",
+      "purpose": "Expose missing authority, role, skill, or capability blockers."
+    },
+    {
+      "name": "work.personal-todo.release.v1",
+      "scope": "organization",
+      "purpose": "Release transient execution claims safely."
+    },
+    {
+      "name": "work.personal-todo.defer.v1",
+      "scope": "organization",
+      "purpose": "Wait durably for another principal, deadline, or platform event."
+    },
+    {
+      "name": "work.personal-todo.update.v1",
+      "scope": "organization",
+      "purpose": "Refresh source context and management commitment details."
+    },
+    {
+      "name": "platform.agent-operating-state.read.v1",
+      "scope": "organization",
+      "purpose": "Recover project/work-item state and duplicate-delivery outcomes after restart."
+    },
+    {
+      "name": "platform.agent-operating-state.write.v1",
+      "scope": "organization",
+      "purpose": "Persist revision-safe state isolated by Workstream and authoritative work item."
+    },
+    {
+      "name": "communication.chat.read.v1",
+      "scope": "team",
+      "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."
+    },
+    {
+      "name": "communication.chat.create.v1",
+      "scope": "team",
+      "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."
+    },
+    {
+      "name": "communication.message.send.v1",
+      "scope": "team",
+      "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."
+    }
   ],
   "events": {
     "subscribes": [
@@ -149,11 +442,27 @@
     ]
   },
   "configuration": [
-    { "key": "llmProviderId", "type": "provider", "label": "LLM provider", "required": true, "secret": false },
-    { "key": "llmModel", "type": "model", "label": "Model", "required": true, "secret": false, "dependsOnFieldKey": "llmProviderId" }
+    {
+      "key": "llmProviderId",
+      "type": "provider",
+      "label": "LLM provider",
+      "required": true,
+      "secret": false
+    },
+    {
+      "key": "llmModel",
+      "type": "model",
+      "label": "Model",
+      "required": true,
+      "secret": false,
+      "dependsOnFieldKey": "llmProviderId"
+    }
   ],
   "credentials": [],
-  "webAccess": { "mode": "None", "rules": [] },
+  "webAccess": {
+    "mode": "None",
+    "rules": []
+  },
   "ui": [],
   "catalog": {
     "imageUrl": "https://raw.githubusercontent.com/CrosswiredStudios/CSweet.Agent.Producer.VideoGame/main/assets/branding/portrait-v1.jpg",
@@ -161,8 +470,13 @@
     "accentColor": "#986537",
     "summary": "Leads project delivery, boards, sprints, schedules, budgets, dependencies, staffing, risks, and status reporting.",
     "category": "Production",
-    "role": { "key": "game-producer", "name": "Video Game Producer" },
-    "license": { "spdxId": "MIT" },
+    "role": {
+      "key": "game-producer",
+      "name": "Video Game Producer"
+    },
+    "license": {
+      "spdxId": "MIT"
+    },
     "iconUrls": [],
     "roleAliases": [],
     "keywords": [],

@@ -132,3 +132,12 @@ Attention reviews discover workstreams from durable accepted handoffs as well as
 Producer staffing binds each missing canonical delegation independently and preserves existing execution, review, QA and platform assignments. Estimates and implementation capacity use the specialist-execution owner explicitly. Candidate selection waits for all declared delegation stages to be staffed. Missing review or QA roles feed the normal staffing proposal path. Stage definitions and delegation recommendations must still be supplied by technical planning.
 
 Delivery acceptance reviews owned active-sprint Producer gates from exact worker output and document revision content, or matching technical/independent QA/merge evidence. Reviews cover every ticket acceptance criterion and are saved before idempotent approval submission. Missing evidence leaves a diagnostic comment and the approval pending. Requires work.orchestration.approval.decide; it grants no CEO hiring/spending authority.
+
+## Release notes
+
+See [versioned release notes](releases/README.md). Add the matching note with every agent version change.
+
+
+### 2.5.1 team board access
+
+Declare work.item.read and work.item.comment at team scope so approved team onboarding grants can materialize the access needed by board planning and delivery reconciliation. Organization-scoped declarations did not produce these team grants, causing board reads to fail after workflow configuration. No organization-wide board access is added.
