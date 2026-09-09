@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.6.8";
+    public override string Version => "2.6.9";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -203,6 +203,11 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     handoff.CoordinationSessionId, handoff.HandoffDigest, context, cancellationToken);
             }
 
+            if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var blockedCycle) == true &&
+                accepted.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var decisionHandoff) &&
+                blockedCycle.OutstandingAuthorityQuestions.Count > 0)
+                await EnsurePlanningDecisionsAsync(workstream.Id, board.Id, blockedCycle.PlanningFingerprint,
+                    blockedCycle.OutstandingAuthorityQuestions, decisionHandoff, context, cancellationToken);
             var metrics = await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(board.Id)
             {
                 TeamId = entry.ActiveTeam?.TeamId,
@@ -560,10 +565,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             return PersonalTodoResult.Blocked("The completed planning sessions do not contain current, correlated proposal artifacts.");
 
         var questions = designerProposal.OpenCreativeDecisions.Concat(technicalProposal.OpenFeasibilityDecisions).ToList();
-        if (questions.Count > 0 && Guid.TryParse(context.Identity?.ManagerEmployeeId, out var creativeDirectorId))
-            await context.Platform.Communication.SendDirectAgentMessageAsync(creativeDirectorId,
-                $"Planning for workstream {workstreamId:D} needs your input: {string.Join("; ", questions)}. The Producer is drafting the backlog; affected scope remains uncommitted.",
-                $"producer-planning-questions:{cycle.PlanningFingerprint}", cancellationToken);
+        await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
+            handoff, context, cancellationToken);
         var published = await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
             designerSession, designerArtifact!, designerProposal,
             technicalSession, technicalArtifact!, technicalProposal,
