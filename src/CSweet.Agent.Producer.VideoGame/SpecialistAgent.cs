@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.6.7";
+    public override string Version => "2.6.8";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -27,6 +27,13 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (IsOwnEstimateInvitation(request))
+        {
+            var estimate = await base.HandleCoordinationTurnAsync(request, context, cancellationToken);
+            return estimate.Disposition == "Completed" && estimate.Artifact is not null
+                ? AgentCoordinationTurnResult.Continue(estimate.Content, estimate.Artifact)
+                : estimate;
+        }
         if (request.SourceKind == "Board" && request.Transcript.Any(x =>
             x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
             IsPlanningRequest(x.Artifact?.Type)))
@@ -642,7 +649,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
 
         var planningRevision = candidates.Max(x => x.PlanningRevision);
         var planningDigest = source.SourceFingerprint;
-        var roleProposals = new List<(AgentCoordinationSession Session, AgentCoordinationArtifact Artifact,
+        var roleProposals = new List<(AgentCoordinationSession Session, AgentCoordinationParticipant Author, AgentCoordinationArtifact Artifact,
             GameRoleEstimateCapacityProposalV1 Proposal)>();
         var pendingRoles = new List<string>();
         foreach (var group in candidates.GroupBy(x => PrimaryExecutionAssignment(x)!.Requirements!.RequiredRoleKey,
@@ -658,20 +665,24 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             var estimationCandidates = group.Select(ToSprintCandidate).OrderBy(x => x.WorkItemId).ToList();
             var estimateRequest = new GameRoleEstimateCapacityRequestV1(boardId, group.Key,
                 planningRevision, planningDigest, estimationCandidates, requestFingerprint);
-            var session = await EnsureTypedBoardSessionAsync(teammate, boardId,
+            var partner = EstimatePartner(teammate, roster, context.InstallationId);
+            if (partner is null)
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                    "QA is required to review the Producer's own estimates.");
+            var session = await EnsureTypedBoardSessionAsync(partner, boardId,
                 $"{group.Key} sprint estimate and capacity",
                 "Supply estimates, confidence, assumptions, blockers, and available sprint capacity for only the exact accountable-role items.",
                 ["Every requested item has a role-owned estimate.", "Planning revision and digest match.",
                     "Capacity and blockers are explicit."],
                 "video-game.production.role-estimate-request.v1", requestFingerprint, estimateRequest,
-                $"producer-estimation-session:{requestFingerprint}", context, cancellationToken);
+                $"producer-estimation-session:{requestFingerprint}:{partner.AgentInstallationId:N}", context, cancellationToken);
             if (session.Status != AgentCoordinationStatuses.Completed)
             {
                 pendingRoles.Add($"{group.Key} ({session.Status})");
                 continue; // Start every role's estimation and keep independent completed proposals usable.
             }
-            var artifact = session.Turns.LastOrDefault(x =>
-                x.Artifact?.Type == "video-game.production.role-estimate-capacity-proposal.v1")?.Artifact;
+            var author = session.Initiator.AgentInstallationId == installationId ? session.Initiator : session.Target;
+            var artifact = OwnedEstimateArtifact(session, installationId);
             var proposal = artifact?.Payload.Deserialize<GameRoleEstimateCapacityProposalV1>();
             var expectedIds = group.Select(x => x.Id).OrderBy(x => x).ToList();
             if (artifact is null || proposal is null || proposal.RoleKey != group.Key ||
@@ -680,7 +691,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 !proposal.Estimates.Select(x => x.WorkItemId).OrderBy(x => x).SequenceEqual(expectedIds) ||
                 proposal.Estimates.Any(x => x.EstimatePoints <= 0))
                 return PersonalTodoResult.Blocked($"The {group.Key} estimate proposal is stale, incomplete, or not bound to the candidate scope.");
-            roleProposals.Add((session, artifact, proposal));
+            roleProposals.Add((session, author, artifact, proposal));
         }
 
         if (roleProposals.Count == 0)
@@ -698,8 +709,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     estimate.EstimatePoints, current.Revision,
                     $"producer-estimate:{current.Id:N}:{sourceProposal.Artifact.Digest}")
                 {
-                    Provenance = new WorkEstimateProvenance(sourceProposal.Session.Target.OrganizationUserId,
-                        sourceProposal.Session.Target.AgentInstallationId, sourceProposal.Session.Id,
+                    Provenance = new WorkEstimateProvenance(sourceProposal.Author.OrganizationUserId,
+                        sourceProposal.Author.AgentInstallationId, sourceProposal.Session.Id,
                         sourceProposal.Session.Revision, sourceProposal.Artifact.Digest,
                         ConfidenceValue(estimate.Confidence))
                 }, cancellationToken);
