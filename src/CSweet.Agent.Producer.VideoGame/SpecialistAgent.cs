@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.6.4";
+    public override string Version => "2.6.5";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -367,6 +367,12 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             }, context, cancellationToken);
     }
 
+    internal static string CommitmentIdempotencyKey(string correlationId)
+    {
+        var legacy = $"producer-commitment:{correlationId}";
+        return legacy.Length <= 160 ? legacy : $"producer-commitment:{ProducerPolicyFingerprint.Digest(correlationId)}";
+    }
+
     private static async Task<PersonalTodoItem> EnsureCommitmentAsync(
         string correlationId,
         string title,
@@ -400,7 +406,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         }
         return await context.Platform.PersonalTodo.AddAsync(
             new AddPersonalTodoItemRequest(title, description, priority, null,
-                $"producer-commitment:{correlationId}", CorrelationId: correlationId)
+                CommitmentIdempotencyKey(correlationId), CorrelationId: correlationId)
             { WorkContext = workContext }, cancellationToken);
     }
 
