@@ -124,29 +124,9 @@ public sealed partial class SpecialistAgent
         foreach (var item in board.Items.Where(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
                      (x.SprintId is null || planned.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null && x.Planning is not null))
         {
-            var assignments = item.StageAssignments.ToList();
-            var owner = item.AccountableOrganizationUserId;
-            var changed = false;
-            foreach (var recommendation in MissingDelegations(item))
-            {
-                var requirements = new WorkAssignmentRequirements(recommendation.RequiredRoleKey,
-                    recommendation.RequiredSpecializationKeys, recommendation.PreferredSpecializationKeys, recommendation.RequiredCapabilityKeys);
-                var selected = RoleTaxonomy.SelectAssignment(roster.Members, requirements);
-                if (selected is null || !Guid.TryParse(selected.Teammate.EmployeeId, out var selectedOwner)) continue;
-                var matched = requirements.RequiredSpecializationKeys.Concat(requirements.PreferredSpecializationKeys
-                    .Where(x => selected.Teammate.SpecializationKeys.Contains(x))).Distinct().OrderBy(x => x).ToList();
-                var fingerprint = ProducerPolicyFingerprint.Digest($"{item.Id:N}:{recommendation.StageKey}:{item.PlanningRevision}:{roster.Revision}:{selected.Teammate.AgentInstallationId}");
-                assignments.RemoveAll(x => x.StageKey == recommendation.StageKey);
-                assignments.Add(new WorkStageAssignment(recommendation.StageKey, "AgentInstallation", selectedOwner, selected.Teammate.AgentInstallationId)
-                {
-                    Requirements = requirements,
-                    SelectionEvidence = new WorkAssignmentSelectionEvidence(selected.Teammate.AgentInstallationId!.Value,
-                        roster.Revision, profileDigest, matched, fingerprint, DateTimeOffset.UtcNow)
-                });
-                if (recommendation.StageKey == "specialist-execution") owner = selectedOwner;
-                changed = true;
-            }
-            if (!changed) continue;
+            var assignments = RefreshAssignments(item, roster, profileDigest);
+            if (assignments.SequenceEqual(item.StageAssignments)) continue;
+            var owner = assignments.SingleOrDefault(x => x.StageKey == "specialist-execution")?.OrganizationUserId;
             var bindingKey = ProducerPolicyFingerprint.Digest($"{item.Id:N}:{item.Revision}:{roster.Revision}:" +
                 string.Join("|", assignments.OrderBy(x => x.StageKey).Select(x => $"{x.StageKey}:{x.AgentInstallationId}")));
             await context.Platform.Work.RevisePlanningAsync(new ReviseWorkItemPlanningRequest(boardId, item.Id,
@@ -159,6 +139,51 @@ public sealed partial class SpecialistAgent
         }
     }
 
+    internal static IReadOnlyList<WorkStageAssignment> RefreshAssignments(
+        WorkItem item, AgentTeamContext roster, string profileDigest)
+    {
+        var assignments = item.StageAssignments.ToList();
+        var requirementsByStage = assignments.Where(x => x.Requirements is not null)
+            .ToDictionary(x => x.StageKey, x => x.Requirements!, StringComparer.Ordinal);
+        foreach (var recommendation in item.Planning?.DelegationRecommendations ?? [])
+            requirementsByStage[recommendation.StageKey] = new WorkAssignmentRequirements(
+                recommendation.RequiredRoleKey, recommendation.RequiredSpecializationKeys,
+                recommendation.PreferredSpecializationKeys, recommendation.RequiredCapabilityKeys);
+        foreach (var (stage, requirements) in requirementsByStage)
+        {
+            var current = assignments.SingleOrDefault(x => x.StageKey == stage);
+            // Preserve an eligible assignee; a new hire alone does not justify reassignment.
+            var selected = RoleTaxonomy.SelectAssignment(roster.Members
+                .Where(x => x.AgentInstallationId == current?.AgentInstallationId).ToArray(), requirements)
+                ?? RoleTaxonomy.SelectAssignment(roster.Members, requirements);
+            if (selected is null || !Guid.TryParse(selected.Teammate.EmployeeId, out var owner))
+            {
+                assignments.RemoveAll(x => x.StageKey == stage);
+                continue;
+            }
+            var installation = selected.Teammate.AgentInstallationId!.Value;
+            var matched = requirements.RequiredSpecializationKeys.Concat(requirements.PreferredSpecializationKeys
+                .Where(x => selected.Teammate.SpecializationKeys.Contains(x, StringComparer.Ordinal)))
+                .Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToArray();
+            if (current?.AgentInstallationId == installation && current.OrganizationUserId == owner &&
+                current.SelectionEvidence is { } evidence && evidence.TeamRosterRevision == roster.Revision &&
+                evidence.ProfileDefinitionDigest == profileDigest &&
+                evidence.MatchedSpecializationKeys.SequenceEqual(matched) &&
+                JsonSerializer.Serialize(current.Requirements) == JsonSerializer.Serialize(requirements))
+                continue;
+            var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+                item.Id, stage, item.PlanningRevision, roster.Revision, profileDigest, installation, requirements, matched
+            }));
+            assignments.RemoveAll(x => x.StageKey == stage);
+            assignments.Add(new WorkStageAssignment(stage, "AgentInstallation", owner, installation)
+            {
+                Requirements = requirements,
+                SelectionEvidence = new WorkAssignmentSelectionEvidence(installation, roster.Revision,
+                    profileDigest, matched, fingerprint, DateTimeOffset.UtcNow)
+            });
+        }
+        return assignments;
+    }
     internal static WorkStageAssignment? PrimaryExecutionAssignment(WorkItem item)
     {
         var matches = item.StageAssignments.Where(x => x.StageKey == "specialist-execution").Take(2).ToArray();

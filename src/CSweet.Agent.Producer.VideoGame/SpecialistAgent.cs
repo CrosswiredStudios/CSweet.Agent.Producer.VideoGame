@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.6.6";
+    public override string Version => "2.6.7";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -853,6 +853,12 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         if (NeedsPlanningFormatRecovery(session))
             session = await context.Platform.Communication.StartBoardCoordinationAsync(
                 start with { IdempotencyKey = start.IdempotencyKey + ":format-v1" }, cancellationToken);
+        if (NeedsDesignerHierarchyRecovery(session))
+            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+                start with {
+                    IdempotencyKey = start.IdempotencyKey + ":hierarchy-v1",
+                    InitialMessage = message + " Correct the previous proposal: every feature must name a milestone parent included in this proposal. Preserve the accepted scope."
+                }, cancellationToken);
         return session;
     }
 
