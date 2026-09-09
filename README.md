@@ -47,7 +47,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.31.1 and the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.40.0 and the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -88,7 +88,7 @@ Reimport both agents to enable this protocol; legacy unrefined handoffs are bloc
 
 ## Shared collaboration SDK
 
-Uses CSweet.Agent.SDK 3.31.1 typed document references, explicit coordination read sharing,
+Uses CSweet.Agent.SDK 3.40.0 typed document references, explicit coordination read sharing,
 accepted-revision lookup, and handoff readiness checks. Pitch content and staffing judgment
 remain agent-specific. See the SDK's `docs/collaboration.md` for reusable documentation requests,
 clarification, review, and personal-work dependency waits. The matching C-Sweet host is required
@@ -96,7 +96,7 @@ for sharing at every coordination start; package import alone does not update th
 
 ## Provider queue handling
 
-Uses SDK 3.31.1 for acknowledged LLM waiting, conversation activity, and host-authoritative deadline updates. Deploy the matching C-Sweet AgentHost and reimport this package to enable the private polling protocol.
+Uses SDK 3.40.0 for acknowledged LLM waiting, conversation activity, and host-authoritative deadline updates. Deploy the matching C-Sweet AgentHost and reimport this package to enable the private polling protocol.
 
 ## Hiring kickoff
 
