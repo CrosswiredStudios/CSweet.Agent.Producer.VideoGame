@@ -6,6 +6,43 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class PlanningReplyTests
 {
+    [Fact]
+    public void PlanningArtifactSharesExactAcceptedMemberAndPreservesCycle()
+    {
+        var cycle = new CrosswiredStudios.VideoGame.Contracts.GameProductionPlanningCycleV1(
+            Guid.NewGuid(), Guid.NewGuid(), 3, Guid.NewGuid(), "profile", Guid.NewGuid(), 1,
+            "package-digest", "concept", "vision-approved", "fingerprint");
+        var member = new CSweet.WorkManagement.Contracts.ArtifactPackageMemberDigest(
+            Guid.NewGuid(), Guid.NewGuid(), "brief", new string('a', 64));
+        var artifact = SpecialistAgent.PlanningArtifact(cycle, [member]);
+        Assert.Equal(cycle, artifact.Payload.Deserialize<CrosswiredStudios.VideoGame.Contracts.GameProductionPlanningCycleV1>());
+        var reference = Assert.Single(artifact.Payload.GetProperty("documentReferences")
+            .Deserialize<CollaborationDocumentReference[]>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!);
+        Assert.Equal(member.ArtifactId, reference.DocumentId);
+        Assert.Equal(member.AcceptedRevisionId, reference.RevisionId);
+        Assert.Equal(member.Sha256, reference.ContentSha256);
+    }
+
+    [Theory]
+    [InlineData(false, "platform.artifact-package.read.v1", true)]
+    [InlineData(true, "platform.artifact-package.read.v1", false)]
+    [InlineData(false, "work.item.read", false)]
+    public void DocumentRecoveryRequiresMissingReferencesAndPackageReadFailure(bool shared, string capability, bool expected)
+    {
+        var participant = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Producer", "Producer");
+        var target = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Technical Director", "Technical Director");
+        var artifact = new AgentCoordinationArtifact("video-game.production.planning-cycle.v1", "1.0", "cycle", 1, true,
+            shared ? JsonSerializer.SerializeToElement(new { documentReferences = new[] { new { documentId = Guid.NewGuid() } } }) :
+                JsonSerializer.SerializeToElement(new {}), "digest");
+        var session = new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty,
+            participant, target, "Planning", "Delivery", [], "Failed", 2, 1, null, false,
+            $"agent-failure:v1;code=capability.failed;retryable=false;capability={capability};diagnosticId=test",
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            [new(Guid.NewGuid(), 0, participant.OrganizationUserId, "Continue", "Plan", DateTimeOffset.UtcNow, artifact)])
+            { SourceKind = "Board" };
+        Assert.Equal(expected, SpecialistAgent.NeedsPlanningDocumentRecovery(session));
+    }
+
     [Theory]
     [InlineData("complete", "Completed")]
     [InlineData("blocked", "Blocked")]

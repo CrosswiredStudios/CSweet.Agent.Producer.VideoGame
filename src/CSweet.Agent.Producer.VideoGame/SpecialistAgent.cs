@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.6.1";
+    public override string Version => "2.6.2";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -508,11 +508,11 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var technicalSession = await EnsurePlanningSessionAsync(technicalDirector, boardId, cycle,
             "Technical delivery and decomposition proposal",
             "Decompose the accepted brief into a lean complete backlog, including containers, technical discovery, implementation, QA and packaging. Justify specialist roles with actual work; do not require a full studio roster.",
-            "video-game.production.technical-delivery-proposal.v1", context, cancellationToken);
+            "video-game.production.technical-delivery-proposal.v1", memberDigests, context, cancellationToken);
         var designerSession = designer is null ? technicalSession : await EnsurePlanningSessionAsync(designer, boardId, cycle,
             "Player-outcome and game-design backlog proposal",
             "Define player outcomes and testable acceptance criteria within the accepted brief. Coordinate technical feasibility separately.",
-            "video-game.production.designer-backlog-proposal.v1", context, cancellationToken);
+            "video-game.production.designer-backlog-proposal.v1", memberDigests, context, cancellationToken);
         priorCycle = (priorCycle ?? new ProducerPlanningCycleState(workstreamId, boardId, teamId,
             source.SourceFingerprint, package.Id, null, null, null, null, null, DateTimeOffset.UtcNow)) with
         {
@@ -823,6 +823,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         string subject,
         string objective,
         string expectedArtifactType,
+        IReadOnlyList<ArtifactPackageMemberDigest> members,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
@@ -835,12 +836,14 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 ["Proposal binds the exact planning cycle.", "Every leaf has testable acceptance criteria and one accountable role.",
                     "Required and preferred skills are explicit; estimates are not invented."],
                 message, $"producer-planning-session:{cycle.PlanningFingerprint}:{targetUserId:N}",
-                new AgentCoordinationArtifactSubmission("video-game.production.planning-cycle.v1", "1.0",
-                    cycle.PlanningFingerprint, 1, true, JsonSerializer.SerializeToElement(cycle)));
+                PlanningArtifact(cycle, members));
         var session = await context.Platform.Communication.StartBoardCoordinationAsync(start, cancellationToken);
         if (NeedsPlanningContextRecovery(session))
             session = await context.Platform.Communication.StartBoardCoordinationAsync(
                 start with { IdempotencyKey = start.IdempotencyKey + ":context-v2" }, cancellationToken);
+        if (NeedsPlanningDocumentRecovery(session))
+            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+                start with { IdempotencyKey = start.IdempotencyKey + ":documents-v1" }, cancellationToken);
         return session;
     }
 
