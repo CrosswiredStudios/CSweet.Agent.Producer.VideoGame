@@ -100,7 +100,7 @@ public sealed partial class SpecialistAgent
             $"I propose delivery coverage for {string.Join(", ", missing.Select(x => x.Key))} on workstream {workstreamId:D}. " +
             "The proposal is based on the accepted brief. Team-board planning begins when technical leadership is hired.",
             $"producer-coverage-chat:{fingerprint}", token);
-        await context.Platform.ProposeResourceChangeAsync(new ResourceChangeProposalRequest(chat.ChatId, Guid.Empty,
+        var proposal = new ResourceChangeProposalRequest(chat.ChatId, Guid.Empty,
             "Deliver the accepted game scope with the smallest team that covers its work.",
             "Add one installation per uncovered capability. Retain the approved team; do not pre-hire unused disciplines.",
             roster.Revision, roles, ["Initial coverage is based on accepted scope, not historical velocity."],
@@ -112,7 +112,8 @@ public sealed partial class SpecialistAgent
                 $"Accepted brief {acceptedBriefDigest ?? "linked through board planning"}; board {boardId?.ToString("D") ?? "deferred until technical leadership is hired"}; missing roles: {string.Join(", ", missing.Select(x => x.Key))}.")],
             AlternativesConsidered = ["Reuse qualified team installations.", "Sequence work before adding parallel capacity.", "Defer optional specialist work."],
             ExpectedEffect = "Unblock the named planning or backlog responsibilities; continue all independently ready work."
-        }, token);
+        };
+        await SubmitCoverageAsync(proposal, boardId, context.Platform.ProposeResourceChangeAsync, token);
     }
 
     private static async Task BindAvailableWorkAsync(Guid boardId, AgentTeamContext roster, string profileDigest,
