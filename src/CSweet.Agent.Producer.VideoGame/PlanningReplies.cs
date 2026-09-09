@@ -25,6 +25,11 @@ public sealed partial class SpecialistAgent
             x.Disposition == "Blocked" && x.Content == "Planning requires the exact workstream and planning fingerprint.") &&
         !session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId && x.Artifact is not null);
 
+    internal static bool NeedsPlanningFormatRecovery(AgentCoordinationSession session) =>
+        session.SourceKind == "Board" && session.Status == "Blocked" &&
+        session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId &&
+            x.Disposition == "Blocked" && x.Content == "Technical planning returned invalid JSON; revise the proposal.") &&
+        !session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId && x.Artifact is not null);
     private static string[] ReplyTypes(string? requestType) => requestType switch
     {
         "video-game.production.planning-cycle.v1" =>

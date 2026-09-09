@@ -81,6 +81,7 @@ public sealed class PlanningReplyTests
     [InlineData("semantic", false)]
     [InlineData("active", false)]
     [InlineData("context-present", false)]
+    [InlineData("format", false)]
     public void ContextRecoveryOnlyReplacesTheKnownLegacyFailure(string scenario, bool expected)
     {
         var self = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Producer", "Producer");
@@ -88,11 +89,12 @@ public sealed class PlanningReplyTests
         var session = new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty,
             self, target, "Planning", "Delivery", [], scenario == "active" ? "Active" : "Blocked", 3, 3, null, false, null,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-            [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Blocked", scenario == "semantic" ? "Need an engine decision" :
+            [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Blocked", scenario == "format" ? "Technical planning returned invalid JSON; revise the proposal." : scenario == "semantic" ? "Need an engine decision" :
                 "Planning requires the exact workstream and planning fingerprint.", DateTimeOffset.UtcNow)])
             { SourceKind = "Board", WorkContext = scenario == "context-present" ?
                 new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, null, null, Guid.NewGuid(), null, null) : null };
         Assert.Equal(expected, SpecialistAgent.NeedsPlanningContextRecovery(session));
+        Assert.Equal(scenario == "format", SpecialistAgent.NeedsPlanningFormatRecovery(session));
     }
 }
 
