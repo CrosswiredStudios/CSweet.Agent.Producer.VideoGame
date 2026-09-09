@@ -25,17 +25,29 @@ public sealed partial class SpecialistAgent
             x.Disposition == "Blocked" && x.Content == "Planning requires the exact workstream and planning fingerprint.") &&
         !session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId && x.Artifact is not null);
 
+    private static string[] ReplyTypes(string? requestType) => requestType switch
+    {
+        "video-game.production.planning-cycle.v1" =>
+            ["video-game.production.technical-delivery-proposal.v1", "video-game.production.designer-backlog-proposal.v1"],
+        "video-game.production.role-estimate-request.v1" =>
+            ["video-game.production.role-estimate-capacity-proposal.v1"],
+        "video-game.production.qa-readiness-request.v1" =>
+            ["video-game.production.qa-sprint-readiness-assessment.v1"],
+        _ => []
+    };
+
+    private static bool IsPlanningRequest(string? type) => ReplyTypes(type).Length > 0;
+
     private static AgentCoordinationTurnResult HandlePlanningReply(AgentCoordinationTurnRequest request)
     {
         var reply = request.Transcript.LastOrDefault(x => x.SpeakerOrganizationUserId == request.Counterpart.OrganizationUserId);
         if (reply?.Disposition == "Blocked")
             return AgentCoordinationTurnResult.Blocked($"Specialist planning requires resolution: {reply.Content}");
-        var cycle = request.Transcript.First(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
-            x.Artifact?.Type == "video-game.production.planning-cycle.v1").Artifact!;
+        var cycle = request.Transcript.Last(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
+            IsPlanningRequest(x.Artifact?.Type)).Artifact!;
         if (request.WorkContext is null || reply?.Artifact is not { IsFinalPage: true } proposal ||
-            proposal.Key != cycle.Key || proposal.Type is not
-                ("video-game.production.technical-delivery-proposal.v1" or "video-game.production.designer-backlog-proposal.v1"))
+            proposal.Key != cycle.Key || !ReplyTypes(cycle.Type).Contains(proposal.Type))
             return AgentCoordinationTurnResult.Blocked("Planning needs a complete specialist proposal bound to the requested cycle and project context.");
-        return AgentCoordinationTurnResult.Completed("Specialist planning proposal received. The planning commitment will validate its scope, provenance and staffing before publishing backlog work; receipt does not approve hiring or delivery.");
+        return AgentCoordinationTurnResult.Completed("Specialist planning proposal received. The owning commitment will validate scope, provenance, estimates, staffing and readiness before advancing work; receipt does not approve hiring or delivery.");
     }
 }

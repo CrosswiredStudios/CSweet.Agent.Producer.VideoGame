@@ -43,21 +43,29 @@ public sealed class PlanningReplyTests
         Assert.Equal(expected, SpecialistAgent.NeedsPlanningDocumentRecovery(session));
     }
 
+    public static IEnumerable<object[]> ReplyCases()
+    {
+        var pairs = new[] {
+            ("planning-cycle", "technical-delivery-proposal"),
+            ("role-estimate-request", "role-estimate-capacity-proposal"),
+            ("qa-readiness-request", "qa-sprint-readiness-assessment") };
+        foreach (var (request, reply) in pairs)
+        foreach (var scenario in new[] { "complete", "blocked", "wrong-key", "wrong-type", "partial", "missing-context" })
+            yield return new object[] { scenario, scenario == "complete" ? "Completed" : "Blocked",
+                $"video-game.production.{request}.v1", $"video-game.production.{reply}.v1" };
+    }
+
     [Theory]
-    [InlineData("complete", "Completed")]
-    [InlineData("blocked", "Blocked")]
-    [InlineData("wrong-key", "Blocked")]
-    [InlineData("partial", "Blocked")]
-    [InlineData("missing-context", "Blocked")]
-    public async Task PlanningReplyDoesNotEnterPitchRefinement(string scenario, string expected)
+    [MemberData(nameof(ReplyCases))]
+    public async Task PlanningReplyDoesNotEnterPitchRefinement(string scenario, string expected, string requestType, string replyType)
     {
         var self = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Producer", "Producer");
         var target = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Technical Director", "Technical Director");
         var turns = new List<AgentCoordinationTurn> {
             new(Guid.NewGuid(), 0, self.OrganizationUserId, "Continue", "Plan", DateTimeOffset.UtcNow,
-                new("video-game.production.planning-cycle.v1", "1.0", "cycle", 1, true, JsonSerializer.SerializeToElement(new {}), "digest")),
+                new(requestType, "1.0", "cycle", 1, true, JsonSerializer.SerializeToElement(new {}), "digest")),
             new(Guid.NewGuid(), 1, target.OrganizationUserId, scenario == "blocked" ? "Blocked" : "Completed", "Need an engine decision", DateTimeOffset.UtcNow,
-                scenario == "blocked" ? null : new("video-game.production.technical-delivery-proposal.v1", "1.0",
+                scenario == "blocked" ? null : new(scenario == "wrong-type" ? "unrelated.v1" : replyType, "1.0",
                     scenario == "wrong-key" ? "other" : "cycle", 1, scenario != "partial", JsonSerializer.SerializeToElement(new {}), "digest")) };
         var request = new AgentCoordinationTurnRequest(Guid.NewGuid(), 2, 2, "Planning", "Delivery", [], self, target, true, turns)
             { SourceKind = "Board", WorkContext = scenario == "missing-context" ? null :

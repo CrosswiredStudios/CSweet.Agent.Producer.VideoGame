@@ -16,7 +16,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.6.2";
+    public override string Version => "2.6.3";
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
@@ -29,7 +29,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     {
         if (request.SourceKind == "Board" && request.Transcript.Any(x =>
             x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
-            x.Artifact?.Type == "video-game.production.planning-cycle.v1"))
+            IsPlanningRequest(x.Artifact?.Type)))
             return HandlePlanningReply(request);
         return await RefinePitchAsync(request, context, cancellationToken);
     }
