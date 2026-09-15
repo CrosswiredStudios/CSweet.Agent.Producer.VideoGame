@@ -18,7 +18,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.6.9",
+  "version": "2.7.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -158,6 +158,16 @@
       "name": "work.item.comment",
       "scope": "team",
       "purpose": "Record progress, blockers, findings, and evidence on the authoritative item."
+    },
+    {
+      "name": "work.item.comment.update.v1",
+      "scope": "team",
+      "purpose": "Correct this agent's own comment on the authoritative item."
+    },
+    {
+      "name": "work.item.comment.delete.v1",
+      "scope": "team",
+      "purpose": "Retract this agent's own comment while its activity history is retained."
     },
     {
       "name": "platform.artifact.read.v1",
