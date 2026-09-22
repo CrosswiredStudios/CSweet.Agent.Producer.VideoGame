@@ -16,11 +16,12 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string VisionAcknowledgementArtifactType = "video-game.production.game-vision-acknowledgement.v1";
     public override string AgentId => "com.csweet.video-game-producer";
     private const string PlanningCommitmentPrefix = "producer-planning:";
+    internal const string PlanningRecoveryMarker = "Producer planning recovery generation 2";
     private const string EstimationCommitmentPrefix = "producer-estimation:";
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.8.4";
+    public override string Version => "2.8.5";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -436,6 +437,10 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             x.ArchivedAt is null && string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal));
         if (existing is not null)
         {
+            // A terminal planning conflict must not be requeued on every attention tick.
+            // A later recovery generation may reassess it once with new repair logic.
+            if (IsSettledPlanningBlock(existing, correlationId))
+                return existing;
             var waiting = existing.Status == PersonalTodoStatuses.Running && existing.Wait is not null;
             if (existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || waiting)
             {
@@ -458,6 +463,11 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 CommitmentIdempotencyKey(correlationId), CorrelationId: correlationId)
             { WorkContext = workContext }, cancellationToken);
     }
+
+    internal static bool IsSettledPlanningBlock(PersonalTodoItem item, string correlationId) =>
+        item.Status == PersonalTodoStatuses.Blocked &&
+        correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
+        item.BlockReason?.Contains(PlanningRecoveryMarker, StringComparison.Ordinal) == true;
 
     private static async Task PrioritizeCommitmentsAsync(
         PersonalTodoDirectory directory,
@@ -585,7 +595,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
 
         if (designerSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled ||
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
-            return PersonalTodoResult.Blocked("Designer / Technical Director planning reached a terminal conflict requiring Creative Director authority.");
+            return PersonalTodoResult.Blocked($"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Creative Director authority.");
         if (designerSession.Status != AgentCoordinationStatuses.Completed ||
             technicalSession.Status != AgentCoordinationStatuses.Completed)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
@@ -924,6 +934,15 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         if (NeedsPlanningFormatRecovery(session))
             session = await context.Platform.Communication.StartBoardCoordinationAsync(
                 start with { IdempotencyKey = start.IdempotencyKey + ":format-v1" }, cancellationToken);
+        if (NeedsCompactPlanningRecovery(session))
+            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+                start with {
+                    IdempotencyKey = start.IdempotencyKey + ":compact-v1",
+                    InitialMessage = message + " The prior technical proposal had malformed JSON in a large deliveryItems array. " +
+                        "Regenerate a complete, compact Epic > Story > Task proposal with no more than 20 items. " +
+                        "Preserve every accepted deliverable, including independently testable engineering and QA work; " +
+                        "use concise descriptions and return the typed artifact only after validation."
+                }, cancellationToken);
         if (NeedsDesignerHierarchyRecovery(session))
             session = await context.Platform.Communication.StartBoardCoordinationAsync(
                 start with {

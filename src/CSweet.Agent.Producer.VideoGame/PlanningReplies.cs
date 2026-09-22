@@ -30,6 +30,12 @@ public sealed partial class SpecialistAgent
         session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId &&
             x.Disposition == "Blocked" && x.Content == "Technical planning returned invalid JSON; revise the proposal.") &&
         !session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId && x.Artifact is not null);
+    internal static bool NeedsCompactPlanningRecovery(AgentCoordinationSession session) =>
+        session.SourceKind == "Board" && session.Status == "Blocked" &&
+        session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId &&
+            x.Disposition == "Blocked" && x.Content.StartsWith(
+                "Technical planning could not produce a valid proposal after two attempts.", StringComparison.Ordinal)) &&
+        !session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId && x.Artifact is not null);
     internal static bool NeedsDesignerHierarchyRecovery(AgentCoordinationSession session)
     {
         if (session.SourceKind != "Board" || session.Status != "Completed") return false;

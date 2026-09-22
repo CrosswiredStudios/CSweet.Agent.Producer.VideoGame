@@ -82,6 +82,7 @@ public sealed class PlanningReplyTests
     [InlineData("active", false)]
     [InlineData("context-present", false)]
     [InlineData("format", false)]
+    [InlineData("compact", false)]
     public void ContextRecoveryOnlyReplacesTheKnownLegacyFailure(string scenario, bool expected)
     {
         var self = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Producer", "Producer");
@@ -89,12 +90,27 @@ public sealed class PlanningReplyTests
         var session = new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty,
             self, target, "Planning", "Delivery", [], scenario == "active" ? "Active" : "Blocked", 3, 3, null, false, null,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-            [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Blocked", scenario == "format" ? "Technical planning returned invalid JSON; revise the proposal." : scenario == "semantic" ? "Need an engine decision" :
+            [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Blocked", scenario == "compact" ? "Technical planning could not produce a valid proposal after two attempts. JSON does not match the requested contract at $.deliveryItems[32]." :
+                scenario == "format" ? "Technical planning returned invalid JSON; revise the proposal." : scenario == "semantic" ? "Need an engine decision" :
                 "Planning requires the exact workstream and planning fingerprint.", DateTimeOffset.UtcNow)])
             { SourceKind = "Board", WorkContext = scenario == "context-present" ?
                 new(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null, null, null, Guid.NewGuid(), null, null) : null };
         Assert.Equal(expected, SpecialistAgent.NeedsPlanningContextRecovery(session));
         Assert.Equal(scenario == "format", SpecialistAgent.NeedsPlanningFormatRecovery(session));
+        Assert.Equal(scenario == "compact", SpecialistAgent.NeedsCompactPlanningRecovery(session));
+    }
+
+    [Fact]
+    public void PlanningBlockRequeuesOnceForNewProducerRecoveryVersion()
+    {
+        var old = JsonSerializer.Deserialize<CSweet.WorkManagement.Contracts.PersonalTodoItem>("{}")! with
+        {
+            Status = "Blocked", BlockReason = "Designer / Technical Director planning reached a terminal conflict."
+        };
+        var current = old with { BlockReason = $"Repeated issue: {SpecialistAgent.PlanningRecoveryMarker}: planning is blocked." };
+        Assert.False(SpecialistAgent.IsSettledPlanningBlock(old, "producer-planning:workstream"));
+        Assert.True(SpecialistAgent.IsSettledPlanningBlock(current, "producer-planning:workstream"));
+        Assert.False(SpecialistAgent.IsSettledPlanningBlock(current, "producer-estimation:workstream"));
     }
 }
 
