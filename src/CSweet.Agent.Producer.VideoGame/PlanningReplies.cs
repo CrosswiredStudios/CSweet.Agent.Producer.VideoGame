@@ -41,6 +41,30 @@ public sealed partial class SpecialistAgent
         return proposal?.PlayerOutcomes.Any(x => x.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Feature &&
             string.IsNullOrWhiteSpace(x.ParentProposalKey)) == true;
     }
+    internal static bool NeedsTechnicalHierarchyRecovery(AgentCoordinationSession session)
+    {
+        if (session.SourceKind != "Board" || session.Status != "Completed") return false;
+        var artifact = session.Turns.LastOrDefault(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId)
+            ?.Artifact;
+        if (artifact is not { IsFinalPage: true, Type: "video-game.production.technical-delivery-proposal.v1" })
+            return false;
+        var proposal = artifact.Payload.Deserialize<GameTechnicalDeliveryProposalV1>();
+        if (proposal is null) return false;
+        var byKey = proposal.DeliveryItems.ToDictionary(x => x.ProposalKey, StringComparer.Ordinal);
+        var stories = new HashSet<string>([VideoGameWorkItemTypeKeys.Feature, VideoGameWorkItemTypeKeys.Content],
+            StringComparer.Ordinal);
+        return !proposal.DeliveryItems.Any(x => stories.Contains(x.WorkItemTypeKey)) ||
+            proposal.DeliveryItems.Any(x => x.WorkItemTypeKey switch
+            {
+                VideoGameWorkItemTypeKeys.Milestone => x.ParentProposalKey is not null,
+                VideoGameWorkItemTypeKeys.Feature or VideoGameWorkItemTypeKeys.Content =>
+                    x.ParentProposalKey is null || !byKey.TryGetValue(x.ParentProposalKey, out var parent) ||
+                    parent.WorkItemTypeKey != VideoGameWorkItemTypeKeys.Milestone,
+                _ => x.ParentProposalKey is null || !byKey.TryGetValue(x.ParentProposalKey, out var parent) ||
+                    !stories.Contains(parent.WorkItemTypeKey)
+            });
+    }
+
     private static string[] ReplyTypes(string? requestType) => requestType switch
     {
         "video-game.production.planning-cycle.v1" =>

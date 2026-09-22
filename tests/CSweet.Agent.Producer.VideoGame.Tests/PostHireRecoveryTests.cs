@@ -8,6 +8,78 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class PostHireRecoveryTests
 {
     [Fact]
+    public async Task ExistingStaffingFollowUpFindsBoardCreatedAfterTheCommitment()
+    {
+        var workstreamId = Guid.NewGuid();
+        var boardId = Guid.NewGuid();
+        var itemId = Guid.NewGuid();
+        var employeeId = Guid.NewGuid();
+        var board = new WorkBoardSummary(boardId, "Game", "Project board", false, false, 1, [])
+        {
+            WorkstreamId = workstreamId
+        };
+        var gap = new WorkItem(itemId, Guid.NewGuid(), null, null, "Task", "Engineering gap",
+            "Needs a game engineer", "Backlog", "High", null, 1, 1, null)
+        {
+            StageAssignments = [new WorkStageAssignment("specialist-execution", "AgentInstallation", null, null)
+            {
+                Requirements = new WorkAssignmentRequirements("game-engineer", [], [], ["work.execution.run.v1"])
+            }]
+        };
+        var boardRead = false;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(
+                WorkBoardCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>([board]))
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(
+                WorkItemCapabilities.Read, (request, _) =>
+                {
+                    Assert.Equal(boardId, request.BoardId);
+                    boardRead = true;
+                    return Task.FromResult(new WorkBoardDetail(board, [], [gap]));
+                });
+        var todo = new PersonalTodoItem(Guid.NewGuid(), Guid.NewGuid(), employeeId, employeeId,
+            "Producer", "Resolve engineering coverage", "Wait for hire", PersonalTodoStatuses.Ready,
+            "High", 1, 1, null, null, null, [], null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+        {
+            CorrelationId = "producer-staffing-gap:test",
+            WorkContext = new PersonalTodoWorkContext { WorkstreamId = workstreamId, WorkItemId = itemId }
+        };
+
+        _ = await new SpecialistAgent().HandlePersonalTodoAsync(todo, runtime.CreateContext(), default);
+
+        Assert.True(boardRead);
+    }
+
+    [Fact]
+    public void SoftwareDeveloperCanFillGameEngineerStageWithPreferredGameSkills()
+    {
+        var developer = Member("software-developer");
+        var gameRequirement = Assignment(Member("game-engineer"), "specialist-execution", 3) with
+        {
+            Requirements = new("game-engineer", [], ["gameplay-programming"], ["work.execution.run.v1"]),
+            SelectionEvidence = null,
+            AgentInstallationId = null,
+            OrganizationUserId = null
+        };
+        var item = Item(gameRequirement) with
+        {
+            Planning = new([], ["Playable behavior passes"], [])
+            {
+                DelegationRecommendations = [new("specialist-execution", "game-engineer",
+                    ["work.execution.run.v1"], null, true, "Game implementation")
+                {
+                    PreferredSpecializationKeys = ["gameplay-programming"]
+                }]
+            }
+        };
+
+        var assigned = Assert.Single(SpecialistAgent.RefreshAssignments(item, Roster(4, developer), "profile"));
+
+        Assert.Equal(developer.AgentInstallationId, assigned.AgentInstallationId);
+        Assert.Equal("game-engineer", assigned.Requirements!.RequiredRoleKey);
+    }
+
+    [Fact]
     public void NewHireRefreshesRetainedAssignmentsAndAddsMissingStageWithoutChurningOwners()
     {
         var engineer = Member("game-engineer");
@@ -73,6 +145,35 @@ public sealed class PostHireRecoveryTests
                 SourceKind = "Board"
             };
         Assert.Equal(expected, SpecialistAgent.NeedsDesignerHierarchyRecovery(session));
+    }
+
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public void CompletedTechnicalProposalRecoversMissingStoryHierarchy(bool hasStory, bool expected)
+    {
+        var self = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Producer", "Producer");
+        var target = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Technical Director", "Technical Director");
+        var cycle = new GameProductionPlanningCycleV1(Guid.NewGuid(), Guid.NewGuid(), 12, Guid.NewGuid(),
+            "profile", Guid.NewGuid(), 1, "digest", "concept", "vision-approved", "cycle");
+        var epic = new GameProposedWorkItemV1("epic", VideoGameWorkItemTypeKeys.Milestone,
+            "Milestone", "Accepted scope", ["Demonstrable"], "game-technical-director", [], [], [], []);
+        var story = epic with { ProposalKey = "story", WorkItemTypeKey = VideoGameWorkItemTypeKeys.Feature,
+            ParentProposalKey = "epic" };
+        var task = epic with { ProposalKey = "task", WorkItemTypeKey = VideoGameWorkItemTypeKeys.Task,
+            ParentProposalKey = hasStory ? "story" : "epic", AccountableRoleKey = "game-engineer" };
+        var proposal = new GameTechnicalDeliveryProposalV1(cycle,
+            hasStory ? [epic, story, task] : [epic, task], [], [], [], "digest");
+        var artifact = new AgentCoordinationArtifact("video-game.production.technical-delivery-proposal.v1",
+            "1.0", "cycle", 1, true, JsonSerializer.SerializeToElement(proposal), "digest");
+        var session = new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty,
+            self, target, "Plan", "Plan", [], "Completed", 2, 2, null, false, null,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Completed", "Proposal", DateTimeOffset.UtcNow, artifact)])
+        {
+            SourceKind = "Board"
+        };
+        Assert.Equal(expected, SpecialistAgent.NeedsTechnicalHierarchyRecovery(session));
     }
 
     private static AgentTeammate Member(string role) => new(Guid.NewGuid().ToString(), role, "Agent", role, role, "Peer", "Online") {

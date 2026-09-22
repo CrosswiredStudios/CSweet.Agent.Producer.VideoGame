@@ -91,7 +91,7 @@ public sealed partial class SpecialistAgent
                 group.SelectMany(x => x.RequiredCapabilityKeys).Append("work.execution.run.v1").Distinct().ToList(),
                 false, producerId, null)
             {
-                TeamId = Guid.Parse(roster.TeamId), RoleCategoryKey = group.Key,
+                TeamId = Guid.Parse(roster.TeamId), RoleCategoryKey = RoleTaxonomy.CoreRoleKey(group.Key),
                 PreferredSpecializationKeys = group.SelectMany(x => x.RequiredSpecializationKeys.Concat(x.PreferredSpecializationKeys)).Distinct().ToList()
             });
             proposed = true;

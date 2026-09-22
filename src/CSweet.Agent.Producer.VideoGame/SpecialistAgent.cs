@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.8.1";
+    public override string Version => "2.8.3";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -154,9 +154,18 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             return await ReconcileSprintReadinessAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(StaffingGapCommitmentPrefix, StringComparison.Ordinal) == true)
         {
-            if (item.WorkContext?.BoardId is not { } gapBoard || item.WorkContext.WorkItemId is not { } gapItem)
+            if (item.WorkContext?.WorkItemId is not { } gapItem)
                 return PersonalTodoResult.Blocked("Staffing follow-up requires an authoritative ticket.");
-            var ticket = (await context.Platform.Work.ReadBoardAsync(gapBoard, cancellationToken)).Items.Single(x => x.Id == gapItem);
+            var gapBoard = item.WorkContext.BoardId;
+            if (gapBoard is null && item.WorkContext.WorkstreamId is { } gapWorkstream)
+                gapBoard = (await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken))
+                    .SingleOrDefault(x => x.WorkstreamId == gapWorkstream && !x.IsArchived)?.Id;
+            if (gapBoard is null)
+                return PersonalTodoResult.Blocked("Staffing follow-up requires the authoritative project board.");
+            var ticket = (await context.Platform.Work.ReadBoardAsync(gapBoard.Value, cancellationToken)).Items
+                .SingleOrDefault(x => x.Id == gapItem);
+            if (ticket is null)
+                return PersonalTodoResult.Blocked("The authoritative staffing-gap ticket no longer exists on the project board.");
             return HasStaffedExecution(ticket) && MissingDelegations(ticket).Count == 0 ? PersonalTodoResult.Completed("The existing ticket now has an eligible owner.")
                 : PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "Waiting for the approved delivery coverage.");
         }
@@ -372,7 +381,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             return;
         }
         if (message.EventType is "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
-            "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1")
+            "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1" or
+            WorkstreamEventNames.DecisionDecidedV1)
         {
             await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt, message.OccurredAt.AddMinutes(5), message.EventType), context, cancellationToken);
             return;
@@ -521,6 +531,9 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         }
 
         var boardId = source.BoardId ?? (await EnsureProductionBoardAsync(workstream, teamId, context, cancellationToken)).Id;
+        // Initial commitments may predate board creation. Carry the resolved board into
+        // every downstream staffing, estimation, and sprint-readiness commitment.
+        source = source with { BoardId = boardId };
         await EnsureDraftSprintAsync(boardId, handoff.RevisionDigest, context, cancellationToken);
         operatingState.PlanningCycles.TryGetValue(workstreamId, out var priorCycle);
         ArtifactPackage package;
@@ -551,14 +564,17 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             workstream.ProfileDefinitionDigest ?? string.Empty, package.Id, package.Version, packageDigest,
             workstream.LifecycleStage, TargetMilestone(workstream.LifecycleStage), source.SourceFingerprint);
 
+        var managerDirections = ResolvedPlanningDirections(
+            await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: workstreamId), cancellationToken),
+            workstreamId, handoff.RevisionDigest);
         var technicalSession = await EnsurePlanningSessionAsync(technicalDirector, boardId, cycle,
             "Technical delivery and decomposition proposal",
             "Decompose the accepted brief into a lean complete backlog, including containers, technical discovery, implementation, QA and packaging. Justify specialist roles with actual work; do not require a full studio roster.",
-            "video-game.production.technical-delivery-proposal.v1", memberDigests, context, cancellationToken);
+            "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken);
         var designerSession = designer is null ? technicalSession : await EnsurePlanningSessionAsync(designer, boardId, cycle,
             "Player-outcome and game-design backlog proposal",
             "Define player outcomes and testable acceptance criteria within the accepted brief. Coordinate technical feasibility separately.",
-            "video-game.production.designer-backlog-proposal.v1", memberDigests, context, cancellationToken);
+            "video-game.production.designer-backlog-proposal.v1", memberDigests, managerDirections, context, cancellationToken);
         priorCycle = (priorCycle ?? new ProducerPlanningCycleState(workstreamId, boardId, teamId,
             source.SourceFingerprint, package.Id, null, null, null, null, null, DateTimeOffset.UtcNow)) with
         {
@@ -630,12 +646,16 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             unassigned.SelectMany(MissingDelegations).ToList(), context, cancellationToken);
         await EnsureDraftSprintAsync(boardId, reconciledDigest, context, cancellationToken);
         await PopulateDraftScopeAsync(boardId, context, cancellationToken);
-        if (questions.Count == 0 && currentBoard.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable && HasStaffedExecution(x)))
+        if (currentBoard.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
+                HasStaffedExecution(x) && (questions.Count == 0 ||
+                    x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike)))
         {
             _ = await EnsureCommitmentAsync(
                 $"{EstimationCommitmentPrefix}{boardId:N}:{reconciledDigest}:1",
                 "Collect estimates and QA sprint-readiness evidence",
-                "Collect role-owned estimates and capacity for the reconciled executable scope, obtain QA readiness evidence, pull eligible leaves to Ready, and create the bounded planned sprint.",
+                questions.Count == 0
+                    ? "Collect role-owned estimates and capacity for the reconciled executable scope, obtain QA readiness evidence, pull eligible leaves to Ready, and create the bounded planned sprint."
+                    : "Collect estimates and QA readiness only for research spikes that produce evidence for pending authority decisions. Keep decision-dependent implementation out of the sprint.",
                 "Urgent",
                 source with { SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
@@ -663,13 +683,15 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
         var planningState = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), cancellationToken);
         if (planningState?.Payload.PlanningCycles.TryGetValue(workstreamId, out var currentCycle) != true ||
-            currentCycle is null || currentCycle.ReconciledDigest != source.SourceFingerprint || currentCycle.OutstandingAuthorityQuestions.Count > 0)
-            return PersonalTodoResult.Blocked("The candidate planning evidence changed or has unresolved authority questions.");
+            currentCycle is null || currentCycle.ReconciledDigest != source.SourceFingerprint)
+            return PersonalTodoResult.Blocked("The candidate planning evidence changed.");
+        var discoveryOnly = currentCycle.OutstandingAuthorityQuestions.Count > 0;
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var plannedSprints = (await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken)).Where(x => x.Status == "Planned").Select(x => x.Id).ToHashSet();
         var candidates = board.Items.Where(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                (x.SprintId is null || plannedSprints.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null)
+                (x.SprintId is null || plannedSprints.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null &&
+                (!discoveryOnly || x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike))
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
         if (candidates.Count == 0)
             return PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope.");
@@ -861,7 +883,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private static AgentTeammate? SelectRoleMember(AgentTeamContext roster, string roleKey) =>
         roster.Members.Where(x => x.IsAvailable && x.AgentInstallationId.HasValue &&
                 string.Equals(x.RuntimeEligibility, "Eligible", StringComparison.OrdinalIgnoreCase) &&
-                x.DeclaredRoleKeys.Contains(roleKey, StringComparer.Ordinal))
+                RoleTaxonomy.SatisfiesRole(x.DeclaredRoleKeys, roleKey))
             .OrderBy(x => x.AgentInstallationId).FirstOrDefault();
 
     private static async Task<AgentCoordinationSession> EnsurePlanningSessionAsync(
@@ -872,18 +894,26 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         string objective,
         string expectedArtifactType,
         IReadOnlyList<ArtifactPackageMemberDigest> members,
+        IReadOnlyList<string> managerDirections,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
         if (!Guid.TryParse(teammate.EmployeeId, out var targetUserId))
             throw new InvalidOperationException($"{subject} target has no authoritative organization-user identity.");
         var message = $"Planning cycle {cycle.PlanningFingerprint}. {objective} Return final artifact type {expectedArtifactType}.";
+        if (managerDirections.Count > 0)
+            message += " Incorporate these recorded Creative Director decisions into the proposal and close only the questions they resolve: " +
+                string.Join(" ", managerDirections);
+        var sessionKey = managerDirections.Count == 0
+            ? $"producer-planning-session:{cycle.PlanningFingerprint}:{targetUserId:N}"
+            : $"producer-planning-session:direction:{ProducerPolicyFingerprint.Digest(
+                JsonSerializer.Serialize(new { cycle.PlanningFingerprint, targetUserId, managerDirections }))}";
         // The board coordination request carries this message durably to the
         // specialist. A parallel direct chat turn can block the same agent.
         var start = new StartBoardCoordinationRequest(targetUserId, boardId, subject, objective,
                 ["Proposal binds the exact planning cycle.", "Every leaf has testable acceptance criteria and one accountable role.",
                     "Required and preferred skills are explicit; estimates are not invented."],
-                message, $"producer-planning-session:{cycle.PlanningFingerprint}:{targetUserId:N}",
+                message, sessionKey,
                 PlanningArtifact(cycle, members));
         var session = await context.Platform.Communication.StartBoardCoordinationAsync(start, cancellationToken);
         if (NeedsPlanningContextRecovery(session))
@@ -901,6 +931,20 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     IdempotencyKey = start.IdempotencyKey + ":hierarchy-v1",
                     InitialMessage = message + " Correct the previous proposal: every feature must name a milestone parent included in this proposal. Preserve the accepted scope."
                 }, cancellationToken);
+        if (NeedsTechnicalHierarchyRecovery(session))
+        {
+            var prior = session.Turns.Last(x => x.Artifact?.Type == expectedArtifactType).Artifact!
+                .Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
+            var retained = string.Join("; ", prior.DeliveryItems.Select(x =>
+                $"{x.ProposalKey} ({x.WorkItemTypeKey}: {x.Title})"));
+            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+                start with {
+                    IdempotencyKey = start.IdempotencyKey + ":hierarchy-v1",
+                    InitialMessage = message + " Correct the previous proposal into an Epic > Story > Task hierarchy. " +
+                        "Keep these existing proposal keys and work types so published tickets can be reparented without duplication: " +
+                        retained + ". Add testable Story containers under Epics, then parent every Task and spike under a Story."
+                }, cancellationToken);
+        }
         return session;
     }
 
@@ -1109,6 +1153,51 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 byKey[proposal.ProposalKey] = item;
                 remaining.Remove(proposal);
             }
+        }
+        // A corrected specialist proposal may add Story containers after its old
+        // tasks were already published. Reparent matching tickets in place.
+        foreach (var proposal in proposals)
+        {
+            var existing = byKey[proposal.ProposalKey];
+            var parentId = proposal.ParentProposalKey is null ? (Guid?)null : byKey[proposal.ParentProposalKey].Id;
+            if (existing.Planning is null || existing.Status is "Done" or "Completed" or "InProgress") continue;
+            var sourceIsTechnical = technical.DeliveryItems.Any(x => x.ProposalKey == proposal.ProposalKey);
+            var sourceSession = sourceIsTechnical ? technicalSession : designerSession;
+            var sourceArtifact = sourceIsTechnical ? technicalArtifact : designerArtifact;
+            if (existing.ParentItemId == parentId &&
+                (!sourceIsTechnical || existing.ProposalProvenance?.ArtifactDigest == sourceArtifact.Digest)) continue;
+            var planning = existing.Planning;
+            if (sourceIsTechnical && proposal.WorkItemTypeKey is VideoGameWorkItemTypeKeys.Task or
+                VideoGameWorkItemTypeKeys.Bug or VideoGameWorkItemTypeKeys.ResearchSpike or
+                VideoGameWorkItemTypeKeys.CreativeReview)
+            {
+                var recommendations = planning.DelegationRecommendations
+                    .Where(x => x.StageKey != "specialist-execution").ToList();
+                recommendations.Add(new WorkTechnicalDelegationRecommendation("specialist-execution",
+                    proposal.AccountableRoleKey,
+                    proposal.RequiredCapabilityKeys.Append("work.execution.run.v1").Distinct().ToList(),
+                    null, true, "Corrected Technical Director proposal.")
+                {
+                    RequiredSpecializationKeys = proposal.RequiredSpecializationKeys,
+                    PreferredSpecializationKeys = proposal.PreferredSpecializationKeys
+                });
+                planning = planning with
+                {
+                    DelegationRecommendations = recommendations,
+                    ArchitectureArtifactDigest = technicalArtifact.Digest
+                };
+            }
+            var revised = await context.Platform.Work.RevisePlanningAsync(new ReviseWorkItemPlanningRequest(
+                boardId, existing.Id, existing.Title, existing.Description, parentId, planning,
+                existing.Revision, existing.PlanningRevision,
+                $"producer-hierarchy:{cycle.PlanningFingerprint}:{sourceArtifact.Digest}:{proposal.ProposalKey}")
+            {
+                ProposalProvenance = new WorkItemProposalProvenance(sourceSession.Id, sourceArtifact.Digest,
+                    proposal.ProposalKey),
+                AccountableOrganizationUserId = existing.AccountableOrganizationUserId,
+                StageAssignments = existing.StageAssignments
+            }, cancellationToken);
+            byKey[proposal.ProposalKey] = revised;
         }
         return proposals.Count;
     }

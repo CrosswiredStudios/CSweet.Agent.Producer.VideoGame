@@ -18,7 +18,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.8.1",
+  "version": "2.8.3",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -453,7 +453,8 @@
       "com.csweet.workforce.changed.v1",
       "com.csweet.hiring-recommendation.fulfilled.v1",
       "com.csweet.workstream.changed.v2",
-      "com.csweet.work.item.changed.v1"
+      "com.csweet.work.item.changed.v1",
+      "com.csweet.decision.decided.v1"
     ]
   },
   "configuration": [

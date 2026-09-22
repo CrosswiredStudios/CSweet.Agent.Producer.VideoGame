@@ -50,6 +50,8 @@ public sealed class PitchRefinementTests
         await new SpecialistAgent().HandlePersonalTodoAsync(task, fixture.Context, default);
         var staffing = Assert.Single(fixture.StaffingProposals);
         Assert.Equal(["game-technical-director", "game-engineer", "game-quality-assurance"], staffing.Roles.Select(x => x.RoleKey));
+        Assert.Equal("software-developer", staffing.Roles.Single(x => x.RoleKey == "game-engineer").RoleCategoryKey);
+        Assert.Equal("software-qa", staffing.Roles.Single(x => x.RoleKey == "game-quality-assurance").RoleCategoryKey);
         Assert.Equal(0, fixture.MessageSends);
         Assert.Equal(task.WorkContext.WorkstreamId, staffing.WorkstreamId);
         Assert.Contains(staffing.Evidence, x => x.SourceRevision == ready.RevisionSha256);

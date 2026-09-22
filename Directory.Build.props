@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <CSweetAgentSdkRepositoryRoot Condition="'$(CSweetAgentSdkRepositoryRoot)' == '' and Exists('$(MSBuildThisFileDirectory)..\\CSweet.Agent.Sdk\\src\\CSweet.Agent.SDK\\CSweet.Agent.SDK.csproj')">$(MSBuildThisFileDirectory)..\\CSweet.Agent.Sdk</CSweetAgentSdkRepositoryRoot>
     <CSweetAgentSdkRepositoryRoot Condition="'$(CSweetAgentSdkRepositoryRoot)' == ''">$(MSBuildThisFileDirectory)..\\CSweetAgentSdk</CSweetAgentSdkRepositoryRoot>
     <UseLocalCSweetAgentSdk Condition="'$(UseLocalCSweetAgentSdk)' == '' and Exists('$(CSweetAgentSdkRepositoryRoot)\\src\\CSweet.Agent.SDK\\CSweet.Agent.SDK.csproj')">true</UseLocalCSweetAgentSdk>
     <UseLocalCSweetAgentSdk Condition="'$(UseLocalCSweetAgentSdk)' == ''">false</UseLocalCSweetAgentSdk>
