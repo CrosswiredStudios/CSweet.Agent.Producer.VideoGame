@@ -595,7 +595,9 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
 
         if (designerSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled ||
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
-            return PersonalTodoResult.Blocked($"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Creative Director authority.");
+            return PersonalTodoResult.Blocked(IsTechnicalPlanningGenerationBlock(technicalSession)
+                ? $"{PlanningRecoveryMarker}: Technical Director planning output was invalid after bounded model correction. Review the specialist diagnostic and repair the generator before retrying."
+                : $"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Creative Director authority.");
         if (designerSession.Status != AgentCoordinationStatuses.Completed ||
             technicalSession.Status != AgentCoordinationStatuses.Completed)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),

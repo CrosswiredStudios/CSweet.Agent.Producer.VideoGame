@@ -83,6 +83,7 @@ public sealed class PlanningReplyTests
     [InlineData("context-present", false)]
     [InlineData("format", false)]
     [InlineData("compact", false)]
+    [InlineData("compact3", false)]
     public void ContextRecoveryOnlyReplacesTheKnownLegacyFailure(string scenario, bool expected)
     {
         var self = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Producer", "Producer");
@@ -91,6 +92,7 @@ public sealed class PlanningReplyTests
             self, target, "Planning", "Delivery", [], scenario == "active" ? "Active" : "Blocked", 3, 3, null, false, null,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Blocked", scenario == "compact" ? "Technical planning could not produce a valid proposal after two attempts. JSON does not match the requested contract at $.deliveryItems[32]." :
+                scenario == "compact3" ? "Technical planning could not produce a valid proposal after three attempts. JSON does not match the requested contract." :
                 scenario == "format" ? "Technical planning returned invalid JSON; revise the proposal." : scenario == "semantic" ? "Need an engine decision" :
                 "Planning requires the exact workstream and planning fingerprint.", DateTimeOffset.UtcNow)])
             { SourceKind = "Board", WorkContext = scenario == "context-present" ?
@@ -98,6 +100,7 @@ public sealed class PlanningReplyTests
         Assert.Equal(expected, SpecialistAgent.NeedsPlanningContextRecovery(session));
         Assert.Equal(scenario == "format", SpecialistAgent.NeedsPlanningFormatRecovery(session));
         Assert.Equal(scenario == "compact", SpecialistAgent.NeedsCompactPlanningRecovery(session));
+        Assert.Equal(scenario is "compact" or "compact3", SpecialistAgent.IsTechnicalPlanningGenerationBlock(session));
     }
 
     [Fact]
