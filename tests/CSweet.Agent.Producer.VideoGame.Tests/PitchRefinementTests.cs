@@ -83,6 +83,16 @@ public sealed class PitchRefinementTests
     [Fact]
     public void ReadyFlagWithUnansweredQuestionsIsInsufficient() => Assert.False(PitchProtocol.CanPlan(new(true, ["Unknown scope"], "Ready", Markdown)));
 
+    [Fact]
+    public void PitchReviewReadsOneCompleteJsonObjectAndRejectsIncompleteJson()
+    {
+        var review = new ProducerReview(false, ["Who owns the audio assets?"], "Audio ownership affects scope.", Markdown);
+        var json = JsonSerializer.Serialize(review, PitchProtocol.Json);
+        Assert.Equal(review.Questions, PitchProtocol.ParseProducerReview(json + "\n<reasoning>extra</reasoning>")!.Questions);
+        Assert.Equal(review.Questions, PitchProtocol.ParseProducerReview("```json\n" + json + "\n```")!.Questions);
+        Assert.ThrowsAny<JsonException>(() => PitchProtocol.ParseProducerReview(json[..^1]));
+    }
+
     private sealed class Fixture
     {
         public Guid Producer { get; } = Guid.NewGuid(); public Guid Director { get; } = Guid.NewGuid();

@@ -63,7 +63,7 @@ public sealed partial class SpecialistAgent
                     """),
                 new ChatMessage(ChatRole.User, $"Accepted pitch:\n{pitch.Revision.Content}\nAccepted GDD:\n{gdd.Revision.Content}\nCurrent shared draft:\n{priorContent}\nConversation:\n{JsonSerializer.Serialize(request.Transcript, PitchProtocol.Json)}")
             ], ResponseOptions(), token);
-            var result = JsonSerializer.Deserialize<ProducerReview>(response.Text, PitchProtocol.Json);
+            var result = PitchProtocol.ParseProducerReview(response.Text);
             if (result is null || result.Questions is null || result.Questions.Count > 12 ||
                 result.Questions.Any(string.IsNullOrWhiteSpace) || string.IsNullOrWhiteSpace(result.Rationale) ||
                 !PitchProtocol.ValidDocument(result.DraftMarkdown) || result.DraftMarkdown.Length > 48000 || result.Ready && !PitchProtocol.CanPlan(result) ||

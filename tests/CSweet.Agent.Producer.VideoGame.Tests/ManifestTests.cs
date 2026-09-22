@@ -57,10 +57,10 @@ public sealed class ManifestTests
     {
         Assert.Equal(32_000, SpecialistAgent.ResolveOutputTokens(new AgentSettings(
             new Dictionary<string, JsonElement>())));
-        Assert.Equal(16_000, SpecialistAgent.ResolveOutputTokens(new AgentSettings(
+        Assert.Equal(128_000, SpecialistAgent.ResolveOutputTokens(new AgentSettings(
             new Dictionary<string, JsonElement>
             {
-                ["maxOutputTokens"] = JsonSerializer.SerializeToElement(16_000)
+                ["maxOutputTokens"] = JsonSerializer.SerializeToElement(128_000)
             })));
         Assert.Equal(24_999, SpecialistAgent.ResolveOutputTokens(new AgentSettings(
             new Dictionary<string, JsonElement>

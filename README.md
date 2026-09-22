@@ -25,7 +25,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.8.3`
+- Version: `2.8.4`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -46,8 +46,9 @@ The installation settings **Maximum context-window tokens** (`maxContextWindowTo
 220,000) and **Maximum output tokens** (`maxOutputTokens`, default 32,000) configure the Producer's
 planning ceiling and per-response output budget for pitch refinement, delivery review, and
 specialist work. The output budget includes model reasoning and must remain below the context
-ceiling. These settings do not enlarge the selected model's actual context window or override a
-lower provider output limit.
+ceiling. The agent imposes no fixed maximum, so both values can match the selected model. These
+settings do not enlarge the model's actual context window or override the provider profile's
+authoritative execution ceiling.
 
 ## Install
 
