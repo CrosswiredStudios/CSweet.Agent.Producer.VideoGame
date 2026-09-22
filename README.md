@@ -25,7 +25,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.8.0`
+- Version: `2.8.1`
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
 - Requested platform/provider capabilities: typed planning, work management, governed staffing, communication, artifacts and brokered model access (see manifest).
@@ -63,8 +63,9 @@ Game-specific payload helpers and decision logic live in the bundled `extensions
 
 ## Progressive delivery (2.3.5)
 
-The Producer drafts a sprint before implementation staffing is complete, proposes a technical lead when
-needed, and requests further roles only for uncovered backlog responsibilities. Approved unfulfilled slots
+The Producer proposes a baseline Technical Director, game engineer, and QA specialist from the
+exact accepted brief before detailed decomposition. It drafts a sprint while hiring is incomplete and
+requests further roles only for uncovered backlog responsibilities. Approved unfulfilled slots
 are not proposed again. Drafts have provisional dates, at most eight tentative tickets, and no committed capacity. Tickets can be unassigned; missing coverage stays visible.
 The technical plan is bound to the accepted brief; a roster change rebinds existing unassigned tickets
 instead of regenerating the backlog. Missing roles and their transitive dependencies remain in Backlog;

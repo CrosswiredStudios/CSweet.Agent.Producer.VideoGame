@@ -49,7 +49,8 @@ public sealed class PitchRefinementTests
         // No board, sprint or metrics capabilities are registered. Initial hiring must not require them.
         await new SpecialistAgent().HandlePersonalTodoAsync(task, fixture.Context, default);
         var staffing = Assert.Single(fixture.StaffingProposals);
-        Assert.Equal("game-technical-director", Assert.Single(staffing.Roles).RoleKey);
+        Assert.Equal(["game-technical-director", "game-engineer", "game-quality-assurance"], staffing.Roles.Select(x => x.RoleKey));
+        Assert.Equal(0, fixture.MessageSends);
         Assert.Equal(task.WorkContext.WorkstreamId, staffing.WorkstreamId);
         Assert.Contains(staffing.Evidence, x => x.SourceRevision == ready.RevisionSha256);
         fixture.HireTechnicalDirector();
@@ -89,7 +90,7 @@ public sealed class PitchRefinementTests
         private Dictionary<Guid, ArtifactDocument> Documents { get; } = [];
         public Dictionary<string, AgentOperatingStateResponse> States { get; } = [];
         public AgentRuntimeContext Context { get; }
-        public int Creates, Revises, Submits, PackageCreates;
+        public int Creates, Revises, Submits, PackageCreates, MessageSends;
         public List<PersonalTodoItem> Todos { get; } = [];
         public List<ResourceChangeProposalRequest> StaffingProposals { get; } = [];
         private Guid? Board => null;
@@ -142,7 +143,10 @@ public sealed class PitchRefinementTests
                 .RegisterCapability<JsonElement, JsonElement>("communication.chat.create.v1",
                     (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { succeeded = true, chat = new { id = Guid.NewGuid(), participants = new[] { new { organizationUserId = Director, employeeType = "Agent", displayName = "Director", role = "Member" } } } })))
                 .RegisterCapability<JsonElement, JsonElement>("communication.message.send.v1",
-                    (request, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { id = Guid.NewGuid(), chatId = request.GetProperty("chatId").GetGuid(), chatTurnId = Guid.NewGuid() })))
+                    (request, _) => {
+                        MessageSends++;
+                        return Task.FromResult(JsonSerializer.SerializeToElement(new { id = Guid.NewGuid(), chatId = request.GetProperty("chatId").GetGuid(), chatTurnId = Guid.NewGuid() }));
+                    })
                 .RegisterCapability<ReadWorkstreamRequest, WorkstreamDetail>(WorkstreamCapabilityNames.ReadV1,
                     (request, _) => Task.FromResult(new WorkstreamDetail(Workstream, "Game", "Ship the accepted game", [], "concept", "Active",
                         Producer, null, null, null, "video-game-production.v2", 4, null, "profile-digest", 1)))

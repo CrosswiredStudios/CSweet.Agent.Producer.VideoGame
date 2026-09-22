@@ -6,6 +6,22 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class AdaptiveDeliveryTests
 {
     [Fact]
+    public void Initial_delivery_proposal_covers_technical_direction_implementation_and_qa()
+    {
+        var requirements = SpecialistAgent.InitialDeliveryRequirements();
+        Assert.Equal(
+            ["game-technical-director", "game-engineer", "game-quality-assurance"],
+            requirements.Select(x => x.RequiredRoleKey));
+        Assert.Equal(requirements.Count, requirements.Select(x => x.StageKey).Distinct().Count());
+        Assert.All(requirements, requirement =>
+        {
+            Assert.True(requirement.SpecialistRequired);
+            Assert.Contains("work.execution.run.v1", requirement.RequiredCapabilityKeys);
+            Assert.False(string.IsNullOrWhiteSpace(requirement.Rationale));
+        });
+    }
+
+    [Fact]
     public async Task AttentionReviewUsesDurableHandoffWithoutSupervisionAssignment()
     {
         var stream = Guid.NewGuid();

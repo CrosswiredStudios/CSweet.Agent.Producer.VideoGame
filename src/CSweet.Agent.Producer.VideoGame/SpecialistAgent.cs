@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.8.0";
+    public override string Version => "2.8.1";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -515,9 +515,9 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         if (technicalDirector is null)
         {
             await ProposeCoverageAsync(workstreamId, source.BoardId, roster,
-                [TechnicalLeadershipRequirement()], context, cancellationToken, handoff.RevisionDigest);
+                InitialDeliveryRequirements(), context, cancellationToken, handoff.RevisionDigest);
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                "The hiring proposal is awaiting a Technical Director. Team-board planning starts after that hire.");
+                "The initial Technical Director, engineering, and QA coverage proposal is awaiting hiring. Team-board planning starts after technical leadership is hired.");
         }
 
         var boardId = source.BoardId ?? (await EnsureProductionBoardAsync(workstream, teamId, context, cancellationToken)).Id;
@@ -878,8 +878,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         if (!Guid.TryParse(teammate.EmployeeId, out var targetUserId))
             throw new InvalidOperationException($"{subject} target has no authoritative organization-user identity.");
         var message = $"Planning cycle {cycle.PlanningFingerprint}. {objective} Return final artifact type {expectedArtifactType}.";
-        _ = await context.Platform.Communication.SendDirectAgentMessageAsync(targetUserId, message,
-            $"producer-planning-kickoff:{cycle.PlanningFingerprint}:{targetUserId:N}", cancellationToken);
+        // The board coordination request carries this message durably to the
+        // specialist. A parallel direct chat turn can block the same agent.
         var start = new StartBoardCoordinationRequest(targetUserId, boardId, subject, objective,
                 ["Proposal binds the exact planning cycle.", "Every leaf has testable acceptance criteria and one accountable role.",
                     "Required and preferred skills are explicit; estimates are not invented."],

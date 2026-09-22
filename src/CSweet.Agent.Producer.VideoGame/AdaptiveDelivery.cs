@@ -25,10 +25,17 @@ public sealed partial class SpecialistAgent
         return board;
     }
 
-    private static WorkTechnicalDelegationRecommendation TechnicalLeadershipRequirement() =>
-        new("specialist-execution", VideoGameRoleKeys.TechnicalDirector, ["work.execution.run.v1"], null, true,
-            "Assess the accepted brief, identify technical risks, and decompose deliverable work before implementation hiring.")
-        { PreferredSpecializationKeys = [VideoGameSpecializationKeys.Development] };
+    internal static IReadOnlyList<WorkTechnicalDelegationRecommendation> InitialDeliveryRequirements() =>
+    [
+        new("technical-direction", VideoGameRoleKeys.TechnicalDirector, ["work.execution.run.v1"], null, true,
+            "Assess the accepted brief, own technical feasibility, and decompose deliverable work.")
+        { PreferredSpecializationKeys = [VideoGameSpecializationKeys.Development] },
+        new("specialist-execution", VideoGameRoleKeys.Engineer, ["work.execution.run.v1"], null, true,
+            "Implement the game and its testable increments from the accepted production brief.")
+        { PreferredSpecializationKeys = [VideoGameSpecializationKeys.Development] },
+        new("quality", VideoGameRoleKeys.QualityAssurance, ["work.execution.run.v1"], null, true,
+            "Verify playable increments against acceptance criteria and protect release quality.")
+    ];
 
     internal static async Task EnsureDraftSprintAsync(Guid boardId, string digest, AgentRuntimeContext context, CancellationToken token)
     {
@@ -96,11 +103,12 @@ public sealed partial class SpecialistAgent
             : acceptedBriefDigest ?? throw new InvalidOperationException("Initial staffing requires the exact accepted production brief.");
         var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new
             { workstreamId, roster.Revision, roles, evidenceRevision }));
-        var chat = await context.Platform.Communication.SendDirectAgentMessageAsync(directorId,
-            $"I propose delivery coverage for {string.Join(", ", missing.Select(x => x.Key))} on workstream {workstreamId:D}. " +
-            "The proposal is based on the accepted brief. Team-board planning begins when technical leadership is hired.",
-            $"producer-coverage-chat:{fingerprint}", token);
-        var proposal = new ResourceChangeProposalRequest(chat.ChatId, Guid.Empty,
+        // The resource-change request publishes a durable event to the Director.
+        // Only its authorized manager conversation is needed here; sending a
+        // separate agent chat turn can conflict with an active Director turn.
+        var chat = await context.Platform.Communication.CreateChatAsync(
+            new CreateCommunicationChat(null, "Private direct conversation.", true, true, [directorId]), token);
+        var proposal = new ResourceChangeProposalRequest(chat.Id, Guid.Empty,
             "Deliver the accepted game scope with the smallest team that covers its work.",
             "Add one installation per uncovered capability. Retain the approved team; do not pre-hire unused disciplines.",
             roster.Revision, roles, ["Initial coverage is based on accepted scope, not historical velocity."],

@@ -26,21 +26,17 @@ public sealed partial class SpecialistAgent
                     planningPackageId = handoff.PlanningPackageId, planningPackageVersion = handoff.PlanningPackageVersion }))
             ).ToArray();
 
-    private static async Task EnsurePlanningDecisionsAsync(Guid workstreamId, Guid boardId,
+    internal static async Task EnsurePlanningDecisionsAsync(Guid workstreamId, Guid boardId,
         string fingerprint, IReadOnlyList<string> questions, ProducerAcceptedHandoff handoff,
         AgentRuntimeContext context, CancellationToken token)
     {
         foreach (var request in PlanningDecisionRequests(workstreamId, boardId, fingerprint, questions, handoff))
         {
-            var decision = await context.Platform.RequestDecisionAsync(request, token);
-            if (decision.Status != DecisionStatuses.Pending ||
-                !Guid.TryParse(context.Identity?.ManagerEmployeeId, out var manager)) continue;
-            await context.Platform.Communication.SendDirectMessageAsync(manager,
-                $"Planning decision {decision.Id:D} requires authoritative direction: {decision.Summary}. " +
-                $"Review it in the Workstream decisions for {workstreamId:D}. Update the accepted brief with the resolution before committing affected scope.",
-                $"producer-decision-notice:{decision.Id:N}",
-                new AgentWorkContext(Guid.Parse(context.BusinessId), workstreamId, null, boardId,
-                    null, null, null, decision.Id, null, null), token);
+            // RequestDecisionAsync persists the decision and its event atomically. The
+            // Creative Director receives DecisionRequestedV1 and the owner receives the
+            // authoritative review card; a second direct chat turn can conflict with
+            // an active conversation and must not block backlog publication.
+            _ = await context.Platform.RequestDecisionAsync(request, token);
         }
     }
 }

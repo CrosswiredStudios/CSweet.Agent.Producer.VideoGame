@@ -1,3 +1,4 @@
+using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
@@ -37,6 +38,31 @@ public sealed class PlanningDecisionTests
         }
         var revised = SpecialistAgent.PlanningDecisionRequests(stream, board, "new-cycle", ["Choose browser targets"], handoff);
         Assert.DoesNotContain(revised[0].IdempotencyKey, first.Select(x => x.IdempotencyKey));
+    }
+
+    [Fact]
+    public async Task Planning_decisions_progress_without_a_second_direct_chat_turn()
+    {
+        var workstream = Guid.NewGuid();
+        var board = Guid.NewGuid();
+        var handoff = new ProducerAcceptedHandoff(workstream, Guid.NewGuid(), Guid.NewGuid(), "accepted-sha",
+            "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
+        var requested = new List<DecisionRequest>();
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<DecisionRequest, DecisionRecord>(PlatformCapabilities.DecisionRequest,
+                (request, _) =>
+                {
+                    requested.Add(request);
+                    var now = DateTimeOffset.UtcNow;
+                    return Task.FromResult(new DecisionRecord(Guid.NewGuid(), workstream, request.TypeKey,
+                        request.Summary, request.AuthorityRuleKey, request.Options,
+                        request.RecommendedOptionId, null, DecisionStatuses.Pending, null,
+                        request.Evidence, null, null, null, 1, now, now));
+                });
+        await SpecialistAgent.EnsurePlanningDecisionsAsync(workstream, board, "cycle",
+            ["Choose browser targets", "Choose browser targets", "Set QA thresholds"], handoff,
+            runtime.CreateContext(), default);
+        Assert.Equal(2, requested.Count);
     }
 
     [Fact]
