@@ -179,6 +179,8 @@ public abstract class VideoGameSpecialistAgentBase : CSweetAgentBase
         .LlmModel("llmModel", "Model", "llmProviderId", required: true,
             description: "Model used for grounded specialist work.");
 
+    protected virtual ChatOptions? ResponseOptions() => null;
+
     public override Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(
         AgentCoordinationTurnRequest request,
         AgentRuntimeContext context,
@@ -416,7 +418,7 @@ public abstract class VideoGameSpecialistAgentBase : CSweetAgentBase
             var response = await context.Platform.Calendar.GetResponseAsync(client, [
                 new ChatMessage(ChatRole.System, $"{RolePrompt}\nYou own only {RoleKey} accountability. Produce concrete, testable Markdown with explicit decisions, dependencies, acceptance evidence, and no placeholders. Do not absorb another specialist's accountability."),
                 new ChatMessage(ChatRole.User, $"Authoritative stage instructions:\n{assignment.Instructions}\n\nRequirements:\n{JsonSerializer.Serialize(canonicalInput.Planning.Requirements)}\n\nAcceptance criteria:\n{JsonSerializer.Serialize(canonicalInput.Planning.AcceptanceCriteria)}\n\nExact approved package {package.PackageId:D} v{package.Version} ({package.Sha256}):\n{JsonSerializer.Serialize(grounding)}\n\nPrior outcomes:\n{JsonSerializer.Serialize(assignment.PriorOutcomes)}\n\nExisting evidence:\n{JsonSerializer.Serialize(assignment.Evidence)}")
-            ], cancellationToken: cancellationToken);
+            ], ResponseOptions(), cancellationToken);
             var markdown = response.Text ?? string.Empty;
             SubstantiveOutputValidator.RequireSubstantiveMarkdown(markdown, RequiredSections.ToArray());
             var itemTypeKey = assignment.Item.TryGetProperty("typeKey", out var typeKeyElement)

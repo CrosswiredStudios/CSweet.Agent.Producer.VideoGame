@@ -55,7 +55,7 @@ public sealed partial class SpecialistAgent
                     with evidence and no unresolved findings. Rejection requires actionable findings.
                     """),
                 new ChatMessage(ChatRole.User, JsonSerializer.Serialize(input, AcceptanceJson))
-            ], cancellationToken: ct);
+            ], ResponseOptions(), ct);
             return JsonSerializer.Deserialize<DeliveryAcceptanceDecision>(response.Text, AcceptanceJson)
                 ?? throw new InvalidOperationException("Producer review returned no decision.");
         }

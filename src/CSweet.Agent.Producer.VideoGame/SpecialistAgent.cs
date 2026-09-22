@@ -2,12 +2,17 @@ using CrosswiredStudios.VideoGame.AgentKit;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 using CrosswiredStudios.VideoGame.Contracts;
+using Microsoft.Extensions.AI;
 using System.Text.Json;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
 {
+    internal const int DefaultContextWindowTokens = 220_000;
+    internal const int DefaultOutputTokens = 32_000;
+    private const int MinimumOutputTokens = 2_048;
+    private const int MaximumOutputTokens = 32_768;
     private const string VisionBriefArtifactType = "creative-direction.game-vision-brief.v1";
     private const string VisionAcknowledgementArtifactType = "video-game.production.game-vision-acknowledgement.v1";
     public override string AgentId => "com.csweet.video-game-producer";
@@ -16,7 +21,30 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.7.1";
+    public override string Version => "2.8.0";
+    protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
+        base.Configure(builder)
+            .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
+                description: "Planning ceiling for Producer model requests; set this no higher than the selected model's real context window.",
+                minimum: 32_769, maximum: 2_000_000, step: 1_000,
+                defaultValue: DefaultContextWindowTokens)
+            .Number("maxOutputTokens", "Maximum output tokens", required: true,
+                description: "Budget for each Producer model response, including reasoning. The provider may impose a lower ceiling.",
+                minimum: MinimumOutputTokens, maximum: MaximumOutputTokens, step: 1_000,
+                defaultValue: DefaultOutputTokens,
+                lessThanFieldKey: "maxContextWindowTokens");
+
+    internal static int ResolveOutputTokens(AgentSettings settings)
+    {
+        var contextWindow = Math.Max(settings.GetInt32("maxContextWindowTokens", DefaultContextWindowTokens),
+            MinimumOutputTokens + 1);
+        var output = Math.Clamp(settings.GetInt32("maxOutputTokens", DefaultOutputTokens),
+            MinimumOutputTokens, MaximumOutputTokens);
+        return Math.Min(output, contextWindow - 1);
+    }
+
+    protected override ChatOptions? ResponseOptions() =>
+        new() { MaxOutputTokens = ResolveOutputTokens(Settings) };
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
     protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";

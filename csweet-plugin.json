@@ -18,7 +18,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.7.1",
+  "version": "2.8.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -471,6 +471,31 @@
       "required": true,
       "secret": false,
       "dependsOnFieldKey": "llmProviderId"
+    },
+    {
+      "key": "maxContextWindowTokens",
+      "type": "number",
+      "label": "Maximum context-window tokens",
+      "required": true,
+      "secret": false,
+      "description": "Planning ceiling for Producer model requests; set this no higher than the selected model's real context window.",
+      "minimum": 32769,
+      "maximum": 2000000,
+      "step": 1000,
+      "defaultValue": 220000
+    },
+    {
+      "key": "maxOutputTokens",
+      "type": "number",
+      "label": "Maximum output tokens",
+      "required": true,
+      "secret": false,
+      "description": "Budget for each Producer model response, including reasoning. The provider may impose a lower ceiling.",
+      "minimum": 2048,
+      "maximum": 32768,
+      "step": 1000,
+      "defaultValue": 32000,
+      "lessThanFieldKey": "maxContextWindowTokens"
     }
   ],
   "credentials": [],
