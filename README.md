@@ -25,7 +25,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.8.5`
+- Version: `2.8.6`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -56,7 +56,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.52.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.53.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds

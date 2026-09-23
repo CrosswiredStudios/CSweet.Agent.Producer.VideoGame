@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.8.5";
+    public override string Version => "2.8.6";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -1092,8 +1092,12 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             throw new InvalidOperationException("Reconciled planning contains unresolved dependency or parent keys.");
 
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
-        var byKey = board.Items.Select(x => (Key: ExtractKey(x.Title), Item: x))
-            .Where(x => x.Key is not null).ToDictionary(x => x.Key!, x => x.Item, StringComparer.Ordinal);
+        var byKey = board.Items.Where(x => x.Status != WorkStatuses.Cancelled)
+            .Select(x => (Key: ProposalKey(x), Item: x))
+            .Where(x => x.Key is not null)
+            .GroupBy(x => x.Key!, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.Item.Revision).First().Item,
+                StringComparer.Ordinal);
         var remaining = proposals.Where(x => !byKey.ContainsKey(x.ProposalKey)).ToList();
         var package = new ArtifactPackageDigest(cycle.ApprovedPackageId, cycle.ApprovedPackageVersion,
             cycle.ApprovedPackageDigest, DateTimeOffset.UtcNow, memberDigests);
@@ -1145,7 +1149,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     boardId, $"[{proposal.ProposalKey}] {proposal.Title}", proposal.Description,
                     KindFor(proposal.WorkItemTypeKey), WorkPriorities.High, null,
                     proposal.ParentProposalKey is null ? null : byKey[proposal.ParentProposalKey].Id,
-                    null, $"producer-ticket:{cycle.PlanningFingerprint}:{proposal.ProposalKey}")
+                    null, $"producer-ticket:{cycle.WorkstreamId:N}:{proposal.ProposalKey}")
                 {
                     TypeKey = proposal.WorkItemTypeKey,
                     AccountableOrganizationUserId = accountable,
@@ -1219,8 +1223,59 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             }, cancellationToken);
             byKey[proposal.ProposalKey] = revised;
         }
+        var reconciledBoard = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        foreach (var stale in SupersededPlanningItems(reconciledBoard.Items, known))
+        {
+            await context.Platform.Work.CancelItemAsync(new TransitionWorkItemRequest(
+                boardId, stale.Id, stale.Revision,
+                $"producer-supersede:{cycle.WorkstreamId:N}:{cycle.PlanningFingerprint}:{stale.Id:N}"),
+                cancellationToken);
+        }
         return proposals.Count;
     }
+
+    internal static IReadOnlyList<WorkItem> SupersededPlanningItems(
+        IReadOnlyList<WorkItem> boardItems,
+        IReadOnlySet<string> currentProposalKeys)
+    {
+        var byId = boardItems.ToDictionary(x => x.Id);
+        var cancellable = boardItems.Where(x =>
+                x.ProposalProvenance is not null &&
+                x.Planning?.ArtifactPackageDigest is not null &&
+                x.SprintId is null &&
+                x.Status is WorkStatuses.Backlog or WorkStatuses.Ready &&
+                ProposalKey(x) is { } key && !currentProposalKeys.Contains(key))
+            .Select(x => x.Id).ToHashSet();
+        var protectedIds = boardItems.Where(x => !cancellable.Contains(x.Id))
+            .Select(x => x.Id).ToHashSet();
+        foreach (var item in boardItems.Where(x => protectedIds.Contains(x.Id)).ToList())
+        {
+            var parentId = item.ParentItemId;
+            while (parentId is { } id && byId.TryGetValue(id, out var parent))
+            {
+                if (!protectedIds.Add(id)) break;
+                parentId = parent.ParentItemId;
+            }
+        }
+
+        int Depth(WorkItem item)
+        {
+            var depth = 0;
+            var parentId = item.ParentItemId;
+            while (parentId is { } id && byId.TryGetValue(id, out var parent))
+            {
+                depth++;
+                parentId = parent.ParentItemId;
+            }
+            return depth;
+        }
+
+        return boardItems.Where(x => cancellable.Contains(x.Id) && !protectedIds.Contains(x.Id))
+            .OrderByDescending(Depth).ThenBy(x => x.Id).ToList();
+    }
+
+    private static string? ProposalKey(WorkItem item) =>
+        item.ProposalProvenance?.ProposalItemKey ?? ExtractKey(item.Title);
 
     private static string? ExtractKey(string title)
     {
