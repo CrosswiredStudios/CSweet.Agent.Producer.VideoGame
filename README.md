@@ -3,7 +3,7 @@
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 
-## Direct manager kickoff (2.8.7)
+## Direct manager kickoff (2.9.0)
 
 The Producer now answers direct Communications turns and finishes each valid turn with a final response. An explicit manager request can generate a lightweight project proposal and a role-specific team proposal through the existing approval paths. Project and hiring approvals remain visible to the manager; a submitted proposal is not an approved project, team, or hire. The Producer package provides its own lightweight game project profile, so project setup does not depend on importing the Creative Director package. The project and team proposals are separate, so an approved project may still need its approved team attached before board execution. The Producer does not require a Creative Director, accepted pitch, or GDD for this path. The older formal creative-handoff flow still applies when that workflow is used.
 ## Kanban model
@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.8.7`
+- Version: `2.9.0`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -60,7 +60,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.53.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.56.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -164,3 +164,23 @@ Requests business-scoped calendar read, create, update, cancel, and scheduling a
 Producer-owned ticket estimates use a board conversation with QA. QA invites the Producer to author estimates for the exact requested scope, checks the returned coverage, and records its review. Estimate provenance identifies the Producer's original artifact; this review does not replace the separate QA sprint-readiness assessment.
 
 Unresolved planning questions are recorded as durable workstream decisions with exact accepted-brief evidence. Attention reviews restore missing decision records even when the planning ToDo is already blocked. Stable keys prevent duplicate requests; decisions do not automatically rewrite the accepted brief or approve affected scope.
+
+## Manager-directed delivery
+
+An approved short brief can use profile `video-game-manager-brief.v1` version 2. Gabriel discovers
+his accountable projects, attaches already approved team members, obtains a bounded technical plan
+from the Technical Director or Software Architect, publishes the tickets and sprints, assigns a
+Software Developer and technical reviewer, and starts each increment after authoritative preflight.
+The workflow requires real published test results, independent review, Producer acceptance and a
+governed exact-candidate merge. A dedicated QA employee and formal creative handoff are optional.
+
+The personal delivery commitment survives restarts. Hiring, planning, repository and sprint events
+wake reconciliation; its durable wait provides bounded missed-event recovery. Existing version-1
+projects retain their immutable profile until its governed upgrade is approved. Project/hiring,
+repository and final completion decisions still respect the business's approval policies.
+
+Delivery setup requests `work.project-delivery.prepare.v1`; repository-bound ticket assignment uses
+`work.item.delivery.finalize`. Profile upgrades and final lifecycle changes use
+`platform.workstream.change.propose.v1`. Source provisioning and team repository discovery retain
+platform policy checks, and `git.merge.review.v2` / `git.merge.authorize.v2` are limited to assigned
+work-item evidence and acceptance. These declarations require effective approved installation grants.

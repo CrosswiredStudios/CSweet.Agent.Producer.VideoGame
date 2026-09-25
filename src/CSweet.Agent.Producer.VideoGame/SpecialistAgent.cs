@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.8.7";
+    public override string Version => "2.9.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -55,6 +55,15 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (request.Transcript.Any(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId && x.Artifact?.Type == ProjectDeliveryPlanning.RequestType))
+        {
+            var reply = request.Transcript.LastOrDefault(x => x.SpeakerOrganizationUserId == request.Counterpart.OrganizationUserId);
+            if (request.WorkContext?.WorkstreamId is { } deliveryProject)
+                await EnsureManagerDeliveryAsync(await context.Platform.ReadWorkstreamAsync(new(deliveryProject), cancellationToken), context, cancellationToken);
+            return reply?.Artifact?.Type == ProjectDeliveryPlanning.ProposalType
+                ? AgentCoordinationTurnResult.Completed("Technical plan received. The durable delivery commitment will validate and populate it.")
+                : AgentCoordinationTurnResult.Blocked(reply?.Content ?? "The technical plan is not available.");
+        }
         if (IsOwnEstimateInvitation(request))
         {
             var estimate = await base.HandleCoordinationTurnAsync(request, context, cancellationToken);
@@ -146,6 +155,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (item.CorrelationId?.StartsWith(ManagerDeliveryPrefix, StringComparison.Ordinal) == true)
+            return await ReconcileManagerDeliveryAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) == true)
             return await ReconcilePlanningAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(EstimationCommitmentPrefix, StringComparison.Ordinal) == true)
@@ -177,19 +188,11 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
-        var assignments = context.Identity?.ManagedWorkstreams
-            .Where(x => !x.EndsAt.HasValue || x.EndsAt > review.OccurredAt)
-            .ToList() ?? [];
         var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
             ProjectStateKeys.Portfolio("producer"), cancellationToken);
-        var workstreamIds = assignments.Select(x => x.WorkstreamId)
-            .Concat(accepted?.Payload.AcceptedHandoffs.Keys ?? Enumerable.Empty<Guid>()).Distinct().ToList();
-        if (workstreamIds.Count == 0)
-            return;
-
         // Accepted commitments survive invocations; the host still filters them against current visibility.
         var portfolio = await context.Platform.ReadPortfolioAsync(
-            new ReadPortfolioRequest(workstreamIds), cancellationToken);
+            new ReadPortfolioRequest(), cancellationToken);
         if (portfolio.Workstreams.Count == 0) return;
         var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken);
         var snapshots = new List<ProducerMetricSnapshot>();
@@ -200,6 +203,23 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         foreach (var entry in portfolio.Workstreams)
         {
             var workstream = entry.Workstream;
+            if (workstream.ProfileKey == "video-game-manager-brief.v1" && workstream.AccountableManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId)
+            {
+                _ = await EnsureManagerDeliveryAsync(workstream, context, cancellationToken, wake: review.Reason != AgentAttentionReasons.Periodic);
+                phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
+                var deliveryState = await context.Platform.ReadOperatingStateAsync<ManagerDeliveryState>(ManagerDeliveryPrefix + workstream.Id.ToString("N"), cancellationToken);
+                commitments.Add($"{workstream.Name}: {deliveryState?.Payload.LastStatus ?? "Delivery setup is queued."}");
+                var deliveryBoard = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
+                if (deliveryBoard is not null)
+                {
+                    var deliveryMetrics = await context.Platform.Work.ReadFlowMetricsAsync(new(deliveryBoard.Id)
+                        { TeamId = entry.ActiveTeam?.TeamId, WorkstreamId = workstream.Id, WindowStart = review.OccurredAt.AddDays(-28), WindowEnd = review.OccurredAt, CompletedSprintLimit = 6 }, cancellationToken);
+                    snapshots.Add(new(workstream.Id, deliveryBoard.Id, deliveryMetrics.SourceRevision, deliveryMetrics.GeneratedAt,
+                        deliveryMetrics.Team, deliveryMetrics.Principals, deliveryMetrics.ConditionCodes));
+                    risks.AddRange(BuildMetricRisks(workstream.Name, deliveryMetrics));
+                }
+                continue;
+            }
             phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
             var board = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
             if (entry.ActiveTeam is not null &&
@@ -360,6 +380,13 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (request.Capability == WorkManagementCapabilityNames.ExecutionRunV1)
+        {
+            var assignment = DeserializePayload<WorkExecutionAssignmentV1>(request.Arguments);
+            if (ProjectDeliveryReview.Supports(assignment) && assignment!.StageKey == "merge-decision")
+                return await ProjectDeliveryReview.ExecuteAsync(assignment, context,
+                    context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure a review provider."), Settings.GetString("llmModel"))), true, cancellationToken);
+        }
         if (request.Capability != ManagementCapabilities.CheckIn)
             return await base.ExecuteCapabilityCoreAsync(request, context, cancellationToken);
         var checkIn = DeserializePayload<ManagementCheckInRequest>(request.Arguments);
@@ -387,7 +414,9 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         }
         if (message.EventType is "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
             "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1" or
-            WorkstreamEventNames.DecisionDecidedV1)
+            WorkstreamEventNames.DecisionDecidedV1 or WorkstreamEventNames.SprintChangedV1 or
+            WorkstreamEventNames.ExecutionChangedV1 or SourceControlEvents.RepositoryProvisioningChanged or ManagementEvents.ResourceChangeDecided or
+            "com.csweet.workstream.project-setup.v1")
         {
             await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt, message.OccurredAt.AddMinutes(5), message.EventType), context, cancellationToken);
             return;

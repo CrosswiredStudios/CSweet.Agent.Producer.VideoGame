@@ -1,0 +1,311 @@
+{
+  "key": "video-game-manager-brief.v1",
+  "version": 2,
+  "displayName": "Manager-directed video game prototype",
+  "lifecyclePolicyKey": "video-game-manager-brief.lifecycle.v1",
+  "defaultBoardProfileKey": "general-work.v1",
+  "metadataSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "workingTitle": {
+        "type": "string"
+      }
+    }
+  },
+  "lifecycle": {
+    "stages": [
+      {
+        "key": "concept"
+      },
+      {
+        "key": "prototype"
+      },
+      {
+        "key": "vertical-slice"
+      },
+      {
+        "key": "completed"
+      },
+      {
+        "key": "cancelled"
+      }
+    ],
+    "transitions": [
+      {
+        "from": "concept",
+        "to": "prototype"
+      },
+      {
+        "from": "prototype",
+        "to": "vertical-slice"
+      },
+      {
+        "from": "vertical-slice",
+        "to": "completed"
+      },
+      {
+        "from": "concept",
+        "to": "cancelled"
+      },
+      {
+        "from": "prototype",
+        "to": "cancelled"
+      },
+      {
+        "from": "vertical-slice",
+        "to": "cancelled"
+      }
+    ]
+  },
+  "boardWorkflow": {
+    "columns": [
+      {
+        "category": "ToDo",
+        "wipPolicy": "Disabled",
+        "name": "Ready",
+        "key": "ready"
+      },
+      {
+        "category": "InProgress",
+        "wipPolicy": "Disabled",
+        "name": "Development",
+        "key": "development"
+      },
+      {
+        "category": "Testing",
+        "wipPolicy": "Disabled",
+        "name": "Technical validation",
+        "key": "quality"
+      },
+      {
+        "category": "Testing",
+        "wipPolicy": "Disabled",
+        "name": "Producer acceptance",
+        "key": "acceptance"
+      },
+      {
+        "category": "Done",
+        "wipPolicy": "Disabled",
+        "name": "Done",
+        "key": "done"
+      },
+      {
+        "category": "Blocked",
+        "wipPolicy": "Disabled",
+        "name": "Blocked",
+        "key": "blocked"
+      },
+      {
+        "category": "Cancelled",
+        "wipPolicy": "Disabled",
+        "name": "Cancelled",
+        "key": "cancelled"
+      }
+    ]
+  },
+  "orchestration": {
+    "name": "Manager brief delivery",
+    "initialStageKey": "ready",
+    "stages": [
+      {
+        "concurrencyLimit": 1,
+        "timeoutSeconds": 1800,
+        "stageType": "Queue",
+        "inputSchemaJson": "{}",
+        "outputSchemaJson": "{}",
+        "key": "ready",
+        "name": "ready",
+        "isSuccessfulTerminal": false,
+        "retryPolicy": {
+          "initialDelaySeconds": 10,
+          "maximumAttempts": 3,
+          "maximumDelaySeconds": 300
+        },
+        "instructions": "Deliver the exact ticket requirements. Treat prior review findings as required rework. Preserve real execution and validation evidence.",
+        "columnKey": "ready"
+      },
+      {
+        "concurrencyLimit": 1,
+        "timeoutSeconds": 1800,
+        "stageType": "AgentExecution",
+        "inputSchemaJson": "{}",
+        "outputSchemaJson": "{}",
+        "key": "development",
+        "name": "development",
+        "isSuccessfulTerminal": false,
+        "retryPolicy": {
+          "initialDelaySeconds": 10,
+          "maximumAttempts": 3,
+          "maximumDelaySeconds": 300
+        },
+        "instructions": "Deliver the exact ticket requirements. Treat prior review findings as required rework. Preserve real execution and validation evidence.",
+        "columnKey": "development"
+      },
+      {
+        "concurrencyLimit": 1,
+        "timeoutSeconds": 1800,
+        "stageType": "AgentExecution",
+        "inputSchemaJson": "{}",
+        "outputSchemaJson": "{}",
+        "key": "quality",
+        "name": "quality",
+        "isSuccessfulTerminal": false,
+        "retryPolicy": {
+          "initialDelaySeconds": 10,
+          "maximumAttempts": 3,
+          "maximumDelaySeconds": 300
+        },
+        "instructions": "Deliver the exact ticket requirements. Treat prior review findings as required rework. Preserve real execution and validation evidence.",
+        "columnKey": "quality"
+      },
+      {
+        "concurrencyLimit": 1,
+        "timeoutSeconds": 1800,
+        "stageType": "AgentExecution",
+        "inputSchemaJson": "{}",
+        "outputSchemaJson": "{}",
+        "key": "merge-decision",
+        "name": "merge-decision",
+        "isSuccessfulTerminal": false,
+        "retryPolicy": {
+          "initialDelaySeconds": 10,
+          "maximumAttempts": 3,
+          "maximumDelaySeconds": 300
+        },
+        "instructions": "Deliver the exact ticket requirements. Treat prior review findings as required rework. Preserve real execution and validation evidence.",
+        "columnKey": "acceptance"
+      },
+      {
+        "concurrencyLimit": 1,
+        "timeoutSeconds": 1800,
+        "stageType": "TrustedPlatformAction",
+        "inputSchemaJson": "{}",
+        "outputSchemaJson": "{}",
+        "key": "merge",
+        "name": "merge",
+        "isSuccessfulTerminal": false,
+        "retryPolicy": {
+          "initialDelaySeconds": 10,
+          "maximumAttempts": 3,
+          "maximumDelaySeconds": 300
+        },
+        "instructions": "Deliver the exact ticket requirements. Treat prior review findings as required rework. Preserve real execution and validation evidence.",
+        "platformAction": "source-control.merge.execute.v2",
+        "columnKey": "acceptance"
+      },
+      {
+        "concurrencyLimit": 1,
+        "timeoutSeconds": 1800,
+        "stageType": "Terminal",
+        "inputSchemaJson": "{}",
+        "outputSchemaJson": "{}",
+        "key": "done",
+        "name": "done",
+        "isSuccessfulTerminal": true,
+        "retryPolicy": {
+          "initialDelaySeconds": 10,
+          "maximumAttempts": 3,
+          "maximumDelaySeconds": 300
+        },
+        "instructions": "Deliver the exact ticket requirements. Treat prior review findings as required rework. Preserve real execution and validation evidence.",
+        "columnKey": "done"
+      }
+    ],
+    "transitions": [
+      {
+        "fromStageKey": "ready",
+        "outcomeCode": "ready",
+        "toStageKey": "development"
+      },
+      {
+        "fromStageKey": "development",
+        "outcomeCode": "completed",
+        "toStageKey": "quality"
+      },
+      {
+        "fromStageKey": "quality",
+        "outcomeCode": "passed",
+        "toStageKey": "merge-decision"
+      },
+      {
+        "fromStageKey": "quality",
+        "maximumTraversals": 3,
+        "outcomeCode": "changes_requested",
+        "toStageKey": "development"
+      },
+      {
+        "fromStageKey": "merge-decision",
+        "outcomeCode": "approved",
+        "toStageKey": "merge"
+      },
+      {
+        "fromStageKey": "merge-decision",
+        "maximumTraversals": 3,
+        "outcomeCode": "rejected",
+        "toStageKey": "development"
+      },
+      {
+        "fromStageKey": "merge",
+        "outcomeCode": "merged",
+        "toStageKey": "done"
+      }
+    ],
+    "mergeMode": "ManagerApproval",
+    "concurrency": {
+      "defaultAssignee": 1,
+      "defaultStage": 2,
+      "board": 2,
+      "global": 8,
+      "organization": 4
+    }
+  },
+  "assignmentPolicy": {
+    "planningQuorums": [],
+    "roles": [
+      {
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v1",
+          "software-development.implement.v1"
+        ],
+        "roleKey": "software-developer",
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ]
+      },
+      {
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v1"
+        ],
+        "roleKey": "software-architect",
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ]
+      },
+      {
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v1"
+        ],
+        "roleKey": "game-producer",
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ]
+      },
+      {
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ],
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v1"
+        ],
+        "roleKey": "game-technical-director"
+      }
+    ],
+    "skillMatchMode": "RequiredThenPreferred",
+    "exactRoleRequired": true
+  }
+}

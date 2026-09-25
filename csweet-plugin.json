@@ -18,7 +18,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.8.7",
+  "version": "2.9.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -42,6 +42,11 @@
         "key": "video-game-manager-brief.v1",
         "version": 1,
         "definitionResource": "profiles/video-game-manager-brief.v1.json"
+      },
+      {
+        "version": 2,
+        "definitionResource": "profiles/video-game-manager-brief.v2.json",
+        "key": "video-game-manager-brief.v1"
       }
     ],
     "requires": []
@@ -139,11 +144,31 @@
     }
   ],
   "requires": [
-    {"name": "work.calendar.read.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
-    {"name": "work.calendar.create.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
-    {"name": "work.calendar.update.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
-    {"name": "work.calendar.cancel.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
-    {"name": "work.calendar.schedule.v1", "scope": "organization", "purpose": "Operate the business calendar within event ownership and reporting authority."},
+    {
+      "name": "work.calendar.read.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.create.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.update.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.cancel.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
+    {
+      "name": "work.calendar.schedule.v1",
+      "scope": "organization",
+      "purpose": "Operate the business calendar within event ownership and reporting authority."
+    },
     {
       "name": "agent.onboarding.complete.v1",
       "scope": "organization",
@@ -255,6 +280,14 @@
       "purpose": "Revise planning with optimistic concurrency when authoritative proposal evidence changes."
     },
     {
+      "name": "platform.workstream.change.propose.v1",
+      "scope": "organization",
+      "purpose": "Submit an existing project's profile upgrade or verified completion transition through its governed approval policy."
+    },    {
+      "name": "work.item.delivery.finalize",
+      "scope": "team",
+      "purpose": "Bind approved technical tickets to the current repository, accountable developer and independent review assignments."
+    },    {
       "name": "work.item.estimate",
       "scope": "team",
       "purpose": "Record only specialist-supplied estimates with coordination provenance."
@@ -262,7 +295,7 @@
     {
       "name": "work.item.move",
       "scope": "team",
-      "purpose": "Pull fully ready executable leaves into Ready without moving containers."
+      "purpose": "Pull ready executable leaves into Ready and close grouping tickets after every executable ticket completes."
     },
     {
       "name": "work.item.cancel",
@@ -458,10 +491,37 @@
       "name": "communication.message.send.v1",
       "scope": "team",
       "purpose": "Coordinate planning questions and governed staffing proposals with the Creative Director and specialists."
+    },
+    {
+      "purpose": "Coordinate and review delivery within current project and assignment authority.",
+      "name": "work.project-delivery.prepare.v1",
+      "scope": "organization"
+    },
+    {
+      "purpose": "Coordinate and review delivery within current project and assignment authority.",
+      "name": "git.merge.review.v2",
+      "scope": "work-item"
+    },
+    {
+      "purpose": "Coordinate and review delivery within current project and assignment authority.",
+      "name": "git.merge.authorize.v2",
+      "scope": "work-item"
+    },
+    {
+      "purpose": "Coordinate and review delivery within current project and assignment authority.",
+      "name": "source-control.repository.provision.v2",
+      "scope": "organization"
+    },
+    {
+      "purpose": "Coordinate and review delivery within current project and assignment authority.",
+      "name": "source-control.repository.team-options.v2",
+      "scope": "team"
     }
   ],
   "events": {
-    "subscribes": ["com.csweet.calendar.reminder-due.v1", "com.csweet.user.message.received.v1",
+    "subscribes": [
+      "com.csweet.calendar.reminder-due.v1",
+      "com.csweet.user.message.received.v1",
       "com.csweet.agent.onboarded.v1",
       "com.csweet.agent.attention.review-due.v1",
       "com.csweet.agent.coordination.turn-requested.v1",
@@ -474,7 +534,11 @@
       "com.csweet.hiring-recommendation.fulfilled.v1",
       "com.csweet.workstream.changed.v2",
       "com.csweet.work.item.changed.v1",
-      "com.csweet.decision.decided.v1"
+      "com.csweet.decision.decided.v1",
+      "com.csweet.work.sprint.changed.v1",
+      "com.csweet.work.execution.changed.v1",
+      "com.csweet.workstream.project-setup.v1",
+      "com.csweet.repository.provisioning.changed.v1"
     ]
   },
   "configuration": [

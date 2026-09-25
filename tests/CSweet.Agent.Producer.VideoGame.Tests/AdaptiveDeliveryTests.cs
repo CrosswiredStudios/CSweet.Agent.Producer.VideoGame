@@ -36,7 +36,7 @@ public sealed class AdaptiveDeliveryTests
                     Guid.NewGuid(), request.StateKey, "test", 1, "Active", new Dictionary<string, string>(), [], request.StateKey, [], Guid.NewGuid(),
                     System.Text.Json.JsonSerializer.SerializeToElement(state), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))))
             .RegisterCapability<ReadPortfolioRequest, PortfolioResponse>(WorkstreamCapabilityNames.PortfolioReadV1,
-                (request, _) => { reads++; Assert.Equal(stream, Assert.Single(request.WorkstreamIds!)); return Task.FromResult(new PortfolioResponse([])); });
+                (request, _) => { reads++; Assert.Null(request.WorkstreamIds); return Task.FromResult(new PortfolioResponse([])); });
         await new SpecialistAgent().HandleAttentionReviewAsync(new AgentAttentionReviewContext(Guid.NewGuid(), DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow.AddMinutes(5), "test"), runtime.CreateContext(), CancellationToken.None);
         Assert.Equal(1, reads);

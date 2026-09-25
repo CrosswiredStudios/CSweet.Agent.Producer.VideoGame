@@ -1,4 +1,5 @@
 using CSweet.Agent.SDK;
+using CSweet.WorkManagement.Contracts;
 using CrosswiredStudios.VideoGame.AgentKit;
 using System.Text.Json;
 
@@ -17,7 +18,7 @@ public sealed class ManifestTests
 
         foreach (var name in new[] { "work.item.read", "work.item.comment" })
             Assert.Contains(manifest.Requires, x => x.Name == name && x.Scope == "team");
-        var managerProfile = Assert.Single(manifest.WorkstreamProfiles.Provides);
+        var managerProfile = Assert.Single(manifest.WorkstreamProfiles.Provides, x => x.Version == 2);
         Assert.Equal("video-game-manager-brief.v1", managerProfile.Key);
         Assert.True(File.Exists(Path.Combine(root,
             managerProfile.DefinitionResource.Replace('/', Path.DirectorySeparatorChar))));
@@ -51,7 +52,17 @@ public sealed class ManifestTests
             json.RootElement.GetProperty("events").GetProperty("subscribes").EnumerateArray().Select(x => x.GetString()));
         Assert.Contains(AgentLifecycleEvents.Onboarded,
             json.RootElement.GetProperty("events").GetProperty("subscribes").EnumerateArray().Select(x => x.GetString()));
-        Assert.Contains("work.item.create", required);
+        foreach (var capability in new[] {
+            ProjectDeliveryCapabilities.Prepare, WorkstreamCapabilityNames.PortfolioReadV1,
+            WorkstreamCapabilityNames.ReadV1, WorkstreamCapabilityNames.TeamRosterReadV2, WorkstreamCapabilityNames.ChangeProposeV1,
+            PlatformCapabilities.ResourceChangeRead, PlatformCapabilities.AgentOperatingStateRead, PlatformCapabilities.AgentOperatingStateWrite,
+            CommunicationCapabilities.CoordinationStartBoard, CommunicationCapabilities.CoordinationRead,
+            WorkItemCapabilities.Read, WorkItemCapabilities.Create, WorkItemCapabilities.Estimate, WorkItemCapabilities.FinalizeDelivery, WorkItemCapabilities.Move,
+            WorkSprintCapabilities.Create, WorkSprintCapabilities.Read, WorkSprintCapabilities.ManageScope,
+            WorkOrchestrationCapabilities.ConfigureProfile, WorkOrchestrationCapabilities.Read, WorkOrchestrationCapabilities.Preflight, WorkOrchestrationCapabilities.Start,
+            SourceControlCapabilities.ProvisionRepository, SourceControlCapabilities.TeamRepositoryOptions,
+            GitMergeCapabilities.Review, GitMergeCapabilities.Authorize })
+            Assert.Contains(capability, required);        Assert.Contains("work.item.create", required);
         Assert.Contains("communication.coordination.start-board.v1", required);
         Assert.Contains("work.personal-todo.add.v1", required);
         Assert.Contains("work.personal-todo.defer.v1", required);
