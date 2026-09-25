@@ -6,13 +6,13 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class OnboardingTests
 {
     [Fact]
-    public async Task OnboardingContactsDirectorAndOwnerThenPersistsBeforeAcknowledging()
+    public async Task OnboardingContactsManagerAndOwnerThenPersistsBeforeAcknowledging()
     {
         var h = new Harness();
         await h.Deliver();
         Assert.Equal(2, h.Messages.Count);
-        Assert.Contains(h.Messages.Values, x => x.Contains("accepted pitch"));
-        Assert.Contains(h.Messages.Values, x => x.Contains("recommend staffing"));
+        Assert.Contains(h.Messages.Values, x => x.Contains("short brief"));
+        Assert.Contains(h.Messages.Values, x => x.Contains("smallest justified team"));
         Assert.NotNull(h.State);
         Assert.Equal(1, h.Acknowledgements);
         // A new delivery work ID retains the source event ID and does not introduce twice.

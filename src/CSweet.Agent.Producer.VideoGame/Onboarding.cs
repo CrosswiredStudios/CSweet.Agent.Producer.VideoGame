@@ -23,16 +23,16 @@ public sealed partial class SpecialistAgent
             if (!Guid.TryParse(context.Identity?.ManagerEmployeeId, out var managerId) || managerId == Guid.Empty)
                 throw new InvalidOperationException("Producer onboarding requires an authoritative manager.");
 
-            await context.Platform.Communication.SendDirectAgentMessageAsync(managerId,
-                "I have joined as Producer and am ready to understand the project. Please share the accepted pitch and GDD " +
-                "through our project handoff. I will clarify scope, success criteria, constraints, risks and delivery needs " +
-                "with you, retain the shared production brief and accepted understanding in durable state, then propose " +
-                "the smallest team justified by the work. If documentation is missing, please create personal tasks to prepare and share it. Team-board planning will wait for the Technical Director hire.",
+            await context.Platform.Communication.SendDirectMessageAsync(managerId,
+                "I have joined as Producer. Tell me what you want to make, the first useful milestone, " +
+                "and any time, budget, or team constraints you already know. A short brief is enough to " +
+                "start a project proposal and a small hiring plan. I can work directly for you; " +
+                "a Creative Director, pitch, and GDD are optional unless you choose that process.",
                 $"{key}:manager", cancellationToken);
             await context.Platform.Communication.SendMessageAsync(onboarded.ConversationId,
-                "I have contacted the Creative Director to begin the project handoff. I will build and retain our shared " +
-                "understanding, then recommend staffing based on the accepted scope. Detailed brief refinement begins " +
-                "when project setup is ready; any required setup approval remains visible in Approvals.",
+                "I am ready to start from your direction. Share a lightweight goal and I can propose " +
+                "the project and the smallest justified team. Project creation and hiring will follow " +
+                "the platform's approval steps.",
                 $"{key}:owner", cancellationToken);
             await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(key,
                 "video-game.producer-onboarding.v1", 1, "Active", new Dictionary<string, string>(), [], key, [],

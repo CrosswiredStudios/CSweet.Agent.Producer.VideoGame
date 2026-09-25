@@ -1,7 +1,11 @@
 # Video Game Producer
 
-Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer manages delivery but does not make creative, technical-feasibility, QA, spending, or hiring decisions for their respective authorities.
+Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
+
+## Direct manager kickoff (2.8.7)
+
+The Producer now answers direct Communications turns and finishes each valid turn with a final response. An explicit manager request can generate a lightweight project proposal and a role-specific team proposal through the existing approval paths. Project and hiring approvals remain visible to the manager; a submitted proposal is not an approved project, team, or hire. The Producer package provides its own lightweight game project profile, so project setup does not depend on importing the Creative Director package. The project and team proposals are separate, so an approved project may still need its approved team attached before board execution. The Producer does not require a Creative Director, accepted pitch, or GDD for this path. The older formal creative-handoff flow still applies when that workflow is used.
 ## Kanban model
 
 The Producer deliberately uses two boards without duplicating work:
@@ -25,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.8.6`
+- Version: `2.8.7`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews

@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.8.6";
+    public override string Version => "2.8.7";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -47,7 +47,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         new() { MaxOutputTokens = ResolveOutputTokens(Settings) };
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
-    protected override string RolePrompt => "You are the operational lead for one video game team. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Convert uncertainty into assigned work or durable decisions.";
+    protected override string RolePrompt => "You are the operational lead for one video game team. Follow the actual manager direction. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Start from a lightweight manager brief when available; a Creative Director and formal creative documents are optional unless the manager or a specific approved workflow requires them. Convert uncertainty into assigned work or durable decisions.";
     protected override IReadOnlyList<string> RequiredSections => ["Schedule", "Budget", "Dependencies", "Staffing", "Risks", "Status Reporting"];
 
     public override async Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(
@@ -375,6 +375,11 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (message.EventType == CommunicationEvents.MessageReceived)
+        {
+            await HandleManagerMessageAsync(message, context, cancellationToken);
+            return;
+        }
         if (message.EventType == AgentLifecycleEvents.Onboarded)
         {
             await HandleOnboardedAsync(message, context, cancellationToken);

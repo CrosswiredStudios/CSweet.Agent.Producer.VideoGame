@@ -18,7 +18,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.8.6",
+  "version": "2.8.7",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -35,6 +35,16 @@
   "protocol": {
     "minimumVersion": "2.0",
     "maximumVersion": "2.x"
+  },
+  "workstreamProfiles": {
+    "provides": [
+      {
+        "key": "video-game-manager-brief.v1",
+        "version": 1,
+        "definitionResource": "profiles/video-game-manager-brief.v1.json"
+      }
+    ],
+    "requires": []
   },
   "provides": [
     {
@@ -205,6 +215,11 @@
       "purpose": "Read only workstreams assigned to this Producer."
     },
     {
+      "name": "platform.workstream.plan.propose.v2",
+      "scope": "organization",
+      "purpose": "Propose a manager-directed game project from a lightweight brief for human approval."
+    },
+    {
       "name": "platform.workstream.read.v1",
       "scope": "organization",
       "purpose": "Verify authoritative lifecycle and profile revisions."
@@ -326,8 +341,8 @@
     },
     {
       "name": "platform.management.resource-change.propose.v1",
-      "scope": "team",
-      "purpose": "Propose evidence-backed team capacity changes for manager decision."
+      "scope": "organization",
+      "purpose": "Propose a new manager-directed team or scoped capacity change for manager decision."
     },
     {
       "name": "platform.management.resource-change.read.v1",
@@ -446,7 +461,7 @@
     }
   ],
   "events": {
-    "subscribes": ["com.csweet.calendar.reminder-due.v1", 
+    "subscribes": ["com.csweet.calendar.reminder-due.v1", "com.csweet.user.message.received.v1",
       "com.csweet.agent.onboarded.v1",
       "com.csweet.agent.attention.review-due.v1",
       "com.csweet.agent.coordination.turn-requested.v1",

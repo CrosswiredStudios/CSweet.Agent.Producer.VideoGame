@@ -17,6 +17,10 @@ public sealed class ManifestTests
 
         foreach (var name in new[] { "work.item.read", "work.item.comment" })
             Assert.Contains(manifest.Requires, x => x.Name == name && x.Scope == "team");
+        var managerProfile = Assert.Single(manifest.WorkstreamProfiles.Provides);
+        Assert.Equal("video-game-manager-brief.v1", managerProfile.Key);
+        Assert.True(File.Exists(Path.Combine(root,
+            managerProfile.DefinitionResource.Replace('/', Path.DirectorySeparatorChar))));
         Assert.Equal(agent.AgentId, manifest.Id);
         Assert.Equal(agent.Version, manifest.Version);
         Assert.Equal(agent.Version, typeof(SpecialistAgent).Assembly.GetName().Version?.ToString(3));
@@ -40,6 +44,11 @@ public sealed class ManifestTests
         var required = json.RootElement.GetProperty("requires").EnumerateArray()
             .Select(x => x.GetProperty("name").GetString()).ToHashSet(StringComparer.Ordinal);
         Assert.Contains("agent.onboarding.complete.v1", required);
+        Assert.Contains("platform.workstream.plan.propose.v2", required);
+        Assert.Contains(manifest.Requires, x => x.Name == PlatformCapabilities.ResourceChangePropose
+            && x.Scope == "organization");
+        Assert.Contains(CommunicationEvents.MessageReceived,
+            json.RootElement.GetProperty("events").GetProperty("subscribes").EnumerateArray().Select(x => x.GetString()));
         Assert.Contains(AgentLifecycleEvents.Onboarded,
             json.RootElement.GetProperty("events").GetProperty("subscribes").EnumerateArray().Select(x => x.GetString()));
         Assert.Contains("work.item.create", required);

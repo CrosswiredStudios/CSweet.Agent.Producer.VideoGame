@@ -1,0 +1,31 @@
+{
+  "key": "video-game-manager-brief.v1",
+  "version": 1,
+  "displayName": "Manager-directed video game prototype",
+  "lifecyclePolicyKey": "video-game-manager-brief.lifecycle.v1",
+  "defaultBoardProfileKey": "general-work.v1",
+  "metadataSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "workingTitle": { "type": "string" }
+    }
+  },
+  "lifecycle": {
+    "stages": [
+      { "key": "concept" },
+      { "key": "prototype" },
+      { "key": "vertical-slice" },
+      { "key": "completed" },
+      { "key": "cancelled" }
+    ],
+    "transitions": [
+      { "from": "concept", "to": "prototype" },
+      { "from": "prototype", "to": "vertical-slice" },
+      { "from": "vertical-slice", "to": "completed" },
+      { "from": "concept", "to": "cancelled" },
+      { "from": "prototype", "to": "cancelled" },
+      { "from": "vertical-slice", "to": "cancelled" }
+    ]
+  }
+}
