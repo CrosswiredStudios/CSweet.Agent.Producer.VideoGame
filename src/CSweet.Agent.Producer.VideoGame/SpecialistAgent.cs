@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.9.3";
+    public override string Version => "2.9.4";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -290,7 +290,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                         $"{SprintReadinessCommitmentPrefix}{planned.Id:N}:{planningRevision}",
                         $"Preflight sprint {planned.Name}",
                         "Verify QA readiness, exact staffing and assignment evidence, capacity, estimates, dependencies, and the approved artifact package before starting execution.",
-                        "Urgent",
+                        WorkPriorities.Critical,
                         new PersonalTodoWorkContext
                         {
                             WorkstreamId = workstream.Id,
@@ -315,7 +315,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                             $"{EstimationCommitmentPrefix}{board.Id:N}:{planningCycle.ReconciledDigest}:{nextSequence}",
                             $"Prepare candidate scope for Production Sprint {nextSequence}",
                             "Refresh role-owned estimates and capacity, obtain QA readiness evidence, and pull only a capacity-bounded dependency-consistent scope to Ready.",
-                            "Urgent",
+                            WorkPriorities.Critical,
                             new PersonalTodoWorkContext
                             {
                                 WorkstreamId = workstream.Id,
@@ -701,7 +701,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 questions.Count == 0
                     ? "Collect role-owned estimates and capacity for the reconciled executable scope, obtain QA readiness evidence, pull eligible leaves to Ready, and create the bounded planned sprint."
                     : "Collect estimates and QA readiness only for research spikes that produce evidence for pending authority decisions. Keep decision-dependent implementation out of the sprint.",
-                "Urgent",
+                WorkPriorities.Critical,
                 source with { SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
         }
@@ -896,7 +896,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             $"{SprintReadinessCommitmentPrefix}{sprint.Id:N}:{planningRevision}",
             $"Preflight sprint {sprint.Name}",
             "Revalidate QA evidence, exact staffing and assignment evidence, estimates, capacity, dependencies, and artifact package before starting execution.",
-            "Urgent", source with { SprintId = sprint.Id, CoordinationSessionId = qaSession.Id,
+            WorkPriorities.Critical, source with { SprintId = sprint.Id, CoordinationSessionId = qaSession.Id,
                 SourceFingerprint = $"{planningRevision}:{qaArtifact.Digest}" }, context, cancellationToken);
         return PersonalTodoResult.Completed($"Recorded specialist estimates, QA readiness, and planned {sprint.Name} with {selectedCandidates.Count} capacity-bounded executable leaves and {totalCapacity} capacity points.");
     }
