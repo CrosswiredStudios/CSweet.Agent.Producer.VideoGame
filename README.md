@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.9.0`
+- Version: `2.9.1`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews

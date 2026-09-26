@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.9.0";
+    public override string Version => "2.9.1";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -1100,7 +1100,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             cancellationToken);
     }
 
-    private static async Task<int> PublishCanonicalBacklogAsync(
+    internal static async Task<int> PublishCanonicalBacklogAsync(
         Guid boardId,
         AgentTeamContext roster,
         GameProductionPlanningCycleV1 cycle,
@@ -1183,7 +1183,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     boardId, $"[{proposal.ProposalKey}] {proposal.Title}", proposal.Description,
                     KindFor(proposal.WorkItemTypeKey), WorkPriorities.High, null,
                     proposal.ParentProposalKey is null ? null : byKey[proposal.ParentProposalKey].Id,
-                    null, $"producer-ticket:{cycle.WorkstreamId:N}:{proposal.ProposalKey}")
+                    null, BoundedMutationKey($"producer-ticket:{cycle.WorkstreamId:N}:{proposal.ProposalKey}"))
                 {
                     TypeKey = proposal.WorkItemTypeKey,
                     AccountableOrganizationUserId = accountable,
@@ -1248,7 +1248,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             var revised = await context.Platform.Work.RevisePlanningAsync(new ReviseWorkItemPlanningRequest(
                 boardId, existing.Id, existing.Title, existing.Description, parentId, planning,
                 existing.Revision, existing.PlanningRevision,
-                $"producer-hierarchy:{cycle.PlanningFingerprint}:{sourceArtifact.Digest}:{proposal.ProposalKey}")
+                BoundedMutationKey($"producer-hierarchy:{cycle.PlanningFingerprint}:{sourceArtifact.Digest}:{proposal.ProposalKey}"))
             {
                 ProposalProvenance = new WorkItemProposalProvenance(sourceSession.Id, sourceArtifact.Digest,
                     proposal.ProposalKey),
@@ -1267,6 +1267,10 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         }
         return proposals.Count;
     }
+
+    // Retain previously accepted keys so retries address the same mutation.
+    internal static string BoundedMutationKey(string key) =>
+        key.Length <= 160 ? key : $"producer-mutation:{ProducerPolicyFingerprint.Digest(key)}";
 
     internal static IReadOnlyList<WorkItem> SupersededPlanningItems(
         IReadOnlyList<WorkItem> boardItems,
