@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.9.1";
+    public override string Version => "2.9.2";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -931,7 +931,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 RoleTaxonomy.SatisfiesRole(x.DeclaredRoleKeys, roleKey))
             .OrderBy(x => x.AgentInstallationId).FirstOrDefault();
 
-    private static async Task<AgentCoordinationSession> EnsurePlanningSessionAsync(
+    internal static async Task<AgentCoordinationSession> EnsurePlanningSessionAsync(
         AgentTeammate teammate,
         Guid boardId,
         GameProductionPlanningCycleV1 cycle,
@@ -952,7 +952,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var sessionKey = managerDirections.Count == 0
             ? $"producer-planning-session:{cycle.PlanningFingerprint}:{targetUserId:N}"
             : $"producer-planning-session:direction:{ProducerPolicyFingerprint.Digest(
-                JsonSerializer.Serialize(new { cycle.PlanningFingerprint, targetUserId, managerDirections }))}";
+                JsonSerializer.Serialize(new { cycle.PlanningFingerprint, targetUserId, managerDirections }))}:directions-v2";
         // The board coordination request carries this message durably to the
         // specialist. A parallel direct chat turn can block the same agent.
         var start = new StartBoardCoordinationRequest(targetUserId, boardId, subject, objective,
