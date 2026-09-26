@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.9.2";
+    public override string Version => "2.9.3";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -1222,9 +1222,16 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             var sourceIsTechnical = technical.DeliveryItems.Any(x => x.ProposalKey == proposal.ProposalKey);
             var sourceSession = sourceIsTechnical ? technicalSession : designerSession;
             var sourceArtifact = sourceIsTechnical ? technicalArtifact : designerArtifact;
-            if (existing.ParentItemId == parentId &&
-                (!sourceIsTechnical || existing.ProposalProvenance?.ArtifactDigest == sourceArtifact.Digest)) continue;
-            var planning = existing.Planning;
+            var planning = existing.Planning with
+            {
+                Requirements = [proposal.Description],
+                AcceptanceCriteria = proposal.AcceptanceCriteria,
+                Constraints = designer.DesignConstraints.Concat(technical.TechnicalConstraints).Distinct().ToList(),
+                DependencyItemIds = proposal.DependencyProposalKeys.Select(key => byKey[key].Id).ToList(),
+                ArtifactPackageDigest = existing.Planning.ArtifactPackageDigest is { } acceptedPackage &&
+                    acceptedPackage.PackageId == package.PackageId && acceptedPackage.Version == package.Version &&
+                    acceptedPackage.Sha256 == package.Sha256 ? acceptedPackage : package
+            };
             if (sourceIsTechnical && proposal.WorkItemTypeKey is VideoGameWorkItemTypeKeys.Task or
                 VideoGameWorkItemTypeKeys.Bug or VideoGameWorkItemTypeKeys.ResearchSpike or
                 VideoGameWorkItemTypeKeys.CreativeReview)
@@ -1245,15 +1252,23 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     ArchitectureArtifactDigest = technicalArtifact.Digest
                 };
             }
+            // Reconcile assignments against the new requirements in this same mutation.
+            // Submitting old requirements first is rejected before the later binding pass can run.
+            var revisedAssignments = RefreshAssignments(existing with { Planning = planning }, roster, cycle.ProfileDigest);
+            var revisedOwner = revisedAssignments.SingleOrDefault(x => x.StageKey == "specialist-execution")?.OrganizationUserId;
+            if (existing.ParentItemId == parentId && existing.Title == $"[{proposal.ProposalKey}] {proposal.Title}" &&
+                existing.Description == proposal.Description && existing.ProposalProvenance?.ArtifactDigest == sourceArtifact.Digest &&
+                JsonSerializer.Serialize(existing.Planning) == JsonSerializer.Serialize(planning) &&
+                revisedAssignments.SequenceEqual(existing.StageAssignments)) continue;
             var revised = await context.Platform.Work.RevisePlanningAsync(new ReviseWorkItemPlanningRequest(
-                boardId, existing.Id, existing.Title, existing.Description, parentId, planning,
+                boardId, existing.Id, $"[{proposal.ProposalKey}] {proposal.Title}", proposal.Description, parentId, planning,
                 existing.Revision, existing.PlanningRevision,
-                BoundedMutationKey($"producer-hierarchy:{cycle.PlanningFingerprint}:{sourceArtifact.Digest}:{proposal.ProposalKey}"))
+                BoundedMutationKey($"producer-hierarchy:{cycle.PlanningFingerprint}:{sourceArtifact.Digest}:{proposal.ProposalKey}:planning-v2"))
             {
                 ProposalProvenance = new WorkItemProposalProvenance(sourceSession.Id, sourceArtifact.Digest,
                     proposal.ProposalKey),
-                AccountableOrganizationUserId = existing.AccountableOrganizationUserId,
-                StageAssignments = existing.StageAssignments
+                AccountableOrganizationUserId = revisedOwner,
+                StageAssignments = revisedAssignments
             }, cancellationToken);
             byKey[proposal.ProposalKey] = revised;
         }
