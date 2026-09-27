@@ -29,6 +29,19 @@ public sealed class RoleReplanningCorrectionTests
     }
 
     [Fact]
+    public void StructuredRepairRetainsAcceptedDocumentReferencesAndExactCycle()
+    {
+        var (request, proposal, _) = Fixture();
+        var member = new CSweet.WorkManagement.Contracts.ArtifactPackageMemberDigest(Guid.NewGuid(), Guid.NewGuid(), "brief", new string('a', 64));
+        var artifact = SpecialistAgent.RoleRepairArtifact(proposal.Cycle, [member], request);
+        Assert.Equal(proposal.Cycle, artifact.Payload.Deserialize<GameProductionPlanningCycleV1>());
+        var reference = Assert.Single(artifact.Payload.GetProperty("documentReferences")
+            .Deserialize<CollaborationDocumentReference[]>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!);
+        Assert.Equal(member.ArtifactId, reference.DocumentId);
+        Assert.Equal(member.AcceptedRevisionId, reference.RevisionId);
+        Assert.Equal(member.Sha256, reference.ContentSha256);
+    }
+    [Fact]
     public void CorrectionContainsAllExactOmissionsAndDependencyGaps()
     {
         var (request, proposal, _) = Fixture();
@@ -64,11 +77,18 @@ public sealed class RoleReplanningCorrectionTests
         Assert.Equal(correction.Id, second.Id);
         Assert.Equal(correctionStatus, second.Status);
         Assert.Single(calls.Select(x => x.IdempotencyKey).Distinct());
-        Assert.Equal($"producer-role-repair-correction:{original.Id:N}:2", calls[0].IdempotencyKey);
+        Assert.Equal($"producer-role-repair-correction:{original.Id:N}:structured-v1", calls[0].IdempotencyKey);
         Assert.All(calls, x => {
             Assert.Equal(original.Target.OrganizationUserId, x.TargetOrganizationUserId);
             Assert.Equal(request.BoardId, x.BoardId);
             Assert.Equal(proposal.Cycle.PlanningFingerprint, x.Artifact!.Key);
+            var repair = x.Artifact.Payload.GetProperty("roleRepair");
+            Assert.Equal(1, repair.GetProperty("schemaVersion").GetInt32());
+            Assert.Equal(request.WorkItemId, repair.GetProperty("sourceWorkItemId").GetGuid());
+            Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(
+                request.OriginalItems.Single(i => i.Id == request.WorkItemId).Planning))).ToLowerInvariant(),
+                repair.GetProperty("sourcePlanningSha256").GetString());
+            Assert.Equal(proposal.Cycle, x.Artifact.Payload.Deserialize<GameProductionPlanningCycleV1>());
             Assert.Contains("Wave template committed", x.InitialMessage);
             Assert.Contains("Keep the accepted scope", x.InitialMessage);
             Assert.InRange(x.InitialMessage.Length, 1, 32768);

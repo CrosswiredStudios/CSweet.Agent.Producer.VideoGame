@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Security.Cryptography;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 using CrosswiredStudios.VideoGame.Contracts;
@@ -35,9 +37,24 @@ public sealed partial class SpecialistAgent
             RoleRepairObjective(), ["Preserve every original requirement, criterion and constraint.",
                 "Assign implementation to engineering and independent validation to QA.",
                 "Make downstream consumers depend on the delivered implementation and validation."],
-            message, $"producer-role-repair-correction:{original.Id:N}:2", PlanningArtifact(cycle, members)), token);
+            message, $"producer-role-repair-correction:{original.Id:N}:structured-v1", RoleRepairArtifact(cycle, members, request)), token);
     }
 
+    internal static AgentCoordinationArtifactSubmission RoleRepairArtifact(GameProductionPlanningCycleV1 cycle,
+        IReadOnlyList<ArtifactPackageMemberDigest> members, RoleRepairRequest request)
+    {
+        var source = request.OriginalItems.Single(x => x.Id == request.WorkItemId);
+        if (source.Planning is null) throw new InvalidOperationException("Role repair requires pinned canonical planning.");
+        var artifact = PlanningArtifact(cycle, members);
+        var payload = JsonNode.Parse(artifact.Payload.GetRawText())!.AsObject();
+        payload["roleRepair"] = JsonSerializer.SerializeToNode(new
+        {
+            schemaVersion = 1,
+            sourceWorkItemId = source.Id,
+            sourcePlanningSha256 = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(source.Planning))).ToLowerInvariant()
+        });
+        return artifact with { Payload = JsonSerializer.SerializeToElement(payload) };
+    }
     internal static IReadOnlyList<string> RoleRepairCorrectionFindings(RoleRepairRequest request,
         GameTechnicalDeliveryProposalV1 proposal)
     {
