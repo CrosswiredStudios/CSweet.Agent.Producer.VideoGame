@@ -17,8 +17,8 @@ public sealed partial class SpecialistAgent
         return match.Success && reason.Length > 0;
     }
 
-    private static async Task<string> RetryDirectedTicketAsync(string identifier, string reason,
-        Guid turnId, AgentRuntimeContext context, CancellationToken token, bool replan = false)
+    private async Task<string> RetryDirectedTicketAsync(string identifier, string reason,
+        Guid turnId, AgentRuntimeContext context, CancellationToken token, bool replan = false, bool amend = false)
     {
         var producer = Guid.Parse(context.Identity!.EmployeeId);
         var boards = (await context.Platform.Work.ListBoardsAsync(cancellationToken: token))
@@ -40,6 +40,7 @@ public sealed partial class SpecialistAgent
         if (matches.Count != 1) return "The ticket does not identify exactly one current execution on a board I manage. No retry was requested.";
         var (current, item) = matches[0];
         var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
+        if (amend) return await QueueScopeAmendmentAsync(current, item, stage, reason, turnId, context, token);
         if (replan) return await QueueSprintRecoveryAsync(current, item, stage, reason, context, token);
         if (stage is null || item.Status is not ("Blocked" or "Failed") ||
             stage.Status is not ("Blocked" or "Failed") || stage.PrincipalKind != "AgentInstallation" ||

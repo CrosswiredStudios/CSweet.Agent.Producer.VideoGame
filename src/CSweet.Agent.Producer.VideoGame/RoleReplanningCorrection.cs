@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent
         if (proposal is null || proposal.Cycle != cycle) return original;
         var findings = RoleRepairCorrectionFindings(request, proposal);
         if (findings.Count == 0) return original;
-        var message = RoleRepairObjective() + "\n" + RoleRepairContext(request) +
+        var message = RoleRepairObjective(request) + "\n" + RoleRepairContext(request) +
             "\nThe previous proposal failed coverage validation. Correct all of these exact discrepancies; " +
             "return a complete replacement proposal using the canonical board as the unchanged source scope. " +
             "Preserve the exact text even when adding explanation. Do not weaken scope or report execution as complete.\n" +
@@ -34,7 +34,7 @@ public sealed partial class SpecialistAgent
         // recover that session, including terminal failure; they never create another retry generation.
         return await context.Platform.Communication.StartBoardCoordinationAsync(new(
             original.Target.OrganizationUserId, request.BoardId, "Correct role-replanning scope coverage",
-            RoleRepairObjective(), ["Preserve every original requirement, criterion and constraint.",
+            RoleRepairObjective(request), [request.ScopeDirection is null ? "Preserve every original requirement, criterion and constraint." : "Apply only the recorded owner-authorized replacements; preserve unrelated planning.",
                 "Assign implementation to engineering and independent validation to QA.",
                 "Make downstream consumers depend on the delivered implementation and validation."],
             message, $"producer-role-repair-correction:{original.Id:N}:structured-v1", RoleRepairArtifact(cycle, members, request)), token);
@@ -46,6 +46,7 @@ public sealed partial class SpecialistAgent
         var source = request.OriginalItems.Single(x => x.Id == request.WorkItemId);
         if (source.Planning is null) throw new InvalidOperationException("Role repair requires pinned canonical planning.");
         var artifact = PlanningArtifact(cycle, members);
+        if (request.ScopeDirection is not null) return artifact;
         var payload = JsonNode.Parse(artifact.Payload.GetRawText())!.AsObject();
         payload["roleRepair"] = JsonSerializer.SerializeToNode(new
         {
@@ -65,6 +66,12 @@ public sealed partial class SpecialistAgent
         catch (InvalidOperationException error)
         {
             var findings = new List<string> { error.Message };
+            if (request.ScopeDirection is not null)
+            {
+                foreach (var expected in ScopeExpectedItems(request).Where(x => x.Status != "Cancelled"))
+                    findings.Add(JsonSerializer.Serialize(new { key = ProposalKey(expected), expected.Planning }, AcceptanceJson));
+                return findings;
+            }
             var criteria = items.SelectMany(x => x.AcceptanceCriteria).ToHashSet(StringComparer.Ordinal);
             foreach (var original in request.OriginalItems.Where(x => x.Status != "Cancelled" && x.Planning is not null))
             {
