@@ -12,7 +12,7 @@ public sealed class RoleReplanningTests
     {
         var source = Empty<WorkItem>() with { Id = Guid.NewGuid(), Status = "Blocked", TypeKey = "task",
             ProposalProvenance = new(Guid.NewGuid(), "digest", "plan"),
-            Planning = new(["Plan and implement the foundation"], ["Approved plan", "Working prototype"], ["60 fps"]),
+            Planning = new(["Plan and implement the foundation"], ["Wave template committed", "Working prototype"], ["60 fps"]),
             StageAssignments = [new("specialist-execution", "AgentInstallation", Guid.NewGuid(), Guid.NewGuid())
                 { Requirements = new("game-technical-director", [], [], []) }] };
         var downstream = Empty<WorkItem>() with { Id = Guid.NewGuid(), Status = "Assigned", TypeKey = "task",
@@ -23,8 +23,8 @@ public sealed class RoleReplanningTests
         var request = new RoleRepairRequest(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), source.Id,
             ["Working prototype"], ["Move implementation to engineering"], [source, downstream], 2, DateTimeOffset.UtcNow);
         GameProposedWorkItemV1[] proposals = [
-            new("plan", "task", "Foundation plan", "Plan", ["Approved plan"], "game-technical-director", [], [], [], []),
-            new("prototype", "task", "Build foundation", "Plan and implement the foundation", ["Working prototype"], "game-engineer", [], [], [], ["plan"]),
+            new("plan", "task", "Foundation plan", "Plan", ["Implementation plan documented"], "game-technical-director", [], [], [], []),
+            new("prototype", "task", "Build foundation", "Plan and implement the foundation", ["Wave template committed", "Working prototype"], "game-engineer", [], [], [], ["plan"]),
             new("game", "task", "Complete game", "Complete game", ["Playable game"], "game-engineer", [], [], [], ["prototype"])];
         return (request, proposals);
     }

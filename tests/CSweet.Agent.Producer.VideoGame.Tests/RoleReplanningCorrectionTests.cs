@@ -14,7 +14,7 @@ public sealed class RoleReplanningCorrectionTests
         if (!valid)
         {
             items[0] = items[0] with { AcceptanceCriteria = ["Reworded plan"] };
-            items[1] = items[1] with { Description = "Shortened implementation" };
+            items[1] = items[1] with { Description = "Shortened implementation", AcceptanceCriteria = ["Working prototype"] };
             items[2] = items[2] with { DependencyProposalKeys = ["plan"] };
         }
         var cycle = new GameProductionPlanningCycleV1(request.WorkstreamId, request.TeamId, 1, request.BoardId,
@@ -34,8 +34,8 @@ public sealed class RoleReplanningCorrectionTests
         var (request, proposal, _) = Fixture();
         var findings = SpecialistAgent.RoleRepairCorrectionFindings(request, proposal);
         Assert.Contains(findings, x => x.Contains("Plan and implement the foundation"));
-        Assert.Contains(findings, x => x.Contains("Approved plan"));
-        Assert.Contains(findings, x => x.Contains("60 fps"));
+        Assert.Contains(findings, x => x.Contains("Wave template committed"));
+        Assert.DoesNotContain(findings, x => x.Contains("Retain this exact technical constraint"));
         Assert.Contains(findings, x => x.Contains("game: add a direct or transitive dependency on prototype"));
         Assert.Throws<InvalidOperationException>(() => SpecialistAgent.ValidateRoleRepairCoverage(request, proposal.DeliveryItems, proposal.TechnicalConstraints));
     }
@@ -64,11 +64,12 @@ public sealed class RoleReplanningCorrectionTests
         Assert.Equal(correction.Id, second.Id);
         Assert.Equal(correctionStatus, second.Status);
         Assert.Single(calls.Select(x => x.IdempotencyKey).Distinct());
+        Assert.Equal($"producer-role-repair-correction:{original.Id:N}:2", calls[0].IdempotencyKey);
         Assert.All(calls, x => {
             Assert.Equal(original.Target.OrganizationUserId, x.TargetOrganizationUserId);
             Assert.Equal(request.BoardId, x.BoardId);
             Assert.Equal(proposal.Cycle.PlanningFingerprint, x.Artifact!.Key);
-            Assert.Contains("Approved plan", x.InitialMessage);
+            Assert.Contains("Wave template committed", x.InitialMessage);
             Assert.Contains("Keep the accepted scope", x.InitialMessage);
             Assert.InRange(x.InitialMessage.Length, 1, 32768);
         });
@@ -86,6 +87,29 @@ public sealed class RoleReplanningCorrectionTests
             [], [], new AgentTestRuntime().CreateContext(), default));
     }
 
+    [Fact]
+    public void MixedTicketCriteriaNotFlaggedByEarlierReviewStillMoveOutOfPlanning()
+    {
+        var (request, proposal, _) = Fixture(true);
+        Assert.DoesNotContain("Wave template committed", request.RoleRepairCriteria);
+        var items = proposal.DeliveryItems.ToArray();
+        items[0] = items[0] with { AcceptanceCriteria = ["Wave template committed"] };
+        items[1] = items[1] with { AcceptanceCriteria = ["Working prototype"] };
+        var findings = SpecialistAgent.RoleRepairCorrectionFindings(request, proposal with { DeliveryItems = items });
+        Assert.Contains(findings, x => x.Contains("plan: move this execution criterion entirely") && x.Contains("Wave template committed"));
+        Assert.Throws<InvalidOperationException>(() => SpecialistAgent.ValidateRoleRepairCoverage(request, items, ["60 fps"]));
+    }
+
+    [Fact]
+    public void OriginalConstraintsAreRetainedWithoutDependingOnModelTranscription()
+    {
+        var (request, proposal, _) = Fixture(true);
+        proposal = proposal with { TechnicalConstraints = ["60 fps each"] };
+        Assert.Empty(SpecialistAgent.RoleRepairCorrectionFindings(request, proposal));
+        Assert.Equal(new[] { "60 fps" }, SpecialistAgent.RetainedRoleRepairConstraints(request));
+        Assert.Empty(SpecialistAgent.RetainedRoleRepairConstraints(null));
+        Assert.Equal(new[] { "Working prototype" }, request.RoleRepairCriteria);
+    }
     [Fact]
     public async Task OversizedCorrectionBlocksWithoutDroppingEvidenceOrDispatching()
     {

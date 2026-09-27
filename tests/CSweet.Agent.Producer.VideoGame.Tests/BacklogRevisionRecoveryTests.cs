@@ -8,9 +8,11 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class BacklogRevisionRecoveryTests
 {
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task Published_backlog_reconciles_corrected_planning_and_assignment_atomically(bool eligible)
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    public async Task Published_backlog_reconciles_corrected_planning_and_assignment_atomically(bool eligible, bool preserveConstraints)
     {
         var boardId = Guid.NewGuid();
         var key = "NC-T-CONTENT-ENG";
@@ -80,7 +82,7 @@ public sealed class BacklogRevisionRecoveryTests
         var roster = new AgentTeamContext(cycle.TeamId.ToString(), "team", "Team", 1, person.OrganizationUserId.ToString(), "Producer", [teammate], [], 1, false);
         for (var replay = 0; replay < 2; replay++)
             Assert.Equal(2, await SpecialistAgent.PublishCanonicalBacklogAsync(boardId, roster, cycle, [], session, artifact,
-                designer, session, artifact, technical, runtime.CreateContext(), default));
+                designer, session, artifact, technical, runtime.CreateContext(), default, preserveConstraints ? ["Original immutable audio constraint"] : null));
         Assert.Single(revisions);
         Assert.Equal(oldItem.Id, item.Id);
         Assert.Equal(artifact.Digest, item.ProposalProvenance!.ArtifactDigest);
@@ -90,7 +92,7 @@ public sealed class BacklogRevisionRecoveryTests
         Assert.Equal(new[] { proposal.Description }, item.Planning.Requirements);
         Assert.Equal(cycle.ApprovedPackageDigest, item.Planning.ArtifactPackageDigest!.Sha256);
         Assert.Equal(new[] { foundation.Id }, item.Planning.DependencyItemIds);
-        Assert.Equal(technical.TechnicalConstraints, item.Planning.Constraints);
+        Assert.Equal(technical.TechnicalConstraints.Concat(preserveConstraints ? new[] { "Original immutable audio constraint" } : []), item.Planning.Constraints);
         if (eligible)
         {
             Assert.Equal(installationId, Assert.Single(item.StageAssignments).AgentInstallationId);

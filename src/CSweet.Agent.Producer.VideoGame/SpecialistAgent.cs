@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.10.2";
+    public override string Version => "2.10.3";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -686,7 +686,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             {
                 ValidateRoleRepairCoverage(roleRepair, technicalProposal.DeliveryItems.Concat(designerProposal.PlayerOutcomes)
                     .GroupBy(x => x.ProposalKey, StringComparer.Ordinal).Select(x => x.First()).ToArray(),
-                    technicalProposal.TechnicalConstraints.Concat(designerProposal.DesignConstraints).ToArray());
+                    technicalProposal.TechnicalConstraints.Concat(designerProposal.DesignConstraints).Concat(RetainedRoleRepairConstraints(roleRepair)).ToArray());
 
             }
             catch (InvalidOperationException error)
@@ -702,7 +702,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var published = roleRepairPublished ? roleRepair!.OriginalItems.Count : await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
             designerSession, designerArtifact!, designerProposal,
             technicalSession, technicalArtifact!, technicalProposal,
-            context, cancellationToken);
+            context, cancellationToken, RetainedRoleRepairConstraints(roleRepair));
         var reconciledDigest = roleRepairPublished ? priorCycle.ReconciledDigest! : ProducerPolicyFingerprint.Digest(string.Join("|",
             designerArtifact!.Digest, technicalArtifact!.Digest, published));
         await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle with
@@ -1158,7 +1158,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentCoordinationArtifact technicalArtifact,
         GameTechnicalDeliveryProposalV1 technical,
         AgentRuntimeContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, IReadOnlyList<string>? retainedConstraints = null)
     {
         var proposals = designer.PlayerOutcomes.Concat(technical.DeliveryItems)
             .GroupBy(x => x.ProposalKey, StringComparer.Ordinal)
@@ -1235,7 +1235,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                     AccountableOrganizationUserId = accountable,
                     Planning = new WorkItemPlanningSpecification(
                         [proposal.Description], proposal.AcceptanceCriteria,
-                        designer.DesignConstraints.Concat(technical.TechnicalConstraints).Distinct().ToList())
+                        designer.DesignConstraints.Concat(technical.TechnicalConstraints).Concat(retainedConstraints ?? []).Distinct(StringComparer.Ordinal).ToList())
                     {
                         DependencyItemIds = proposal.DependencyProposalKeys.Select(key => byKey[key].Id).ToList(),
                         DelegationRecommendations = executable
@@ -1272,7 +1272,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             {
                 Requirements = [proposal.Description],
                 AcceptanceCriteria = proposal.AcceptanceCriteria,
-                Constraints = designer.DesignConstraints.Concat(technical.TechnicalConstraints).Distinct().ToList(),
+                Constraints = designer.DesignConstraints.Concat(technical.TechnicalConstraints).Concat(retainedConstraints ?? []).Distinct(StringComparer.Ordinal).ToList(),
                 DependencyItemIds = proposal.DependencyProposalKeys.Select(key => byKey[key].Id).ToList(),
                 ArtifactPackageDigest = existing.Planning.ArtifactPackageDigest is { } acceptedPackage &&
                     acceptedPackage.PackageId == package.PackageId && acceptedPackage.Version == package.Version &&

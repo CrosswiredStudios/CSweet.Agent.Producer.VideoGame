@@ -28,14 +28,14 @@ public sealed partial class SpecialistAgent
             message += "\nRecorded Creative Director decisions: " + JsonSerializer.Serialize(managerDirections, AcceptanceJson);
         if (message.Length > 32768)
             throw new InvalidOperationException("Role-repair correction evidence exceeds the coordination bound; no scope was truncated.");
-        // One stable correction session per original planning session. Repeated attention reviews
+        // One stable correction session per original planning session and role policy. Repeated attention reviews
         // recover that session, including terminal failure; they never create another retry generation.
         return await context.Platform.Communication.StartBoardCoordinationAsync(new(
             original.Target.OrganizationUserId, request.BoardId, "Correct role-replanning scope coverage",
             RoleRepairObjective(), ["Preserve every original requirement, criterion and constraint.",
                 "Assign implementation to engineering and independent validation to QA.",
                 "Make downstream consumers depend on the delivered implementation and validation."],
-            message, $"producer-role-repair-correction:{original.Id:N}:1", PlanningArtifact(cycle, members)), token);
+            message, $"producer-role-repair-correction:{original.Id:N}:2", PlanningArtifact(cycle, members)), token);
     }
 
     internal static IReadOnlyList<string> RoleRepairCorrectionFindings(RoleRepairRequest request,
@@ -43,7 +43,7 @@ public sealed partial class SpecialistAgent
     {
         var items = proposal.DeliveryItems;
         // The creative-brief invariant is supplied by the Producer when there is no designer.
-        var constraints = proposal.TechnicalConstraints.Append("Preserve the exact accepted creative brief and its non-goals.").ToArray();
+        var constraints = proposal.TechnicalConstraints.Concat(RetainedRoleRepairConstraints(request)).Append("Preserve the exact accepted creative brief and its non-goals.").ToArray();
         try { ValidateRoleRepairCoverage(request, items, constraints); return []; }
         catch (InvalidOperationException error)
         {
@@ -62,11 +62,11 @@ public sealed partial class SpecialistAgent
                     !original.Planning.AcceptanceCriteria.SequenceEqual(replacement.AcceptanceCriteria))
                     findings.Add($"{key}: restore its original acceptance criteria and order; unrelated scope must remain unchanged.");
             }
-            foreach (var text in request.RoleRepairCriteria)
+            foreach (var text in RoleRepairDeliveryCriteria(request))
                 foreach (var item in items.Where(x => x.AcceptanceCriteria.Contains(text, StringComparer.Ordinal) &&
                     x.AccountableRoleKey is not ("game-engineer" or "game-quality-assurance")))
                     findings.Add($"{item.ProposalKey}: move this execution criterion entirely to engineering or independent QA: {text}");
-            var moved = items.Where(x => x.AcceptanceCriteria.Intersect(request.RoleRepairCriteria, StringComparer.Ordinal).Any())
+            var moved = items.Where(x => x.AcceptanceCriteria.Intersect(RoleRepairDeliveryCriteria(request), StringComparer.Ordinal).Any())
                 .Select(x => x.ProposalKey).ToHashSet(StringComparer.Ordinal);
             bool DependsOn(string from, string target, HashSet<string> visited) => visited.Add(from) &&
                 items.Where(x => x.ProposalKey == from).SelectMany(x => x.DependencyProposalKeys)

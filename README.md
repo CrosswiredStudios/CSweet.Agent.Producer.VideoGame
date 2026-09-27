@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.10.2`
+- Version: `2.10.3`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -196,3 +196,5 @@ The Producer requests `work.orchestration.cancel` at team scope for this recover
 Version 2.10.1 stores each original ticket snapshot separately and writes a compact header only after all pages are durable. This retains the complete accepted scope while respecting the host's 65,536-character operating-state limit. Interrupted writes reuse the persisted pages; replanning hydrates the exact original snapshots before validating coverage and freshness.
 
 Version 2.10.2 gives a failed role-replanning proposal one durable correction session with exact scope discrepancies. The Producer reuses that session on reconnect and still requires the full coverage check before replacing a sprint. Terminal correction failures remain blocked for diagnosis.
+
+Version 2.10.3 carries the original role-repair constraints into every resulting ticket. All old mixed-ticket completion criteria stay with engineering/QA delivery; the retained Technical Director ticket receives separate plan criteria. This revised policy has one stable correction session per source session, with prior attempts preserved.
