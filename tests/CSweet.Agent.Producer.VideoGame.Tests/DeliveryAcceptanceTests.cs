@@ -10,11 +10,12 @@ public sealed class DeliveryAcceptanceTests
     private static readonly string Sha = new('a', 40);
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(false, false)]
-    [InlineData(true, true)]
-    [InlineData(false, true)]
-    public async Task ReviewCachesDecisionBeforeSubmissionAndReplaysAfterLostResponse(bool approved, bool documentDelivery)
+    [InlineData(true, false, false)]
+    [InlineData(false, false, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, true, true)]
+    public async Task ReviewCachesDecisionBeforeSubmissionAndReplaysAfterLostResponse(bool approved, bool documentDelivery, bool roleRepair)
     {
         var boardId = Guid.NewGuid();
         var documentId = Guid.NewGuid();
@@ -30,13 +31,16 @@ public sealed class DeliveryAcceptanceTests
         var review = Stage("producer-review", "", Guid.NewGuid()) with { Status = "WaitingForApproval" };
         var item = new WorkItem(Guid.NewGuid(), Guid.NewGuid(), null, null, "Task", "Move player", "Deliver movement",
             "WaitingForApproval", "High", null, 0, 1, null)
-        { Planning = new WorkItemPlanningSpecification(["Movement"], ["Input changes position"], []) };
+        { Planning = new WorkItemPlanningSpecification(["Movement"], ["Input changes position"], []),
+            StageAssignments = roleRepair ? [new("specialist-execution", "AgentInstallation", Guid.NewGuid(), Guid.NewGuid())
+                { Requirements = new("game-technical-director", [], [], ["work.execution.run.v1"]) }] : [] };
         var itemExecution = new WorkItemExecutionResponse(Guid.NewGuid(), item.Id, "GAME-1", "producer-review", 0,
             "WaitingForApproval", null, stages, DateTimeOffset.UtcNow);
         var execution = new WorkSprintExecutionResponse(Guid.NewGuid(), boardId, Guid.NewGuid(), Guid.NewGuid(),
             Guid.NewGuid(), "Active", 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null, [itemExecution]);
         AgentOperatingStateResponse? stored = null;
         var evaluations = 0;
+        var repairs = 0;
         var submissions = new List<DecideWorkApprovalStageRequest>();
         var runtime = new AgentTestRuntime()
             .RegisterCapability<JsonElement, ArtifactDocument>(PlatformCapabilities.ArtifactRead, (request, _) =>
@@ -71,12 +75,20 @@ public sealed class DeliveryAcceptanceTests
             if (documentDelivery) Assert.Equal("Actual movement design content.", input.DocumentContent);
             else Assert.Null(input.DocumentContent);
             return Task.FromResult(new DeliveryAcceptanceDecision(approved, "Delivery reviewed.",
-                approved ? [] : ["Fix movement bounds."], [new("Input changes position", approved, "QA movement report for exact commit.")]));
+                approved ? [] : ["Fix movement bounds."], [new("Input changes position", approved, "QA movement report for exact commit.")], roleRepair, roleRepair ? ["Input changes position"] : null));
+        }
+        Task Repair(DeliveryAcceptanceInput input, DeliveryAcceptanceDecision decision, CancellationToken token)
+        {
+            Assert.NotNull(stored);
+            Assert.True(decision.RequiresRoleReplanning);
+            if (++repairs == 1) throw new InvalidOperationException("Lost handoff response");
+            return Task.CompletedTask;
         }
         await Assert.ThrowsAnyAsync<Exception>(() => SpecialistAgent.ReviewDeliveryAsync(boardId, execution,
-            itemExecution, review, runtime.CreateContext(), Evaluate, CancellationToken.None));
-        await SpecialistAgent.ReviewDeliveryAsync(boardId, execution, itemExecution, review, runtime.CreateContext(), Evaluate, CancellationToken.None);
+            itemExecution, review, runtime.CreateContext(), Evaluate, CancellationToken.None, Repair));
+        await SpecialistAgent.ReviewDeliveryAsync(boardId, execution, itemExecution, review, runtime.CreateContext(), Evaluate, CancellationToken.None, Repair);
         Assert.Equal(1, evaluations);
+        if (roleRepair) { Assert.Empty(submissions); Assert.Equal(2, repairs); return; }
         Assert.Equal(2, submissions.Count);
         Assert.Equal(submissions[0], submissions[1]);
         Assert.Equal(approved, submissions[1].Approved);

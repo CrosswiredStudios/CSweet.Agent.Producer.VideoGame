@@ -6,9 +6,12 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class PlanningDirectionRecoveryTests
 {
-    [Fact]
-    public async Task Direction_recovery_is_distinct_from_legacy_but_stable_across_retries()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(8192)]
+    public async Task Direction_recovery_is_distinct_from_legacy_but_stable_across_retries(int contextLength)
     {
+        var additionalContext = contextLength == 0 ? null : new string('x', contextLength);
         var target = Guid.NewGuid();
         var cycle = new GameProductionPlanningCycleV1(Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(),
             "profile", Guid.NewGuid(), 1, "package", "concept", "vision", new string('a', 64));
@@ -26,12 +29,14 @@ public sealed class PlanningDirectionRecoveryTests
         string[] directions = ["Proceed with delegated engine research. Do not reopen the resolved version question."];
         for (var i = 0; i < 2; i++)
             await SpecialistAgent.EnsurePlanningSessionAsync(member, cycle.BoardId, cycle, "Planning", "Plan delivery",
-                "video-game.production.technical-delivery-proposal.v1", [], directions, runtime.CreateContext(), default);
+                "video-game.production.technical-delivery-proposal.v1", [], directions, runtime.CreateContext(), default, additionalContext);
         var legacy = "producer-planning-session:direction:" + ProducerPolicyFingerprint.Digest(
             JsonSerializer.Serialize(new { cycle.PlanningFingerprint, targetUserId = target, managerDirections = directions }));
         Assert.Equal(legacy + ":directions-v2", requests[0].IdempotencyKey);
         Assert.Equal(requests[0].IdempotencyKey, requests[1].IdempotencyKey);
         Assert.Contains(directions[0], requests[0].InitialMessage);
+        Assert.Equal("Plan delivery", requests[0].Objective);
+        if (additionalContext is not null) Assert.Contains(additionalContext, requests[0].InitialMessage);
         Assert.InRange(requests[0].IdempotencyKey.Length, 1, 160);
         await SpecialistAgent.EnsurePlanningSessionAsync(member, cycle.BoardId, cycle, "Planning", "Plan delivery",
             "video-game.production.technical-delivery-proposal.v1", [], [], runtime.CreateContext(), default);

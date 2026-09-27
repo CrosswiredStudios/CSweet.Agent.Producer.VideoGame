@@ -16,7 +16,7 @@ public sealed class ManifestTests
         var manifest = await AgentManifestLoader.LoadAsync(path, CancellationToken.None);
         var agent = new SpecialistAgent();
 
-        foreach (var name in new[] { "work.item.read", "work.item.comment" })
+        foreach (var name in new[] { "work.item.read", "work.item.comment", "work.orchestration.cancel", "work.sprint.carryover" })
             Assert.Contains(manifest.Requires, x => x.Name == name && x.Scope == "team");
         var managerProfile = Assert.Single(manifest.WorkstreamProfiles.Provides, x => x.Version == 2);
         Assert.Equal("video-game-manager-brief.v1", managerProfile.Key);

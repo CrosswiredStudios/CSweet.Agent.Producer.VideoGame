@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.9.5";
+    public override string Version => "2.10.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -157,6 +157,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     {
         if (item.CorrelationId?.StartsWith(ManagerDeliveryPrefix, StringComparison.Ordinal) == true)
             return await ReconcileManagerDeliveryAsync(item, context, cancellationToken);
+        if (item.CorrelationId?.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) == true)
+            return await ReconcilePlanningAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) == true)
             return await ReconcilePlanningAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(EstimationCommitmentPrefix, StringComparison.Ordinal) == true)
@@ -474,7 +476,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         {
             // A terminal planning conflict must not be requeued on every attention tick.
             // A later recovery generation may reassess it once with new repair logic.
-            if (IsSettledPlanningBlock(existing, correlationId))
+            if (IsSettledPlanningBlock(existing, correlationId) ||
+                (correlationId.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) && existing.Status == PersonalTodoStatuses.Blocked))
                 return existing;
             var waiting = existing.Status == PersonalTodoStatuses.Running && existing.Wait is not null;
             if (existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || waiting)
@@ -531,7 +534,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     {
         var correlation = item.CorrelationId ?? string.Empty;
         if (correlation.StartsWith("producer-blocker:", StringComparison.Ordinal) ||
-            correlation.StartsWith(StaffingGapCommitmentPrefix, StringComparison.Ordinal)) return 0;
+            correlation.StartsWith(StaffingGapCommitmentPrefix, StringComparison.Ordinal) ||
+            correlation.StartsWith(RoleRepairPrefix, StringComparison.Ordinal)) return 0;
         if (correlation.StartsWith("producer-gate:", StringComparison.Ordinal)) return 1;
         if (correlation.StartsWith(SprintReadinessCommitmentPrefix, StringComparison.Ordinal)) return 2;
         if (correlation.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) ||
@@ -550,6 +554,14 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             string.IsNullOrWhiteSpace(source.SourceFingerprint))
             return PersonalTodoResult.Blocked("The planning commitment is missing authoritative workstream, team, or fingerprint context.");
 
+        RoleRepairRequest? roleRepair = null;
+        if (item.CorrelationId?.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) == true)
+        {
+            roleRepair = (await context.Platform.ReadOperatingStateAsync<RoleRepairRequest>(source.SourceFingerprint, cancellationToken))?.Payload;
+            if (roleRepair is null || roleRepair.WorkstreamId != workstreamId || roleRepair.TeamId != teamId ||
+                roleRepair.BoardId != source.BoardId || source.SourceFingerprint != RoleRepairPrefix + roleRepair.ReviewStageId.ToString("N"))
+                return PersonalTodoResult.Blocked("Role repair is missing its exact persisted scope and review evidence.");
+        }
         var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
         var stateStore = new RevisionSafeProjectState(context.Platform);
         var state = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
@@ -580,6 +592,10 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         source = source with { BoardId = boardId };
         await EnsureDraftSprintAsync(boardId, handoff.RevisionDigest, context, cancellationToken);
         operatingState.PlanningCycles.TryGetValue(workstreamId, out var priorCycle);
+        if (priorCycle is not null && priorCycle.PlanningFingerprint != source.SourceFingerprint)
+            priorCycle = new ProducerPlanningCycleState(workstreamId, boardId, teamId, source.SourceFingerprint,
+                priorCycle.ArtifactPackageId, null, null, null, null, null, DateTimeOffset.UtcNow);
+        var roleRepairPublished = roleRepair is not null && priorCycle?.ReconciledDigest is not null;
         ArtifactPackage package;
         if (priorCycle?.ArtifactPackageId is not { } packageId)
         {
@@ -613,8 +629,10 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             workstreamId, handoff.RevisionDigest);
         var technicalSession = await EnsurePlanningSessionAsync(technicalDirector, boardId, cycle,
             "Technical delivery and decomposition proposal",
-            "Decompose the accepted brief into a lean complete backlog, including containers, technical discovery, implementation, QA and packaging. Justify specialist roles with actual work; do not require a full studio roster.",
-            "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken);
+            "Decompose the accepted brief into a lean complete backlog, including containers, technical discovery, implementation, QA and packaging. Justify specialist roles with actual work; do not require a full studio roster. " +
+                (roleRepair is null ? RoleBoundary : RoleRepairObjective()),
+            "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken,
+            roleRepair is null ? null : RoleRepairContext(roleRepair));
         var designerSession = designer is null ? technicalSession : await EnsurePlanningSessionAsync(designer, boardId, cycle,
             "Player-outcome and game-design backlog proposal",
             "Define player outcomes and testable acceptance criteria within the accepted brief. Coordinate technical feasibility separately.",
@@ -622,6 +640,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         priorCycle = (priorCycle ?? new ProducerPlanningCycleState(workstreamId, boardId, teamId,
             source.SourceFingerprint, package.Id, null, null, null, null, null, DateTimeOffset.UtcNow)) with
         {
+            PlanningFingerprint = source.SourceFingerprint,
             DesignerSessionId = designerSession.Id,
             TechnicalDirectorSessionId = technicalSession.Id,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -657,16 +676,37 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         var questions = designerProposal.OpenCreativeDecisions.Concat(technicalProposal.OpenFeasibilityDecisions).ToList();
         await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
             handoff, context, cancellationToken);
-        var published = await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
+        if (roleRepair is not null && !roleRepairPublished)
+        {
+            if (questions.Count > 0)
+                return PersonalTodoResult.Blocked("Resolve the corrected proposal's authority questions before replacing the active sprint.");
+            try
+            {
+                ValidateRoleRepairCoverage(roleRepair, technicalProposal.DeliveryItems.Concat(designerProposal.PlayerOutcomes)
+                    .GroupBy(x => x.ProposalKey, StringComparer.Ordinal).Select(x => x.First()).ToArray(),
+                    technicalProposal.TechnicalConstraints.Concat(designerProposal.DesignConstraints).ToArray());
+
+            }
+            catch (InvalidOperationException error)
+            {
+                return PersonalTodoResult.Blocked("Role repair requires correction: " + error.Message);
+            }
+            var sourceExecution = await context.Platform.Work.ReadOrchestrationAsync(new(boardId, SprintId: roleRepair.SprintId), cancellationToken);
+            if (sourceExecution?.Items.Any(x => x.Status == "Running") == true)
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                    "The corrected plan is ready; let current work finish before carrying unfinished scope into the replacement sprint.");
+            await PrepareRoleRepairSprintAsync(roleRepair, context, cancellationToken);
+        }
+        var published = roleRepairPublished ? roleRepair!.OriginalItems.Count : await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
             designerSession, designerArtifact!, designerProposal,
             technicalSession, technicalArtifact!, technicalProposal,
             context, cancellationToken);
-        var reconciledDigest = ProducerPolicyFingerprint.Digest(string.Join("|",
+        var reconciledDigest = roleRepairPublished ? priorCycle.ReconciledDigest! : ProducerPolicyFingerprint.Digest(string.Join("|",
             designerArtifact!.Digest, technicalArtifact!.Digest, published));
         await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle with
         {
-            DesignerProposalDigest = designerArtifact.Digest,
-            TechnicalProposalDigest = technicalArtifact.Digest,
+            DesignerProposalDigest = designerArtifact!.Digest,
+            TechnicalProposalDigest = technicalArtifact!.Digest,
             ReconciledDigest = reconciledDigest,
             OutstandingAuthorityQuestions = questions,
             UpdatedAt = DateTimeOffset.UtcNow
@@ -942,14 +982,17 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         IReadOnlyList<ArtifactPackageMemberDigest> members,
         IReadOnlyList<string> managerDirections,
         AgentRuntimeContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, string? additionalContext = null)
     {
         if (!Guid.TryParse(teammate.EmployeeId, out var targetUserId))
             throw new InvalidOperationException($"{subject} target has no authoritative organization-user identity.");
         var message = $"Planning cycle {cycle.PlanningFingerprint}. {objective} Return final artifact type {expectedArtifactType}.";
+        if (!string.IsNullOrWhiteSpace(additionalContext)) message += "\n" + additionalContext;
         if (managerDirections.Count > 0)
             message += " Incorporate these recorded Creative Director decisions into the proposal and close only the questions they resolve: " +
                 string.Join(" ", managerDirections);
+        if (objective.Length > 4096 || message.Length > 32768)
+            throw new InvalidOperationException("Planning coordination exceeds the host content limits; provide a bounded handoff without dropping scope.");
         var sessionKey = managerDirections.Count == 0
             ? $"producer-planning-session:{cycle.PlanningFingerprint}:{targetUserId:N}"
             : $"producer-planning-session:direction:{ProducerPolicyFingerprint.Digest(

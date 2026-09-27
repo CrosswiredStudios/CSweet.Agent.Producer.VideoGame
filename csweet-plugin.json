@@ -18,7 +18,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.9.5",
+  "version": "2.10.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -328,6 +328,11 @@
       "purpose": "Reconcile authoritative execution state, blockers, and retries."
     },
     {
+      "name": "work.orchestration.cancel",
+      "scope": "team",
+      "purpose": "Cancel an incompatible execution only after validating a scope-preserving role correction; retain its history and replan unfinished work."
+    },
+    {
       "name": "work.orchestration.retry",
       "scope": "team",
       "purpose": "Retry an eligible blocked stage under policy."
@@ -342,6 +347,7 @@
       "scope": "team",
       "purpose": "Create bounded planned sprints."
     },
+
     {
       "name": "work.sprint.scope.manage",
       "scope": "team",
@@ -355,7 +361,7 @@
     {
       "name": "work.sprint.carryover",
       "scope": "team",
-      "purpose": "Carry incomplete scope with lineage."
+      "purpose": "Carry unfinished scope from a cancelled incompatible sprint into its planned replacement after validating role correction."
     },
     {
       "name": "work.sprint.report.read",
