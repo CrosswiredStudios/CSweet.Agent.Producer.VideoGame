@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent
         var message = RoleRepairObjective(request) + "\n" + RoleRepairContext(request) +
             "\nThe previous proposal failed coverage validation. Correct all of these exact discrepancies; " +
             "return a complete replacement proposal using the canonical board as the unchanged source scope. " +
-            "Preserve the exact text even when adding explanation. Do not weaken scope or report execution as complete.\n" +
+            "Preserve the exact authorized text even when adding explanation. Do not report execution as complete.\n" +
             JsonSerializer.Serialize(findings, AcceptanceJson);
         if (managerDirections.Count > 0)
             message += "\nRecorded Creative Director decisions: " + JsonSerializer.Serialize(managerDirections, AcceptanceJson);
@@ -69,7 +69,18 @@ public sealed partial class SpecialistAgent
             if (request.ScopeDirection is not null)
             {
                 foreach (var expected in ScopeExpectedItems(request).Where(x => x.Status != "Cancelled"))
-                    findings.Add(JsonSerializer.Serialize(new { key = ProposalKey(expected), expected.Planning }, AcceptanceJson));
+                {
+                    var key = ProposalKey(expected);
+                    var actual = items.SingleOrDefault(x => x.ProposalKey == key);
+                    if (actual is null) { findings.Add($"Restore existing ticket {key}."); continue; }
+                    if (expected.Planning is not { } planning) continue;
+                    if (!planning.AcceptanceCriteria.SequenceEqual(actual.AcceptanceCriteria))
+                        findings.Add($"{key}: use exactly these criteria in this order: " + JsonSerializer.Serialize(planning.AcceptanceCriteria));
+                    foreach (var requirement in planning.Requirements.Where(x => !actual.Description.Contains(x, StringComparison.Ordinal)))
+                        findings.Add($"{key}: retain this authorized requirement verbatim: {requirement}");
+                    if (PrimaryExecutionAssignment(expected)?.Requirements?.RequiredRoleKey is { } role && actual.AccountableRoleKey != role)
+                        findings.Add($"{key}: preserve accountable role {role}.");
+                }
                 return findings;
             }
             var criteria = items.SelectMany(x => x.AcceptanceCriteria).ToHashSet(StringComparer.Ordinal);

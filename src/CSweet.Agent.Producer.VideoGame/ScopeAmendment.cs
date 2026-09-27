@@ -8,12 +8,21 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
+    internal static bool CanAmendScope(WorkSprintExecutionResponse execution, Guid itemId, Guid stageId)
+    {
+        var item = execution.Items.SingleOrDefault(x => x.WorkItemId == itemId);
+        var stage = item?.Stages.SingleOrDefault(x => x.Id == stageId && x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
+        return execution.Status == "Active" && item?.Status is "Blocked" or "Failed" or "WaitingForApproval" &&
+            stage?.Status is "Blocked" or "Failed" or "WaitingForApproval" &&
+            !execution.Items.Any(x => x.Status == "Running" || x.Stages.Any(s => s.Status is "Running" or "Dispatching" ||
+                s.Id != stageId && s.Status == "WaitingForApproval"));
+    }
+
     private async Task<string> QueueScopeAmendmentAsync(WorkSprintExecutionResponse execution,
         WorkItemExecutionResponse item, WorkStageExecutionResponse? stage, string direction, Guid turnId,
         AgentRuntimeContext context, CancellationToken token)
     {
-        if (stage is null || stage.Status is not ("Blocked" or "Failed" or "WaitingForApproval") ||
-            execution.Items.Any(x => x.Status == "Running" || x.Stages.Any(s => s.Status is "Running" or "Dispatching")))
+        if (stage is null || !CanAmendScope(execution, item.WorkItemId, stage.Id))
             return "Scope amendment requires the current work to reach a stopped review boundary. No running assignment or sprint was changed.";
         var board = await context.Platform.Work.ReadBoardAsync(execution.BoardId, token);
         if (board.Board.ManagerOrganizationUserId?.ToString() != context.Identity?.EmployeeId ||

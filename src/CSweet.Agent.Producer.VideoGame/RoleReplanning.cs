@@ -184,6 +184,8 @@ public sealed partial class SpecialistAgent
                 throw new InvalidOperationException("The original delivery review is no longer waiting for this correction.");
             if (request.InfrastructureRecovery && !CanRecoverExhaustedSprint(execution, request.WorkItemId, request.ReviewStageId))
                 throw new InvalidOperationException("The exhausted stage changed or other work is active; reassess recovery.");
+            if (request.ScopeDirection is not null && !CanAmendScope(execution, request.WorkItemId, request.ReviewStageId))
+                throw new InvalidOperationException("Scope amendment must wait for all active work and other approvals to settle.");
             var current = await context.Platform.Work.ReadBoardAsync(boardId, token);
             if (current.Items.Count != request.OriginalItems.Count || request.OriginalItems.Any(old => !current.Items.Any(x => x.Id == old.Id &&
                 JsonSerializer.Serialize(x.Planning) == JsonSerializer.Serialize(old.Planning))))
