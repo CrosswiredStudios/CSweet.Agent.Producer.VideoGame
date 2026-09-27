@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.11.1";
+    public override string Version => "2.11.2";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -996,7 +996,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         if (managerDirections.Count > 0)
             message += " Incorporate these recorded Creative Director decisions into the proposal and close only the questions they resolve: " +
                 string.Join(" ", managerDirections);
-        if (objective.Length > 4096 || message.Length > 32768)
+        if (objective.Length > 4096)
             throw new InvalidOperationException("Planning coordination exceeds the host content limits; provide a bounded handoff without dropping scope.");
         var sessionKey = managerDirections.Count == 0
             ? $"producer-planning-session:{cycle.PlanningFingerprint}:{targetUserId:N}"
@@ -1004,49 +1004,54 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 JsonSerializer.Serialize(new { cycle.PlanningFingerprint, targetUserId, managerDirections }))}:directions-v2";
         // The board coordination request carries this message durably to the
         // specialist. A parallel direct chat turn can block the same agent.
+        Task<AgentCoordinationSession> StartAsync(StartBoardCoordinationRequest candidate)
+        {
+            var handoff = BoundPlanningHandoff(candidate.InitialMessage, candidate.Artifact!);
+            return context.Platform.Communication.StartBoardCoordinationAsync(candidate with
+                { InitialMessage = handoff.Message, Artifact = handoff.Artifact }, cancellationToken);
+        }
         var start = new StartBoardCoordinationRequest(targetUserId, boardId, subject, objective,
                 ["Proposal binds the exact planning cycle.", "Every leaf has testable acceptance criteria and one accountable role.",
                     "Required and preferred skills are explicit; estimates are not invented."],
-                message, sessionKey,
-                PlanningArtifact(cycle, members));
-        var session = await context.Platform.Communication.StartBoardCoordinationAsync(start, cancellationToken);
+                message, sessionKey, PlanningArtifact(cycle, members));
+        var session = await StartAsync(start);
         if (NeedsPlanningContextRecovery(session))
-            session = await context.Platform.Communication.StartBoardCoordinationAsync(
-                start with { IdempotencyKey = start.IdempotencyKey + ":context-v2" }, cancellationToken);
+            session = await StartAsync(
+                start with { IdempotencyKey = start.IdempotencyKey + ":context-v2" });
         if (NeedsPlanningDocumentRecovery(session))
-            session = await context.Platform.Communication.StartBoardCoordinationAsync(
-                start with { IdempotencyKey = start.IdempotencyKey + ":documents-v1" }, cancellationToken);
+            session = await StartAsync(
+                start with { IdempotencyKey = start.IdempotencyKey + ":documents-v1" });
         if (NeedsPlanningFormatRecovery(session))
-            session = await context.Platform.Communication.StartBoardCoordinationAsync(
-                start with { IdempotencyKey = start.IdempotencyKey + ":format-v1" }, cancellationToken);
+            session = await StartAsync(
+                start with { IdempotencyKey = start.IdempotencyKey + ":format-v1" });
         if (NeedsCompactPlanningRecovery(session))
-            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+            session = await StartAsync(
                 start with {
                     IdempotencyKey = start.IdempotencyKey + ":compact-v1",
                     InitialMessage = message + " The prior technical proposal had malformed JSON in a large deliveryItems array. " +
                         "Regenerate a complete, compact Epic > Story > Task proposal with no more than 20 items. " +
                         "Preserve every accepted deliverable, including independently testable engineering and QA work; " +
                         "use concise descriptions and return the typed artifact only after validation."
-                }, cancellationToken);
+                });
         if (NeedsDesignerHierarchyRecovery(session))
-            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+            session = await StartAsync(
                 start with {
                     IdempotencyKey = start.IdempotencyKey + ":hierarchy-v1",
                     InitialMessage = message + " Correct the previous proposal: every feature must name a milestone parent included in this proposal. Preserve the accepted scope."
-                }, cancellationToken);
+                });
         if (NeedsTechnicalHierarchyRecovery(session))
         {
             var prior = session.Turns.Last(x => x.Artifact?.Type == expectedArtifactType).Artifact!
                 .Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
             var retained = string.Join("; ", prior.DeliveryItems.Select(x =>
                 $"{x.ProposalKey} ({x.WorkItemTypeKey}: {x.Title})"));
-            session = await context.Platform.Communication.StartBoardCoordinationAsync(
+            session = await StartAsync(
                 start with {
                     IdempotencyKey = start.IdempotencyKey + ":hierarchy-v1",
                     InitialMessage = message + " Correct the previous proposal into an Epic > Story > Task hierarchy. " +
                         "Keep these existing proposal keys and work types so published tickets can be reparented without duplication: " +
                         retained + ". Add testable Story containers under Epics, then parent every Task and spike under a Story."
-                }, cancellationToken);
+                });
         }
         return session;
     }

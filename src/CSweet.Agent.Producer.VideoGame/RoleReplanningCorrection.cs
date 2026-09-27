@@ -28,8 +28,7 @@ public sealed partial class SpecialistAgent
             JsonSerializer.Serialize(findings, AcceptanceJson);
         if (managerDirections.Count > 0)
             message += "\nRecorded Creative Director decisions: " + JsonSerializer.Serialize(managerDirections, AcceptanceJson);
-        if (message.Length > 32768)
-            throw new InvalidOperationException("Role-repair correction evidence exceeds the coordination bound; no scope was truncated.");
+        var handoff = BoundPlanningHandoff(message, RoleRepairArtifact(cycle, members, request));
         // One stable correction session per original planning session and role policy. Repeated attention reviews
         // recover that session, including terminal failure; they never create another retry generation.
         return await context.Platform.Communication.StartBoardCoordinationAsync(new(
@@ -37,7 +36,7 @@ public sealed partial class SpecialistAgent
             RoleRepairObjective(request), [request.ScopeDirection is null ? "Preserve every original requirement, criterion and constraint." : "Apply only the recorded owner-authorized replacements; preserve unrelated planning.",
                 "Assign implementation to engineering and independent validation to QA.",
                 "Make downstream consumers depend on the delivered implementation and validation."],
-            message, $"producer-role-repair-correction:{original.Id:N}:structured-v1", RoleRepairArtifact(cycle, members, request)), token);
+            handoff.Message, $"producer-role-repair-correction:{original.Id:N}:structured-v1", handoff.Artifact), token);
     }
 
     internal static AgentCoordinationArtifactSubmission RoleRepairArtifact(GameProductionPlanningCycleV1 cycle,

@@ -134,7 +134,7 @@ public sealed class RoleReplanningCorrectionTests
     public async Task OversizedCorrectionBlocksWithoutDroppingEvidenceOrDispatching()
     {
         var (request, proposal, original) = Fixture();
-        request = request with { Findings = [new string('x', 32768)] };
+        request = request with { Findings = [new string('x', 65536)] };
         await Assert.ThrowsAsync<InvalidOperationException>(() => SpecialistAgent.EnsureRoleRepairCorrectionAsync(
             request, original, proposal.Cycle, [], [], new AgentTestRuntime().CreateContext(), default));
     }
