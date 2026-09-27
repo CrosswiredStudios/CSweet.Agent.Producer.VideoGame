@@ -167,32 +167,41 @@ public sealed partial class SpecialistAgent
     internal static async Task PrepareRoleRepairSprintAsync(RoleRepairRequest request, AgentRuntimeContext context, CancellationToken token)
     {
         var boardId = request.BoardId;
-        var key = RoleRepairPrefix + request.ReviewStageId.ToString("N");
+        var key = (request.InfrastructureRecovery ? SprintRecoveryPrefix : RoleRepairPrefix) + request.ReviewStageId.ToString("N");
         var execution = await context.Platform.Work.ReadOrchestrationAsync(new(boardId, SprintId: request.SprintId), token)
             ?? throw new InvalidOperationException("The source sprint execution is unavailable.");
         if (execution.Status != "Cancelled")
         {
             if (execution.Status != "Active" || !execution.Items.Any(x => x.WorkItemId == request.WorkItemId &&
-                x.Stages.Any(s => s.Id == request.ReviewStageId && s.Status is "WaitingForApproval" or "Blocked")))
+                x.Stages.Any(s => s.Id == request.ReviewStageId && s.Status is "WaitingForApproval" or "Blocked" or "Failed")))
                 throw new InvalidOperationException("The original delivery review is no longer waiting for this correction.");
+            if (request.InfrastructureRecovery && !CanRecoverExhaustedSprint(execution, request.WorkItemId, request.ReviewStageId))
+                throw new InvalidOperationException("The exhausted stage changed or other work is active; reassess recovery.");
             var current = await context.Platform.Work.ReadBoardAsync(boardId, token);
             if (current.Items.Count != request.OriginalItems.Count || request.OriginalItems.Any(old => !current.Items.Any(x => x.Id == old.Id &&
                 JsonSerializer.Serialize(x.Planning) == JsonSerializer.Serialize(old.Planning))))
                 throw new InvalidOperationException("Scope changed after the role repair request; reassess before cancelling execution.");
             await context.Platform.InvokeAsync<ControlWorkSprintExecutionRequest, WorkSprintExecutionResponse>(
                 WorkOrchestrationCapabilities.Cancel, new(boardId, request.SprintId, execution.Revision,
-                    key + ":cancel", "Replace incompatible role assignments with a scope-preserving technical plan."), token);
+                    key + ":cancel", request.InfrastructureRecovery ? "Preserve exhausted attempt history after repair: " + string.Join(" ", request.Findings) : "Replace incompatible role assignments with a scope-preserving technical plan."), token);
         }
         // The original sprint and its attempts remain in history. All writes use current revisions and stable keys.
         var target = await context.Platform.Work.CreateSprintAsync(new CreateWorkSprintRequest(boardId,
-            $"Production Sprint {request.TargetSequence}", "Role-corrected scope; estimates and readiness must be refreshed.",
+            $"Production Sprint {request.TargetSequence}", request.InfrastructureRecovery ? "Recover unfinished scope after infrastructure repair; refresh estimates and readiness." : "Role-corrected scope; estimates and readiness must be refreshed.",
             request.CapturedAt.Date, request.CapturedAt.Date.AddDays(14), key + ":sprint") { Sequence = request.TargetSequence }, token);
         var currentSprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
         target = currentSprints.Single(x => x.Id == target.Id);
-        if (target.Status != "Planned")
-            throw new InvalidOperationException("The replacement sprint is already committed; do not replan its execution.");
         var source = currentSprints.Single(x => x.Id == request.SprintId);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
+        if (target.Status != "Planned")
+        {
+            // A successful recovery may be redelivered after normal readiness starts the sprint.
+            // Recognize the completed carryover without changing the now-committed work.
+            if (request.InfrastructureRecovery && source.Status == "Cancelled" && target.Status is "Active" or "Completed" &&
+                request.OriginalItems.Where(x => x.SprintId == source.Id && x.Status is not ("Done" or "Completed" or "Cancelled"))
+                    .All(old => board.Items.Any(x => x.Id == old.Id && x.SprintId == target.Id))) return;
+            throw new InvalidOperationException("The replacement sprint is already committed; do not replan its execution.");
+        }
         if (board.Items.Any(x => x.SprintId == source.Id && x.Status is not ("Done" or "Completed" or "Cancelled")))
             await context.Platform.Work.CarryOverSprintAsync(new(boardId, source.Id, target.Id, null,
                 source.Revision, key + ":carryover"), token);
@@ -209,4 +218,5 @@ internal sealed record RoleRepairRequest(Guid BoardId, Guid WorkstreamId, Guid T
     IReadOnlyList<WorkItem> OriginalItems, int TargetSequence, DateTimeOffset CapturedAt)
 {
     public IReadOnlyList<string> OriginalItemStateKeys { get; init; } = [];
+    public bool InfrastructureRecovery { get; init; }
 }

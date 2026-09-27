@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.10.5";
+    public override string Version => "2.10.6";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -155,6 +155,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (item.CorrelationId?.StartsWith(SprintRecoveryPrefix, StringComparison.Ordinal) == true)
+            return await ReconcileSprintRecoveryAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(ManagerDeliveryPrefix, StringComparison.Ordinal) == true)
             return await ReconcileManagerDeliveryAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) == true)

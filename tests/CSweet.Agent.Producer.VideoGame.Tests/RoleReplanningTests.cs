@@ -74,21 +74,24 @@ public sealed class RoleReplanningTests
     }
 
     [Theory]
-    [InlineData("cancel")]
-    [InlineData("carryover")]
-    [InlineData("move")]
-    public async Task InterruptedReplanningResumesWithoutDuplicateCancellationOrLosingCompletedWork(string loseResponse)
+    [InlineData("cancel", false)]
+    [InlineData("cancel", true)]
+    [InlineData("carryover", false)]
+    [InlineData("carryover", true)]
+    [InlineData("move", false)]
+    [InlineData("move", true)]
+    public async Task InterruptedReplanningResumesWithoutDuplicateCancellationOrLosingCompletedWork(string loseResponse, bool recovery)
     {
         var (request, _) = Fixture();
         var source = Empty<WorkSprint>() with { Id = request.SprintId, BoardId = request.BoardId, Revision = 8, Status = "Active" };
         var target = source with { Id = Guid.NewGuid(), Revision = 1, Status = "Planned" };
         var done = request.OriginalItems[1] with { Id = Guid.NewGuid(), Status = "Completed", SprintId = source.Id };
         var items = request.OriginalItems.Select(x => x with { SprintId = source.Id, Revision = 4 }).Append(done).ToList();
-        request = request with { OriginalItems = items.ToArray() };
-        var stage = Empty<WorkStageExecutionResponse>() with { Id = request.ReviewStageId, Status = "Blocked" };
+        request = request with { OriginalItems = items.ToArray(), InfrastructureRecovery = recovery };
+        var stage = Empty<WorkStageExecutionResponse>() with { Id = request.ReviewStageId, StageKey = "specialist-execution", Status = "Blocked", PrincipalKind = "AgentInstallation", AgentInstallationId = Guid.NewGuid(), AssignmentRevision = 1, AttemptCount = 3, MaximumAttempts = 3 };
         var execution = Empty<WorkSprintExecutionResponse>() with { Id = Guid.NewGuid(), BoardId = request.BoardId,
             SprintId = source.Id, Status = "Active", Revision = 12, Items = [Empty<WorkItemExecutionResponse>() with
-                { WorkItemId = request.WorkItemId, Stages = [stage] }] };
+                { WorkItemId = request.WorkItemId, CurrentStageKey = stage.StageKey, Status = "Blocked", Stages = [stage] }] };
         var backlog = new WorkBoardColumn(Guid.NewGuid(), "Backlog", "Backlog", 0, "None", null);
         var cancels = 0; var carryovers = 0; var lost = false; var creates = new List<CreateWorkSprintRequest>();
         void Lose(string point) { if (!lost && loseResponse == point) { lost = true; throw new IOException("Lost response"); } }
@@ -124,5 +127,15 @@ public sealed class RoleReplanningTests
         Assert.Single(creates.Distinct());
         Assert.Equal(done, items.Single(x => x.Id == done.Id));
         Assert.All(items.Where(x => x.Id != done.Id), x => { Assert.Equal("Backlog", x.Status); Assert.Equal(target.Id, x.SprintId); });
+        if (recovery)
+        {
+            target = target with { Status = "Active" };
+            var running = items.First(x => x.Id != done.Id);
+            items[items.IndexOf(running)] = running with { Status = "InProgress" };
+            var beforeReplay = JsonSerializer.Serialize(items);
+            await SpecialistAgent.PrepareRoleRepairSprintAsync(request, runtime.CreateContext(), CancellationToken.None);
+            Assert.Equal(beforeReplay, JsonSerializer.Serialize(items));
+            Assert.Equal(1, cancels); Assert.Equal(1, carryovers);
+        }
     }
 }

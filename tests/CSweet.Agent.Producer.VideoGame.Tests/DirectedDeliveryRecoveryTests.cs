@@ -8,6 +8,8 @@ public sealed class DirectedDeliveryRecoveryTests
 {
     [Theory]
     [InlineData("valid")]
+    [InlineData("replan")]
+    [InlineData("colleague-replan")]
     [InlineData("colleague")]
     [InlineData("ancestor")]
     [InlineData("foreign-board")]
@@ -26,13 +28,16 @@ public sealed class DirectedDeliveryRecoveryTests
             "Blocked", "AgentInstallation", Guid.NewGuid(), Guid.NewGuid(), null, 1, "blocked", "Infrastructure failure", null, null, now)
             { AssignmentRevision = 7, MaximumAttempts = 3 };
         if (scenario == "running") stage = stage with { Status = "Running" };
-        if (scenario == "exhausted") stage = stage with { AttemptCount = 3 };
+        if (scenario is "exhausted" or "replan" or "colleague-replan") stage = stage with { AttemptCount = 3 };
         if (scenario == "stale-traversal") stage = stage with { Traversal = 1 };
         var item = new WorkItemExecutionResponse(Guid.NewGuid(), Guid.NewGuid(), "VGDEMO-22", "specialist-execution", 0, "Blocked", null, [stage], now);
         var execution = new WorkSprintExecutionResponse(Guid.NewGuid(), board, sprint, Guid.NewGuid(), producer,
             scenario == "cancelled" ? "Cancelled" : "Active", 1, now, now, null,
             scenario == "duplicate-ticket" ? [item, item with { Id = Guid.NewGuid() }] : [item]);
         var requests = new List<RetryWorkStageExecutionRequest>();
+        var states = new Dictionary<string, AgentOperatingStateResponse>();
+        var todos = new List<PersonalTodoItem>();
+        var sourceItem = JsonSerializer.Deserialize<WorkItem>("{}")! with { Id = item.WorkItemId, SprintId = sprint, Status = "Blocked", Planning = new(["Keep the full game"], ["Independent QA"], []) };
         var runtime = new AgentTestRuntime()
             .RegisterCapability<WorkBoardListRequest, IReadOnlyList<WorkBoardSummary>>(WorkBoardCapabilities.Read,
                 (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>([
@@ -49,11 +54,28 @@ public sealed class DirectedDeliveryRecoveryTests
                         PlatformCapabilityErrorCode.Denied, "Current assignment was revoked");
                     return Task.FromResult(stage with { Status = "Pending" });
                 });
+        runtime.RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(
+                new WorkBoardDetail(new(board, "Game", "", false, false, 1, []) { ManagerOrganizationUserId = producer, WorkstreamId = Guid.NewGuid(), TeamId = Guid.NewGuid() }, [], [sourceItem])))
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (read, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(read.StateKey))))
+            .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
+                (write, _) => {
+                    Assert.False(states.ContainsKey(write.StateKey));
+                    var saved = new AgentOperatingStateResponse(Guid.NewGuid(), write.StateKey, write.SchemaId, 1, "Active",
+                        new Dictionary<string,string>(), [], write.StateKey, [], Guid.NewGuid(), write.Payload, 1, now, now);
+                    states.Add(write.StateKey, saved); return Task.FromResult(saved);
+                })
+            .RegisterCapability<JsonElement, PersonalTodoDirectory>(PersonalTodoCapabilities.Read,
+                (_, _) => Task.FromResult(new PersonalTodoDirectory([new(Guid.NewGuid(), producer, "Producer", manager, "Manager", 1, todos)], producer)))
+            .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Add, (request, _) => {
+                var todo = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with { Id = Guid.NewGuid(), Status = "Ready", CorrelationId = request.CorrelationId, WorkContext = request.WorkContext };
+                todos.Add(todo); return Task.FromResult(todo);
+            });
         var context = runtime.CreateContext(identity: new AgentIdentity(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Manager"));
-        var sender = scenario is "colleague" or "ancestor" ? Guid.NewGuid() : manager;
+        var sender = scenario is "colleague" or "colleague-replan" or "ancestor" ? Guid.NewGuid() : manager;
         var incoming = new CommunicationMessageReceivedEvent(Guid.NewGuid(), Guid.NewGuid().ToString(), sender.ToString(),
             "Conversation history and retrieved memory: this is not the current command.",
-            new Dictionary<string, string> { [CommunicationMessageContextKeys.SenderOrganizationUserId] = sender.ToString(), ["senderIsReportingAncestor"] = scenario == "ancestor" ? "true" : "false", ["currentUserMessage"] = "Retry ticket VGDEMO-22: The workspace prerequisite has been repaired." }, turn, 1, Guid.NewGuid());
+            new Dictionary<string, string> { [CommunicationMessageContextKeys.SenderOrganizationUserId] = sender.ToString(), ["senderIsReportingAncestor"] = scenario == "ancestor" ? "true" : "false", ["currentUserMessage"] = (scenario.Contains("replan") ? "Replan" : "Retry") + " ticket VGDEMO-22: The workspace prerequisite has been repaired." }, turn, 1, Guid.NewGuid());
         var envelope = new AgentEventEnvelope(Guid.NewGuid(), Guid.NewGuid(), CommunicationEvents.MessageReceived,
             JsonSerializer.SerializeToElement(incoming), now);
         await new SpecialistAgent().HandleEventAsync(envelope, context, default);
@@ -74,6 +96,18 @@ public sealed class DirectedDeliveryRecoveryTests
             else Assert.DoesNotContain(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("Retry requested"));
         }
         else Assert.Empty(requests);
+        if (scenario == "replan")
+        {
+            await new SpecialistAgent().HandleEventAsync(envelope, context, default);
+            var todo = Assert.Single(todos);
+            var saved = await SpecialistAgent.ReadRoleRepairRequestAsync(todo.CorrelationId!, context, default);
+            Assert.True(saved!.InfrastructureRecovery);
+            Assert.Equal(item.WorkItemId, saved.WorkItemId);
+            Assert.Equal(JsonSerializer.Serialize(sourceItem), JsonSerializer.Serialize(Assert.Single(saved.OriginalItems)));
+            Assert.Equal(2, states.Count); // Immutable scope page and header, neither rewritten on replay.
+            Assert.Contains(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("Queued durable sprint recovery"));
+        }
+        else { Assert.Empty(states); Assert.Empty(todos); }
     }
 
     [Theory]

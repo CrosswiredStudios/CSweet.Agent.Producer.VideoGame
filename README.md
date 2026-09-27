@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.10.5`
+- Version: `2.10.6`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -210,3 +210,11 @@ authority. The host still enforces ownership, assignment revision and remaining 
 A repeated delivery of the same message uses the same retry key. Colleague messages, quoted
 commands, cancelled execution, stale stages and exhausted budgets cannot trigger this action.
 This explicit request does not relax acceptance criteria or automatically retry substantive blockers.
+
+When a repaired ticket has exhausted its stage attempt limit, use
+'Replan ticket VGDEMO-22: Describe the repaired infrastructure condition.'
+from the Producer's reporting chain. The Producer records a durable scope snapshot and
+recovery commitment, preserves the old execution and completed work, and carries unfinished
+tickets to one planned sprint. Existing estimates/readiness/preflight workflows must authorize
+its start. Recovery refuses to interrupt running work or pending approvals, and never resets
+attempt counts or claims acceptance.

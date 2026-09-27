@@ -26,10 +26,12 @@ public sealed partial class SpecialistAgent
             var recoverySupervisor = isManager ||
                 (incoming.Context?.GetValueOrDefault("senderIsReportingAncestor") == "true" &&
                  Guid.TryParse(incoming.Context.GetValueOrDefault(CommunicationMessageContextKeys.SenderOrganizationUserId), out _));
-            if (TryReadRetryDirection(currentMessage, out var retryTicket, out var retryReason))
+            var replan = currentMessage.TrimStart().StartsWith("Replan ticket ", StringComparison.OrdinalIgnoreCase);
+            var recoveryMessage = replan ? "Retry ticket " + currentMessage.TrimStart()["Replan ticket ".Length..] : currentMessage;
+            if (TryReadRetryDirection(recoveryMessage, out var retryTicket, out var retryReason))
             {
                 var result = recoverySupervisor
-                    ? await RetryDirectedTicketAsync(retryTicket, retryReason, incoming.TurnId, context, cancellationToken)
+                    ? await RetryDirectedTicketAsync(retryTicket, retryReason, incoming.TurnId, context, cancellationToken, replan)
                     : "A stage retry requires direction from my reporting chain.";
                 await stream.CommitAsync(result, cancellationToken);
                 return;
