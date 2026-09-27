@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.10.4`
+- Version: `2.10.5`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -200,3 +200,13 @@ Version 2.10.2 gives a failed role-replanning proposal one durable correction se
 Version 2.10.3 carries the original role-repair constraints into every resulting ticket. All old mixed-ticket completion criteria stay with engineering/QA delivery; the retained Technical Director ticket receives separate plan criteria. This revised policy has one stable correction session per source session, with prior attempts preserved.
 
 Version 2.10.4 sends a structured `roleRepair` extension on the existing planning-cycle artifact, pinning the source ticket ID and SHA-256 of its canonical planning. Technical Director 2.11.6 or later preserves that source scope directly and produces linked planning, engineering and independent QA work. The `structured-v1` correction identity is durable and bounded; retries recover the same session, including terminal failure. Accepted document references and the full Producer coverage gate remain intact. Update Technical Director before resuming the Producer's blocked role-replanning commitment. No new capability grants are required.
+### Manager-directed delivery recovery
+
+After resolving an infrastructure blocker, a manager in the Producer's active reporting chain can send
+`Retry ticket VGDEMO-22: The workspace prerequisite has been repaired.` in the Producer chat.
+Use the actual ticket identifier. The Producer re-reads its current owned boards and active
+execution, then requests the exact blocked stage through its existing `work.orchestration.retry`
+authority. The host still enforces ownership, assignment revision and remaining attempts.
+A repeated delivery of the same message uses the same retry key. Colleague messages, quoted
+commands, cancelled execution, stale stages and exhausted budgets cannot trigger this action.
+This explicit request does not relax acceptance criteria or automatically retry substantive blockers.

@@ -22,6 +22,18 @@ public sealed partial class SpecialistAgent
             var isManager = Guid.TryParse(context.Identity?.ManagerEmployeeId, out var manager) &&
                 incoming.Context?.TryGetValue(CommunicationMessageContextKeys.SenderOrganizationUserId, out var sender) == true &&
                 Guid.TryParse(sender, out var senderId) && senderId == manager;
+            var currentMessage = incoming.Context?.GetValueOrDefault("currentUserMessage") ?? incoming.Message;
+            var recoverySupervisor = isManager ||
+                (incoming.Context?.GetValueOrDefault("senderIsReportingAncestor") == "true" &&
+                 Guid.TryParse(incoming.Context.GetValueOrDefault(CommunicationMessageContextKeys.SenderOrganizationUserId), out _));
+            if (TryReadRetryDirection(currentMessage, out var retryTicket, out var retryReason))
+            {
+                var result = recoverySupervisor
+                    ? await RetryDirectedTicketAsync(retryTicket, retryReason, incoming.TurnId, context, cancellationToken)
+                    : "A stage retry requires direction from my reporting chain.";
+                await stream.CommitAsync(result, cancellationToken);
+                return;
+            }
             var producer = Guid.Parse(context.Identity!.EmployeeId);
             var history = await context.Platform.Communication.ReadChatAsync(conversation, cancellationToken);
             var portfolio = await context.Platform.ReadPortfolioAsync(new(), cancellationToken);
