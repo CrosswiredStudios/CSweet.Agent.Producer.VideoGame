@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.10.0";
+    public override string Version => "2.10.1";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -557,7 +557,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         RoleRepairRequest? roleRepair = null;
         if (item.CorrelationId?.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) == true)
         {
-            roleRepair = (await context.Platform.ReadOperatingStateAsync<RoleRepairRequest>(source.SourceFingerprint, cancellationToken))?.Payload;
+            roleRepair = await ReadRoleRepairRequestAsync(source.SourceFingerprint, context, cancellationToken);
             if (roleRepair is null || roleRepair.WorkstreamId != workstreamId || roleRepair.TeamId != teamId ||
                 roleRepair.BoardId != source.BoardId || source.SourceFingerprint != RoleRepairPrefix + roleRepair.ReviewStageId.ToString("N"))
                 return PersonalTodoResult.Blocked("Role repair is missing its exact persisted scope and review evidence.");

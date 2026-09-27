@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.10.0`
+- Version: `2.10.1`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -192,3 +192,5 @@ The Producer uses its existing work.orchestration.retry capability for one bound
 The Technical Director plans and reviews. Engineering writes code, builds prototypes, implements performance changes, and commits repository work. QA independently validates execution. The Producer reviews blocked Technical Director assignments and completed documents against the exact accepted criteria. An incompatible assignment creates a durable role-replanning commitment instead of approving incomplete delivery or repeatedly retrying it.
 
 The Producer requests `work.orchestration.cancel` at team scope for this recovery. It remains subject to the host's board-manager authority and grants. Cancellation occurs only after a corrected technical proposal preserves original requirements, exact acceptance criteria, constraints, ticket identities, unrelated work, and implementation dependencies. Active work is allowed to finish first. The existing `work.sprint.carryover` capability then moves unfinished work into a planned replacement sprint; completed work and previous execution attempts stay in their original history. Specialist estimates, delivery finalization, QA readiness, and sprint preflight still apply. A changed or invalid scope blocks recovery before cancellation.
+
+Version 2.10.1 stores each original ticket snapshot separately and writes a compact header only after all pages are durable. This retains the complete accepted scope while respecting the host's 65,536-character operating-state limit. Interrupted writes reuse the persisted pages; replanning hydrates the exact original snapshots before validating coverage and freshness.

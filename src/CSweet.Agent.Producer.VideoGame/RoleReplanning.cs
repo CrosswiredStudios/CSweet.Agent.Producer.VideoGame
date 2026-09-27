@@ -26,15 +26,7 @@ public sealed partial class SpecialistAgent
             var request = new RoleRepairRequest(board.Id, project, team, execution.SprintId, reviewStage.Id,
                 input.Item.Id, decision.RoleRepairCriteria!, decision.Findings, snapshot.Items,
                 sprints.Select(x => x.Sequence ?? 0).DefaultIfEmpty().Max() + 1, DateTimeOffset.UtcNow);
-            try
-            {
-                await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(key,
-                    "video-game.role-replanning.v1", 1, "Active", new Dictionary<string, string>(), [], key, [], Guid.NewGuid(),
-                    JsonSerializer.SerializeToElement(request, AcceptanceJson), null, key), token);
-            }
-            catch (PlatformCapabilityException error) when (error.Code == PlatformCapabilityErrorCode.Conflict) { }
-            saved = await context.Platform.ReadOperatingStateAsync<RoleRepairRequest>(key, token)
-                ?? throw new InvalidOperationException("The role replanning request was not persisted.");
+            await PersistRoleRepairRequestAsync(key, request, context, token);
         }
         await EnsureCommitmentAsync(key, "Separate technical planning from implementation",
             "Preserve the current sprint history and every acceptance criterion. Obtain a corrected technical proposal before carrying unfinished work into a new planned sprint.",
@@ -45,6 +37,54 @@ public sealed partial class SpecialistAgent
             }, context, token);
     }
 
+    internal static async Task PersistRoleRepairRequestAsync(string key, RoleRepairRequest request,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        if (request.OriginalItems.Count > 200 || request.OriginalItems.Select(x => x.Id).Distinct().Count() != request.OriginalItems.Count)
+            throw new InvalidOperationException("Role-replanning requires at most 200 distinct ticket snapshots.");
+        var pages = new List<string>();
+        foreach (var item in request.OriginalItems.OrderBy(x => x.Id))
+        {
+            var pageKey = key + ":scope:" + item.Id.ToString("N");
+            await WriteSnapshotAsync(pageKey, "video-game.role-replanning-scope.v1", item, context, token);
+            pages.Add(pageKey);
+        }
+        var header = request with { OriginalItems = [], OriginalItemStateKeys = pages };
+        await WriteSnapshotAsync(key, "video-game.role-replanning.v1", header, context, token);
+    }
+
+    private static async Task WriteSnapshotAsync<T>(string key, string schema, T payload,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        if (await context.Platform.ReadOperatingStateAsync<T>(key, token) is not null) return;
+        var json = JsonSerializer.SerializeToElement(payload, AcceptanceJson);
+        if (json.GetRawText().Length > 65536)
+            throw new InvalidOperationException("A role-replanning ticket snapshot exceeds the host bound; split its scope without truncating requirements.");
+        try
+        {
+            await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(key,
+                schema, 1, "Active", new Dictionary<string,string>(), [], key, [], Guid.NewGuid(), json, null, key), token);
+        }
+        catch (PlatformCapabilityException error) when (error.Code == PlatformCapabilityErrorCode.Conflict) { }
+    }
+
+    internal static async Task<RoleRepairRequest?> ReadRoleRepairRequestAsync(string key,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        var request = (await context.Platform.ReadOperatingStateAsync<RoleRepairRequest>(key, token))?.Payload;
+        if (request is null || request.OriginalItemStateKeys.Count == 0) return request;
+        if (request.OriginalItemStateKeys.Count > 200) throw new InvalidOperationException("Role-replanning scope exceeds the bounded ticket count.");
+        var items = new List<WorkItem>();
+        foreach (var pageKey in request.OriginalItemStateKeys)
+        {
+            var item = (await context.Platform.ReadOperatingStateAsync<WorkItem>(pageKey, token))?.Payload
+                ?? throw new InvalidOperationException("An exact role-replanning scope snapshot is missing.");
+            if (pageKey != key + ":scope:" + item.Id.ToString("N") || items.Any(x => x.Id == item.Id))
+                throw new InvalidOperationException("A role-replanning scope snapshot has invalid identity.");
+            items.Add(item);
+        }
+        return request with { OriginalItems = items };
+    }
     private static string RoleRepairObjective() => RoleBoundary +
         " Repair the mixed-role ticket by splitting linked planning, implementation and validation work. " +
         "Preserve all existing proposal keys, containers, completed work, constraints and unrelated scope. " +
@@ -161,4 +201,7 @@ public sealed partial class SpecialistAgent
 
 internal sealed record RoleRepairRequest(Guid BoardId, Guid WorkstreamId, Guid TeamId, Guid SprintId,
     Guid ReviewStageId, Guid WorkItemId, IReadOnlyList<string> RoleRepairCriteria, IReadOnlyList<string> Findings,
-    IReadOnlyList<WorkItem> OriginalItems, int TargetSequence, DateTimeOffset CapturedAt);
+    IReadOnlyList<WorkItem> OriginalItems, int TargetSequence, DateTimeOffset CapturedAt)
+{
+    public IReadOnlyList<string> OriginalItemStateKeys { get; init; } = [];
+}
