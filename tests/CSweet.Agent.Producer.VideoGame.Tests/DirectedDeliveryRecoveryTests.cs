@@ -100,12 +100,7 @@ public sealed class DirectedDeliveryRecoveryTests
             Assert.Contains("workspace prerequisite", request.Reason);
             if (scenario is "valid" or "ancestor")
             {
-                var agent = new SpecialistAgent();
-        await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(), AgentConfigurationCapabilities.Update,
-            JsonSerializer.SerializeToElement(new UpdateAgentConfigurationRequest(new Dictionary<string, JsonElement> {
-                ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid().ToString()), ["llmModel"] = JsonSerializer.SerializeToElement("test")
-            }))), context, default);
-        await agent.HandleEventAsync(envelope, context, default);
+                await agent.HandleEventAsync(envelope, context, default);
                 Assert.Equal(request.IdempotencyKey, requests[1].IdempotencyKey);
                 Assert.Contains(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("platform reports Pending"));
             }
@@ -114,12 +109,7 @@ public sealed class DirectedDeliveryRecoveryTests
         else Assert.Empty(requests);
         if (scenario == "replan")
         {
-            var agent = new SpecialistAgent();
-        await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(), AgentConfigurationCapabilities.Update,
-            JsonSerializer.SerializeToElement(new UpdateAgentConfigurationRequest(new Dictionary<string, JsonElement> {
-                ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid().ToString()), ["llmModel"] = JsonSerializer.SerializeToElement("test")
-            }))), context, default);
-        await agent.HandleEventAsync(envelope, context, default);
+            await agent.HandleEventAsync(envelope, context, default);
             var todo = Assert.Single(todos);
             var saved = await SpecialistAgent.ReadRoleRepairRequestAsync(todo.CorrelationId!, context, default);
             Assert.True(saved!.InfrastructureRecovery);

@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.11.0";
+    public override string Version => "2.11.1";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -696,7 +696,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 return PersonalTodoResult.Blocked("Role repair requires correction: " + error.Message);
             }
             var sourceExecution = await context.Platform.Work.ReadOrchestrationAsync(new(boardId, SprintId: roleRepair.SprintId), cancellationToken);
-            if (sourceExecution?.Items.Any(x => x.Status == "Running") == true)
+            if (sourceExecution?.Items.Any(x => x.Status == "Running" || x.Stages.Any(s => s.Status is "Running" or "Dispatching" || roleRepair.ScopeDirection is not null && s.Id != roleRepair.ReviewStageId && s.Status == "WaitingForApproval")) == true)
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                     "The corrected plan is ready; let current work finish before carrying unfinished scope into the replacement sprint.");
             await PrepareRoleRepairSprintAsync(roleRepair, context, cancellationToken);
@@ -716,6 +716,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
             UpdatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
         await BindAvailableWorkAsync(boardId, roster, cycle.ProfileDigest, context, cancellationToken);
+        await RefreshAmendedDeliveriesAsync(roleRepair, boardId, context, cancellationToken);
         var currentBoard = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var unassigned = currentBoard.Items.Where(x =>
                 x.ExecutionMode == WorkItemExecutionModes.Executable &&

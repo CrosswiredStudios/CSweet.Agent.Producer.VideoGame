@@ -99,4 +99,50 @@ public sealed class ScopeAmendmentTests
         Assert.Equal(SpecialistAgent.ScopeExpectedItems(request)[0].Planning!.AcceptanceCriteria,
             SpecialistAgent.ScopeExpectedItems(replay)[0].Planning!.AcceptanceCriteria);
     }
-}
+    [Fact]
+    public void DeliveryRefreshCarriesNewCriteriaAndRetainsRepositoryAndDeliveryControls()
+    {
+        var (request, _) = Fixture();
+        var original = request.OriginalItems[0];
+        var repository = Guid.NewGuid();
+        var qualityGate = Guid.NewGuid();
+        original = original with { Delivery = new(repository, original.Planning!.Requirements, original.Planning.AcceptanceCriteria, original.Planning.Constraints)
+            { BaseBranch = "main", QualityGateColumnId = qualityGate } };
+        request = request with { OriginalItems = [original, request.OriginalItems[1]] };
+        var updated = SpecialistAgent.AmendedDelivery(SpecialistAgent.ScopeExpectedItems(request)[0]);
+        Assert.Contains("deferred", updated.AcceptanceCriteria[1]);
+        Assert.Equal(repository, updated.RepositoryId);
+        Assert.Equal("main", updated.BaseBranch);
+        Assert.Equal(qualityGate, updated.QualityGateColumnId);
+        Assert.Equal(original.Planning!.Requirements, updated.Requirements);
+    }
+
+    [Theory]
+    [InlineData("Running")]
+    [InlineData("Dispatching")]
+    [InlineData("WaitingForApproval")]
+    public void AnotherActiveOperationPreventsScopeCancellation(string otherStatus)
+    {
+        var (request, _) = Fixture();
+        var stage = JsonSerializer.Deserialize<WorkStageExecutionResponse>("{}")! with {
+            Id = request.ReviewStageId, StageKey = "technical-review", Status = "Blocked", Traversal = 2 };
+        var item = JsonSerializer.Deserialize<WorkItemExecutionResponse>("{}")! with {
+            WorkItemId = request.WorkItemId, Status = "Blocked", CurrentStageKey = stage.StageKey, Traversal = 2, Stages = [stage] };
+        var execution = JsonSerializer.Deserialize<WorkSprintExecutionResponse>("{}")! with { Status = "Active", Items = [item] };
+        Assert.True(SpecialistAgent.CanAmendScope(execution, request.WorkItemId, stage.Id));
+        execution = execution with { Items = [item, item with { WorkItemId = Guid.NewGuid(), Stages = [stage with { Id = Guid.NewGuid(), Status = otherStatus }] }] };
+        Assert.False(SpecialistAgent.CanAmendScope(execution, request.WorkItemId, stage.Id));
+    }    [Fact]
+    public void StaleLegacyBriefCannotReintroduceOldCriteriaOnReplay()
+    {
+        var (request, _) = Fixture();
+        var original = request.OriginalItems[0];
+        var repository = Guid.NewGuid();
+        original = original with { Delivery = new(repository, original.Planning!.Requirements, original.Planning.AcceptanceCriteria, original.Planning.Constraints),
+            Development = new(repository, "profile", original.Planning.Requirements, original.Planning.AcceptanceCriteria, original.Planning.Constraints) };
+        request = request with { OriginalItems = [original, request.OriginalItems[1]] };
+        var item = SpecialistAgent.ScopeExpectedItems(request)[0];
+        var updated = SpecialistAgent.AmendedDelivery(item);
+        Assert.Throws<InvalidOperationException>(() => SpecialistAgent.ValidateAmendedDevelopment(item with { Delivery = updated }, updated));
+        SpecialistAgent.ValidateAmendedDevelopment(item with { Development = item.Development! with { AcceptanceCriteria = updated.AcceptanceCriteria } }, updated);
+    }}

@@ -80,7 +80,7 @@ public sealed partial class SpecialistAgent
         var seen = new HashSet<(Guid, string, string)>();
         foreach (var edit in request.ScopeReplacements)
         {
-            if (!items.TryGetValue(edit.ItemId, out var item) || item.Status is "Done" or "Completed" or "Cancelled" ||
+            if (edit is null || !items.TryGetValue(edit.ItemId, out var item) || item.Status is "Done" or "Completed" or "Cancelled" ||
                 item.Planning is not { } planning || string.IsNullOrWhiteSpace(edit.Original) ||
                 string.IsNullOrWhiteSpace(edit.Replacement) || edit.Replacement.Length > 8000 || edit.Original == edit.Replacement ||
                 !seen.Add((edit.ItemId, edit.Field, edit.Original)))
@@ -108,6 +108,40 @@ public sealed partial class SpecialistAgent
         return request.OriginalItems.Select(x => items[x.Id]).ToArray();
     }
 
+    internal static WorkItemDeliverySpecification AmendedDelivery(WorkItem item)
+    {
+        if (item.Planning is not { } planning || item.Delivery is not { } delivery)
+            throw new InvalidOperationException("Scope delivery refresh requires finalized canonical planning.");
+        return delivery with { Requirements = planning.Requirements, AcceptanceCriteria = planning.AcceptanceCriteria,
+            Constraints = planning.Constraints, DependencyItemIds = planning.DependencyItemIds };
+    }
+
+    private static async Task RefreshAmendedDeliveriesAsync(RoleRepairRequest? request, Guid boardId,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        if (request?.ScopeDirection is null) return;
+        var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
+        foreach (var item in board.Items.Where(x => x.Status is not ("Done" or "Completed" or "Cancelled") && x.Delivery is not null))
+        {
+            var updated = AmendedDelivery(item);
+            if (JsonSerializer.Serialize(updated) == JsonSerializer.Serialize(item.Delivery))
+            {
+                ValidateAmendedDevelopment(item, updated);
+                continue;
+            }
+            var owner = item.AccountableOrganizationUserId ?? throw new InvalidOperationException("Amended delivery has no accountable owner.");
+            var refreshed = await context.Platform.Work.FinalizeItemDeliveryAsync(new(boardId, item.Id, updated,
+                owner, item.StageAssignments, item.Revision, $"producer-scope-finalize:{request.ReviewStageId:N}:{item.Id:N}:{item.PlanningRevision}"), token);
+            ValidateAmendedDevelopment(refreshed, updated);
+        }
+    }
+    internal static void ValidateAmendedDevelopment(WorkItem item, WorkItemDeliverySpecification updated)
+    {
+        if (item.Development is { } development &&
+            (!development.Requirements.SequenceEqual(updated.Requirements) || !development.AcceptanceCriteria.SequenceEqual(updated.AcceptanceCriteria) ||
+             !(development.Constraints ?? []).SequenceEqual(updated.Constraints ?? [])))
+            throw new InvalidOperationException("A legacy development brief conflicts with amended canonical delivery; reconcile it before execution.");
+    }
     internal static void ValidateScopeAmendmentCoverage(RoleRepairRequest request,
         IReadOnlyList<GameProposedWorkItemV1> proposals, IReadOnlyList<string> constraints)
     {
@@ -130,7 +164,7 @@ public sealed partial class SpecialistAgent
                 throw new InvalidOperationException($"Scope amendment proposal differs from the exact authorized planning for {item.Identifier ?? ProposalKey(item)}.");
         }
         foreach (var removed in request.ScopeReplacements.Where(x => x.Field == "constraints").Select(x => x.Original).Distinct())
-            if (!expected.Any(x => x.Planning?.Constraints?.Contains(removed, StringComparer.Ordinal) == true) && constraints.Contains(removed, StringComparer.Ordinal))
+            if (!expected.Any(x => x.Status is not ("Done" or "Completed") && x.Planning?.Constraints?.Contains(removed, StringComparer.Ordinal) == true) && constraints.Contains(removed, StringComparer.Ordinal))
                 throw new InvalidOperationException("The corrected proposal reinstates a superseded constraint.");
     }
 }

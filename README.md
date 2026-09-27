@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.11.0`
+- Version: `2.11.1`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -218,3 +218,9 @@ recovery commitment, preserves the old execution and completed work, and carries
 tickets to one planned sprint. Existing estimates/readiness/preflight workflows must authorize
 its start. Recovery refuses to interrupt running work or pending approvals, and never resets
 attempt counts or claims acceptance.
+
+## Owner-directed scope amendments (2.11.0)
+
+`Amend ticket IDENTIFIER: direction` accepts an explicit current-message correction from the Producer's authenticated reporting chain. It discovers one current execution on a board the Producer manages, requires a stopped review boundary and no concurrent work or other pending approval, and records the authorizing turn plus bounded exact before/after replacements. Historical chat, retrieved content and colleague messages cannot authorize this action. General setup/staffing authority is unchanged.
+
+The Producer obtains a corrected Technical Director proposal, checks it against the exact amendment while preserving unrelated criteria, ticket hierarchy, dependencies, roles and completed work, and then uses the normal cancellation/carryover workflow. Original attempts and source publications remain in history. Revised delivery briefs are finalized from the new canonical planning so coding and QA do not receive stale criteria. New estimates and QA readiness still govern the replacement sprint. A scope amendment never marks delivery accepted or missing measurements passed, and cannot edit an active assignment. Repeating the same chat turn recovers the durable request; a different direction at the same review boundary is rejected instead of overwriting it.
