@@ -21,7 +21,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.10.1";
+    public override string Version => "2.10.2";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -633,6 +633,8 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
                 (roleRepair is null ? RoleBoundary : RoleRepairObjective()),
             "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken,
             roleRepair is null ? null : RoleRepairContext(roleRepair));
+        if (roleRepair is not null && !roleRepairPublished && designer is null)
+            technicalSession = await EnsureRoleRepairCorrectionAsync(roleRepair, technicalSession, cycle, memberDigests, managerDirections, context, cancellationToken);
         var designerSession = designer is null ? technicalSession : await EnsurePlanningSessionAsync(designer, boardId, cycle,
             "Player-outcome and game-design backlog proposal",
             "Define player outcomes and testable acceptance criteria within the accepted brief. Coordinate technical feasibility separately.",

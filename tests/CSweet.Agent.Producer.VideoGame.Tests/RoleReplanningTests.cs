@@ -8,7 +8,7 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class RoleReplanningTests
 {
     private static T Empty<T>() => JsonSerializer.Deserialize<T>("{}")!;
-    private static (RoleRepairRequest Request, GameProposedWorkItemV1[] Proposals) Fixture()
+    internal static (RoleRepairRequest Request, GameProposedWorkItemV1[] Proposals) Fixture()
     {
         var source = Empty<WorkItem>() with { Id = Guid.NewGuid(), Status = "Blocked", TypeKey = "task",
             ProposalProvenance = new(Guid.NewGuid(), "digest", "plan"),
