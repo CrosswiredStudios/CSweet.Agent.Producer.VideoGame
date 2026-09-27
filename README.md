@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.9.4`
+- Version: `2.9.5`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -184,3 +184,5 @@ Delivery setup requests `work.project-delivery.prepare.v1`; repository-bound tic
 `platform.workstream.change.propose.v1`. Source provisioning and team repository discovery retain
 platform policy checks, and `git.merge.review.v2` / `git.merge.authorize.v2` are limited to assigned
 work-item evidence and acceptance. These declarations require effective approved installation grants.
+
+The Producer uses its existing work.orchestration.retry capability for one bounded retry per stage and missing-section error. It retains the current assignment revision, host attempt limit, and substantive acceptance gates. Other blockers are not automatically retried.
