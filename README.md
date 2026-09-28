@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.11.2`
+- Version: `2.12.0`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -227,3 +227,7 @@ The Producer obtains a corrected Technical Director proposal, checks it against 
 ## Large planning handoffs (2.11.2)
 
 `BoundPlanningHandoff` keeps ordinary requests in their initial message and carries oversized requests in the same planning-cycle artifact's `coordinationContext`. The coordination start persists both atomically. Exact originals, replacements, owner authorization and prior management decisions remain intact; no text is truncated. Technical Director 2.11.9 is required to read artifact-carried context. The artifact remains bounded, references retain their revisions, and replay uses the existing session key. Install the Director update before resuming the blocked Producer planning commitment.
+
+## Raising decisions to the owner (2.12.0)
+
+When a ticket on a board I manage is Blocked with the `decision-required:v1` diagnostic, I send my manager one direct message per blocked attempt. This happens when a developer or QA reports that no code change can move the ticket and it needs a scope, criteria, environment or tooling decision. The message includes the specialist's decision request and the exact replies I act on: `Amend ticket <ID>: <decision>` to change or defer criteria through the normal replanning, estimate and readiness flow, or `Retry ticket <ID>: <what changed>` once the missing environment or direction exists. Ordinary blockers are not relabelled as decisions, and a single blocked attempt is never escalated twice. There are no new grants.
