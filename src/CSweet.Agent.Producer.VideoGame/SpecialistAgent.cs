@@ -7,8 +7,10 @@ using System.Text.Json;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
-public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
+public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 {
+    protected override string ManagementResponsibility => "production oversight";
+
     internal const int DefaultContextWindowTokens = 220_000;
     internal const int DefaultOutputTokens = 32_000;
     private const int MinimumOutputTokens = 2_048;
@@ -21,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.12.0";
+    public override string Version => "2.14.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -187,11 +189,12 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         return PersonalTodoResult.Blocked("This Producer personal commitment has no supported authoritative correlation.");
     }
 
-    public override async Task HandleAttentionReviewAsync(
+    protected override async Task HandleManagerAttentionReviewAsync(
         AgentAttentionReviewContext review,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+
         var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
             ProjectStateKeys.Portfolio("producer"), cancellationToken);
         // Accepted commitments survive invocations; the host still filters them against current visibility.
@@ -403,7 +406,7 @@ public sealed partial class SpecialistAgent : VideoGameSpecialistAgentBase
         return AgentWorkResult.Success(BuildManagementReport(checkIn.CycleId, checkIn.RequestId, payload));
     }
 
-    public override async Task HandleEventAsync(
+    protected override async Task HandleManagerEventAsync(
         AgentEventEnvelope message,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)

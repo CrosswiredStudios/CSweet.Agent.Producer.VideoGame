@@ -164,7 +164,7 @@ public sealed class RevisionSafeProjectState(PlatformCapabilityClient platform)
         Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(payload))).ToLowerInvariant();
 }
 
-public abstract class VideoGameSpecialistAgentBase : CSweetAgentBase
+public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
 {
     protected abstract string RoleKey { get; }
     public string DeclaredRoleKey => RoleKey;
@@ -524,6 +524,8 @@ public static class VideoGameSpecialistConformance
             errors.Add("The package id does not match the specialist implementation.");
         var roles = root.GetProperty("rolePolicy").GetProperty("declaredRoleKeys")
             .EnumerateArray().Select(x => x.GetString()).Where(x => x is not null).ToHashSet(StringComparer.Ordinal);
+        if (root.GetProperty("rolePolicy").TryGetProperty("baseType", out var baseType) && baseType.GetString() == AgentBaseTypes.Manager)
+            roles.Remove(AgentBaseTypes.Manager);
         if (!roles.SetEquals([expectedRoleKey]))
             errors.Add("Every required specialist package must declare exactly its one accountable role.");
         var provided = root.GetProperty("provides").EnumerateArray()

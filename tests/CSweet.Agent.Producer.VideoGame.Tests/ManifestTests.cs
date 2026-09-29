@@ -15,6 +15,8 @@ public sealed class ManifestTests
 
         var manifest = await AgentManifestLoader.LoadAsync(path, CancellationToken.None);
         var agent = new SpecialistAgent();
+        Assert.IsAssignableFrom<CSweetManagerAgentBase>(agent);
+        Assert.Equal(AgentBaseTypes.Manager, manifest.RolePolicy!.BaseType);
 
         foreach (var name in new[] { "work.item.read", "work.item.comment", "work.orchestration.cancel", "work.sprint.carryover" })
             Assert.Contains(manifest.Requires, x => x.Name == name && x.Scope == "team");

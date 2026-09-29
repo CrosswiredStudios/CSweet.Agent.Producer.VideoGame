@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.12.0`
+- Version: `2.14.0`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -60,7 +60,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.56.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.58.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -228,6 +228,29 @@ The Producer obtains a corrected Technical Director proposal, checks it against 
 
 `BoundPlanningHandoff` keeps ordinary requests in their initial message and carries oversized requests in the same planning-cycle artifact's `coordinationContext`. The coordination start persists both atomically. Exact originals, replacements, owner authorization and prior management decisions remain intact; no text is truncated. Technical Director 2.11.9 is required to read artifact-carried context. The artifact remains bounded, references retain their revisions, and replay uses the existing session key. Install the Director update before resuming the blocked Producer planning commitment.
 
-## Raising decisions to the owner (2.12.0)
+## Raising decisions to the owner (2.14.0)
 
 When a ticket on a board I manage is Blocked with the `decision-required:v1` diagnostic, I send my manager one direct message per blocked attempt. This happens when a developer or QA reports that no code change can move the ticket and it needs a scope, criteria, environment or tooling decision. The message includes the specialist's decision request and the exact replies I act on: `Amend ticket <ID>: <decision>` to change or defer criteria through the normal replanning, estimate and readiness flow, or `Retry ticket <ID>: <what changed>` once the missing environment or direction exists. Ordinary blockers are not relabelled as decisions, and a single blocked attempt is never escalated twice. There are no new grants.
+
+## Project incident reporting
+
+Project-health and management-incident events are handled before ordinary workflow routing. The Producer
+reads sanitized project-scoped evidence and reports observed facts, likely causes, missing evidence, and a
+recommended action without invoking a model. Management agents forward operational failures outside their
+responsibility using the same incident identity. Attention reviews recover pending incidents after reconnect.
+
+The manifest requests incident read/forward capabilities; the Producer additionally requests health,
+diagnostics, and report capabilities. Approve these through the normal installation grant review. The
+platform enforces current project/reporting authority and advances unhandled hops after 15 minutes.
+No additional repair or automatic retry authority is requested.
+
+
+## Shared manager type
+
+The manifest declares `rolePolicy.baseType: "manager"` and `profile: "manager.v1"`.
+This agent derives from SDK `CSweetManagerAgentBase`; its job remains a specialized manager role.
+The shared base handles project-health/incident events and attention recovery before ordinary work.
+Diagnostic reads and assessment reports require the manifest's current approved project-health and
+incident grants. Monitoring covers current assigned projects only. The default diagnosis escalates;
+role-specific recovery can be added through `AssessIncidentAsync` using existing authorized operations.
+A recorded recovery request does not close the incident or extend its 15-minute escalation deadline.

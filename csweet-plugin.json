@@ -3,8 +3,9 @@
   "manifestVersion": "2.0",
   "kind": "agent",
   "rolePolicy": {
-    "profile": "manager.v1",
+    "baseType": "manager", "profile": "manager.v1",
     "declaredRoleKeys": [
+      "manager",
       "game-producer"
     ],
     "specializationKeys": [
@@ -18,7 +19,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.12.0",
+  "version": "2.14.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -283,11 +284,13 @@
       "name": "platform.workstream.change.propose.v1",
       "scope": "organization",
       "purpose": "Submit an existing project's profile upgrade or verified completion transition through its governed approval policy."
-    },    {
+    },
+    {
       "name": "work.item.delivery.finalize",
       "scope": "team",
       "purpose": "Bind approved technical tickets to the current repository, accountable developer and independent review assignments."
-    },    {
+    },
+    {
       "name": "work.item.estimate",
       "scope": "team",
       "purpose": "Record only specialist-supplied estimates with coordination provenance."
@@ -347,7 +350,6 @@
       "scope": "team",
       "purpose": "Create bounded planned sprints."
     },
-
     {
       "name": "work.sprint.scope.manage",
       "scope": "team",
@@ -522,6 +524,31 @@
       "purpose": "Coordinate and review delivery within current project and assignment authority.",
       "name": "source-control.repository.team-options.v2",
       "scope": "team"
+    },
+    {
+      "name": "platform.management.incident.read.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.management.incident.forward.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.project-health.read.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.project-health.diagnostics.read.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.management.incident.report.v1",
+      "scope": "organization",
+      "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
     }
   ],
   "events": {
@@ -544,7 +571,9 @@
       "com.csweet.work.sprint.changed.v1",
       "com.csweet.work.execution.changed.v1",
       "com.csweet.workstream.project-setup.v1",
-      "com.csweet.repository.provisioning.changed.v1"
+      "com.csweet.repository.provisioning.changed.v1",
+      "com.csweet.project-health.review-due.v1",
+      "com.csweet.management.incident.changed.v1"
     ]
   },
   "configuration": [
