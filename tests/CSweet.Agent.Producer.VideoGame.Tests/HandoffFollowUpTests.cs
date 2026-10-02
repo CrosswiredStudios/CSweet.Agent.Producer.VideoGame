@@ -24,6 +24,15 @@ public sealed class HandoffFollowUpTests
     }
 
     [Fact]
+    public void ForeignOrEmptyPayloadsAreNotTreatedAsAWatch()
+    {
+        Assert.False(HandoffFollowUpPolicy.IsValid(null));
+        Assert.False(HandoffFollowUpPolicy.IsValid(new ProducerHandoffWatch(Guid.Empty, null, null, null, Start, 0, null, null)));
+        Assert.False(HandoffFollowUpPolicy.IsValid(new ProducerHandoffWatch(Guid.NewGuid(), null, null, null, default, 0, null, null)));
+        Assert.True(HandoffFollowUpPolicy.IsValid(new ProducerHandoffWatch(Guid.NewGuid(), null, null, null, Start, 0, null, null)));
+    }
+
+    [Fact]
     public void OwnerManagerGetsOneReminderAndNoEscalation()
     {
         var owner = Guid.NewGuid();
@@ -56,7 +65,7 @@ public sealed class HandoffFollowUpTests
             await SpecialistAgent.FollowUpAwaitedHandoffAsync(Start.AddMinutes(minutes), h.Context, default);
 
         Assert.Equal(2, h.Messages.Keys.Count(x => x.StartsWith("producer-handoff-nudge:", StringComparison.Ordinal)));
-        var escalation = Assert.Single(h.Messages.Where(x => x.Key.StartsWith("producer-handoff-escalation:", StringComparison.Ordinal)));
+        var escalation = Assert.Single(h.Messages, x => x.Key.StartsWith("producer-handoff-escalation:", StringComparison.Ordinal));
         Assert.Contains("Creative Director", escalation.Value);
         Assert.Equal(h.OwnerConversation, h.EscalationChat);
         Assert.NotNull(h.Watch!.EscalatedAt);

@@ -26,6 +26,13 @@ internal static class HandoffFollowUpPolicy
     public static readonly TimeSpan Patience = TimeSpan.FromMinutes(30);
     public const int MaximumNudges = 2;
 
+    /// <summary>
+    /// A watch without a manager or start time is not usable (for example, a missing or foreign
+    /// operating-state payload); the caller restarts the watch instead of acting on it.
+    /// </summary>
+    public static bool IsValid(ProducerHandoffWatch? watch) =>
+        watch is not null && watch.ManagerId != Guid.Empty && watch.WaitingSince != default;
+
     public static HandoffFollowUpAction Decide(ProducerHandoffWatch watch, DateTimeOffset now)
     {
         if (now - (watch.LastNudgeAt ?? watch.WaitingSince) < Patience) return HandoffFollowUpAction.None;
@@ -65,17 +72,18 @@ public sealed partial class SpecialistAgent
         catch (PlatformCapabilityException exception) when (exception.Code == PlatformCapabilityErrorCode.NotFound) { existing = null; }
         var store = new RevisionSafeProjectState(context.Platform);
         var watch = existing?.Payload;
-        if (watch is null)
+        if (!HandoffFollowUpPolicy.IsValid(watch))
         {
             // Producers onboarded before 2.15.0 have no watch: start the clock now.
             if (!Guid.TryParse(context.Identity?.ManagerEmployeeId, out var manager) || manager == Guid.Empty) return;
             var started = new ProducerHandoffWatch(manager, context.Identity?.ManagerDisplayName, null, null, now, 0, null, null);
             await store.MergeAsync<ProducerHandoffWatch>(HandoffFollowUpPolicy.StateKey, HandoffFollowUpPolicy.SchemaId, 1,
-                current => current ?? started, new Dictionary<string, string>(), $"{HandoffFollowUpPolicy.StateKey}:start", token);
+                current => HandoffFollowUpPolicy.IsValid(current) ? current! : started,
+                new Dictionary<string, string>(), $"{HandoffFollowUpPolicy.StateKey}:start", token);
             return;
         }
 
-        switch (HandoffFollowUpPolicy.Decide(watch, now))
+        switch (HandoffFollowUpPolicy.Decide(watch!, now))
         {
             case HandoffFollowUpAction.NudgeManager:
                 var nudge = watch.Nudges + 1;

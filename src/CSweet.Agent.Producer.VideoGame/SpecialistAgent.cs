@@ -203,7 +203,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (portfolio.Workstreams.Count == 0)
         {
             // No project yet means the next step is the manager's handoff; follow up rather than idle.
-            await FollowUpAwaitedHandoffAsync(review.OccurredAt, context, cancellationToken);
+            // Follow-up is best effort: a failed message is retried by the next review and must not
+            // fail the review itself.
+            try { await FollowUpAwaitedHandoffAsync(review.OccurredAt, context, cancellationToken); }
+            catch (PlatformCapabilityException) { }
             return;
         }
         var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken);
