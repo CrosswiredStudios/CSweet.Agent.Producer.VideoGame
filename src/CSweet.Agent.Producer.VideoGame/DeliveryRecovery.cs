@@ -81,6 +81,18 @@ public sealed partial class SpecialistAgent
         return ($"{DecisionEscalationPrefix}{stage.Id:N}:{stage.AttemptCount}", content);
     }
 
+    // Rejections raised by the specialist's own deliverable validator (SubstantiveOutputValidator). They describe
+    // the generated document, not missing evidence, authority or QA, so another generation attempt can fix them.
+    private static readonly string[] CorrectableDeliverableFailures =
+    [
+        "The deliverable is missing required section '",
+        "The deliverable contains unresolved placeholder text",
+        "The durable deliverable is too short to be substantive"
+    ];
+
+    internal static bool IsCorrectableDeliverableFailure(string reason) =>
+        CorrectableDeliverableFailures.Any(prefix => reason.StartsWith(prefix, StringComparison.Ordinal));
+
     internal static RetryWorkStageExecutionRequest? CorrectableDeliveryRetry(Guid boardId, Guid executionId, WorkStageExecutionResponse stage)
     {
         // Retry only structural generation failures, never missing real-world evidence, authority,
@@ -90,12 +102,12 @@ public sealed partial class SpecialistAgent
             stage.PrincipalKind != "AgentInstallation" || stage.AgentInstallationId is null ||
             stage.LatestOutcome?.Disposition != WorkExecutionDispositions.Blocked ||
             stage.AssignmentRevision < 1 || stage.AttemptCount < 1 || stage.AttemptCount >= stage.MaximumAttempts ||
-            reason is null || !reason.StartsWith("The deliverable is missing required section '", StringComparison.Ordinal)) return null;
+            reason is null || !IsCorrectableDeliverableFailure(reason)) return null;
         // Deliberately independent of attempt number: duplicates, reconnects, and a repeated identical
         // formatting defect reuse the host's receipt instead of repeatedly spending attempts.
         var key = $"producer-format-retry:{stage.Id:N}:{AcceptanceDigest(reason)}";
         return new(boardId, executionId, stage.Id, key,
-            "Retry the structurally incomplete deliverable within the existing stage attempt budget; substantive acceptance remains required.")
+            "Retry the deliverable that failed its own structural validation within the existing stage attempt budget; substantive acceptance remains required.")
         { ExpectedAssignmentRevision = stage.AssignmentRevision };
     }
 }

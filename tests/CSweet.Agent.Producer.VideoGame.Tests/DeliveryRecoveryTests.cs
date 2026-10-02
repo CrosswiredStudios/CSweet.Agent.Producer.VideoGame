@@ -26,6 +26,16 @@ public sealed class DeliveryRecoveryTests
     }
 
     [Theory]
+    [InlineData("The deliverable contains unresolved placeholder text: todo.")]
+    [InlineData("The durable deliverable is too short to be substantive.")]
+    public void SelfValidationFailuresAreRetried(string reason)
+    {
+        var stage = Blocked();
+        Assert.NotNull(SpecialistAgent.CorrectableDeliveryRetry(Guid.NewGuid(), Guid.NewGuid(), stage with
+            { LatestOutcome = stage.LatestOutcome! with { Summary = reason } }));
+    }
+
+    [Theory]
     [InlineData("No measured performance evidence is available.")]
     [InlineData("Access denied.")]
     [InlineData("Independent QA failed.")]

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using CSweet.Agent.SDK;
 using CSweet.Agent.SDK.WorkManagement;
 using CSweet.WorkManagement.Contracts;
@@ -90,19 +91,42 @@ public static class SpecialistAssignmentValidator
 
 public static class SubstantiveOutputValidator
 {
-    private static readonly string[] PlaceholderMarkers =
-        ["todo", "tbd", "lorem ipsum", "placeholder", "insert here", "coming soon", "to be decided"];
+    // Only unmistakable unresolved markers count. Ordinary prose ("placeholder art", "to be decided by
+    // QA", a review rule forbidding `TODO` comments) is legitimate deliverable content, and fenced or
+    // inline code is never scanned.
+    private static readonly Regex[] PlaceholderMarkers =
+    [
+        new(@"(?m)(^|[\s(\[|*_])(TODO|TBD|FIXME)(?=\s*([:)\]|]|$))", RegexOptions.CultureInvariant),
+        new(@"lorem ipsum", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+        new(@"\[\s*(insert|add|fill in|placeholder)\b[^\]\n]*\]", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+        new(@"<\s*(insert|fill in|placeholder)\b[^>\n]*>", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant),
+        new(@"\binsert (here|text|details|content)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)
+    ];
+    private static readonly Regex CodeBlocks = new(@"(```|~~~)[\s\S]*?(\1|$)", RegexOptions.CultureInvariant);
+    private static readonly Regex InlineCode = new(@"`[^`\n]*`", RegexOptions.CultureInvariant);
+
+    /// <summary>Returns why a deliverable is not substantive, or null when it passes.</summary>
+    public static string? FindIssue(string markdown, params string[] requiredSections)
+    {
+        if (string.IsNullOrWhiteSpace(markdown) || markdown.Length < 800)
+            return "The durable deliverable is too short to be substantive.";
+        var prose = InlineCode.Replace(CodeBlocks.Replace(markdown, " "), " ");
+        foreach (var marker in PlaceholderMarkers)
+        {
+            var match = marker.Match(prose);
+            if (match.Success)
+                return $"The deliverable contains unresolved placeholder text: {match.Value.Trim()}.";
+        }
+        var normalized = markdown.ToLowerInvariant();
+        foreach (var section in requiredSections)
+            if (!normalized.Contains(section.ToLowerInvariant(), StringComparison.Ordinal))
+                return $"The deliverable is missing required section '{section}'.";
+        return null;
+    }
 
     public static void RequireSubstantiveMarkdown(string markdown, params string[] requiredSections)
     {
-        if (string.IsNullOrWhiteSpace(markdown) || markdown.Length < 800)
-            throw new InvalidOperationException("The durable deliverable is too short to be substantive.");
-        var normalized = markdown.ToLowerInvariant();
-        var marker = PlaceholderMarkers.FirstOrDefault(normalized.Contains);
-        if (marker is not null) throw new InvalidOperationException($"The deliverable contains unresolved placeholder text: {marker}.");
-        foreach (var section in requiredSections)
-            if (!normalized.Contains(section.ToLowerInvariant(), StringComparison.Ordinal))
-                throw new InvalidOperationException($"The deliverable is missing required section '{section}'.");
+        if (FindIssue(markdown, requiredSections) is { } issue) throw new InvalidOperationException(issue);
     }
 }
 
@@ -415,11 +439,23 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                 ?? throw new InvalidOperationException("A brokered LLM provider must be configured.");
             var client = context.CreateChatClient(new AgentLlmSelection(provider, Settings.GetString("llmModel"),
                 new AgentLlmInvocationContext(null, null, $"video-game-specialist:{RoleKey}")));
-            var response = await context.Platform.Calendar.GetResponseAsync(client, [
+            List<ChatMessage> messages = [
                 new ChatMessage(ChatRole.System, $"{RolePrompt}\nYou own only {RoleKey} accountability. Produce concrete, testable Markdown with explicit decisions, dependencies, acceptance evidence, and no placeholders. Do not absorb another specialist's accountability."),
                 new ChatMessage(ChatRole.User, $"Authoritative stage instructions:\n{assignment.Instructions}\n\nRequirements:\n{JsonSerializer.Serialize(canonicalInput.Planning.Requirements)}\n\nAcceptance criteria:\n{JsonSerializer.Serialize(canonicalInput.Planning.AcceptanceCriteria)}\n\nExact approved package {package.PackageId:D} v{package.Version} ({package.Sha256}):\n{JsonSerializer.Serialize(grounding)}\n\nPrior outcomes:\n{JsonSerializer.Serialize(assignment.PriorOutcomes)}\n\nExisting evidence:\n{JsonSerializer.Serialize(assignment.Evidence)}")
-            ], ResponseOptions(), cancellationToken);
+            ];
+            var response = await context.Platform.Calendar.GetResponseAsync(client, messages, ResponseOptions(), cancellationToken);
             var markdown = response.Text ?? string.Empty;
+            if (SubstantiveOutputValidator.FindIssue(markdown, RequiredSections.ToArray()) is { } draftIssue)
+            {
+                // One bounded self-correction: the author fixes its own draft instead of blocking the sprint
+                // on a problem it can resolve. A second failure still blocks with the exact reason.
+                messages.Add(new ChatMessage(ChatRole.Assistant, markdown));
+                messages.Add(new ChatMessage(ChatRole.User,
+                    $"The draft was rejected: {draftIssue} Return the complete corrected document only. Replace every " +
+                    $"unresolved marker with concrete content and keep all required sections ({string.Join(", ", RequiredSections)})."));
+                response = await context.Platform.Calendar.GetResponseAsync(client, messages, ResponseOptions(), cancellationToken);
+                markdown = response.Text ?? string.Empty;
+            }
             SubstantiveOutputValidator.RequireSubstantiveMarkdown(markdown, RequiredSections.ToArray());
             var itemTypeKey = assignment.Item.TryGetProperty("typeKey", out var typeKeyElement)
                 ? typeKeyElement.GetString() ?? assignment.StageKey
