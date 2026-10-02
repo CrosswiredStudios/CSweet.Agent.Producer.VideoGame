@@ -69,4 +69,39 @@ public sealed class DecisionEscalationTests
         var stage = Stage([SpecialistAgent.DecisionRequiredDiagnostic], new string('x', 6000));
         Assert.True(SpecialistAgent.DecisionEscalation(Item(stage), stage)!.Value.Content.Length < 3200);
     }
+
+    private const string DispatchReason = "Daniel Kim can't start VGF943299B17-6: project.assignment_required: The project must be active and the developer must be an explicit participant on its team. Ask the project manager to update membership.";
+
+    private static WorkStageExecutionResponse NeverStarted(string? error = DispatchReason) =>
+        new(Guid.NewGuid(), "specialist-execution", "AgentExecution", 0, "Blocked", "AgentInstallation", Guid.NewGuid(),
+            Guid.NewGuid(), null, 0, null, null, error, null, DateTimeOffset.UtcNow) { AssignmentRevision = 1, MaximumAttempts = 3 };
+
+    [Fact]
+    public void A_ticket_the_platform_could_not_dispatch_reaches_the_owner_once_with_the_reason()
+    {
+        var stage = NeverStarted();
+        var escalation = SpecialistAgent.DispatchBlockerEscalation(Item(stage), stage)!.Value;
+        Assert.StartsWith("VG4CC32F61E0-22 can't start", escalation.Content);
+        Assert.Contains(DispatchReason, escalation.Content);
+        Assert.Contains("Manage members", escalation.Content);
+        Assert.Contains("Retry ticket VG4CC32F61E0-22:", escalation.Content);
+        Assert.StartsWith($"producer-decision:{stage.Id:N}:dispatch:", escalation.Key);
+        Assert.True(escalation.Key.Length <= 128);
+        Assert.Equal(escalation.Key, SpecialistAgent.DispatchBlockerEscalation(Item(stage), stage)!.Value.Key);
+        Assert.NotEqual(escalation.Key, SpecialistAgent.DispatchBlockerEscalation(Item(stage), stage with { LastError = "Something else." })!.Value.Key);
+    }
+
+    [Fact]
+    public void Worker_blockers_and_unblocked_work_are_not_dispatch_blockers()
+    {
+        var worked = Stage(["detail"]);
+        Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(worked), worked));
+        var stage = NeverStarted();
+        Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(stage, "Pending"), stage));
+        Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(stage), stage with { Status = "Pending" }));
+        Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(stage), stage with { AttemptCount = 1 }));
+        Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(stage), null));
+        var silent = NeverStarted(null);
+        Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(silent) with { BlockedReason = null }, silent));
+    }
 }

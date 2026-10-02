@@ -42,7 +42,7 @@ public sealed partial class SpecialistAgent
             foreach (var item in execution.Items.Where(x => x.Status == "Blocked"))
             {
                 var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
-                if (DecisionEscalation(item, stage) is not { } escalation) continue;
+                if ((DecisionEscalation(item, stage) ?? DispatchBlockerEscalation(item, stage)) is not { } escalation) continue;
                 try
                 {
                     if (await context.Platform.ReadOperatingStateAsync<ProducerDecisionEscalation>(escalation.Key, token) is not null) continue;
@@ -79,6 +79,29 @@ public sealed partial class SpecialistAgent
                 : $"This stage has used its attempt budget, so a plain retry is not available; reply `Replan ticket {id}: <direction>` to carry it into a replanned sprint.");
         // One escalation per blocked attempt; a new attempt that blocks again is a new decision request.
         return ($"{DecisionEscalationPrefix}{stage.Id:N}:{stage.AttemptCount}", content);
+    }
+
+    /// <summary>
+    /// The platform refused to hand a ticket to its assignee (for example, the assignee isn't a participant of the
+    /// project), so no attempt ran and there is no specialist outcome to act on. The platform enrolls staffing hires
+    /// itself, so what remains needs someone with authority over the project: raise it once with the exact reason.
+    /// </summary>
+    internal static (string Key, string Content)? DispatchBlockerEscalation(WorkItemExecutionResponse item, WorkStageExecutionResponse? stage)
+    {
+        if (stage is null || item.Status != "Blocked" || stage.Status != "Blocked" || stage.LatestOutcome is not null ||
+            stage.AttemptCount != 0 || stage.PrincipalKind != "AgentInstallation") return null;
+        var reason = (string.IsNullOrWhiteSpace(stage.LastError) ? item.BlockedReason : stage.LastError)?.Trim();
+        if (string.IsNullOrWhiteSpace(reason)) return null;
+        if (reason.Length > 2500) reason = reason[..2497] + "...";
+        var id = item.ItemIdentifier;
+        var content = $"{id} can't start, and nothing on the team can clear it without you.\n\n{reason}\n\n" +
+            "The platform didn't hand the ticket to its assignee, so no work or attempt was spent. " +
+            (reason.Contains("project.", StringComparison.Ordinal)
+                ? "If the assignee should work on this project, add them under Projects → Manage members. "
+                : "") +
+            $"Once it's fixed, reply `Retry ticket {id}: <what changed>`, or `Amend ticket {id}: <your decision>` to change the plan.";
+        // One escalation per distinct reason for this never-started stage.
+        return ($"{DecisionEscalationPrefix}{stage.Id:N}:dispatch:{AcceptanceDigest(reason)[..16]}", content);
     }
 
     // Rejections raised by the specialist's own deliverable validator (SubstantiveOutputValidator). They describe
