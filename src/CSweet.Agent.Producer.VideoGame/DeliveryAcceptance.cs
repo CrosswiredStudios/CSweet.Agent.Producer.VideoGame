@@ -49,8 +49,9 @@ public sealed partial class SpecialistAgent
                     await ReviewDeliveryAsync(board.Id, execution, item, stage, context, EvaluateAcceptanceAsync, token,
                         (input, decision, ct) => RequestRoleRepairAsync(board, execution, stage, input, decision, context, ct));
                 }
-                catch (InvalidOperationException error)
+                catch (Exception error) when (error is InvalidOperationException or JsonException)
                 {
+                    // One unreadable review must not fail the whole attention review and loop forever unseen.
                     await context.Platform.Work.CommentAsync(new(board.Id, item.WorkItemId,
                         $"Producer acceptance is waiting: {error.Message}",
                         $"producer-review-wait:{stage.Id:N}:{AcceptanceDigest(error.Message)}"), token);
@@ -86,8 +87,7 @@ public sealed partial class SpecialistAgent
                     """),
                 new ChatMessage(ChatRole.User, JsonSerializer.Serialize(input, AcceptanceJson))
             ], ResponseOptions(), ct);
-            return JsonSerializer.Deserialize<DeliveryAcceptanceDecision>(response.Text, AcceptanceJson)
-                ?? throw new InvalidOperationException("Producer review returned no decision.");
+            return ModelJson.Deserialize<DeliveryAcceptanceDecision>(response.Text, AcceptanceJson, "Producer review");
         }
     }
 
