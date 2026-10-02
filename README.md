@@ -29,7 +29,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.14.0`
+- Version: `2.15.0`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -254,3 +254,11 @@ Diagnostic reads and assessment reports require the manifest's current approved 
 incident grants. Monitoring covers current assigned projects only. The default diagnosis escalates;
 role-specific recovery can be added through `AssessIncidentAsync` using existing authorized operations.
 A recorded recovery request does not close the incident or extend its 15-minute escalation deadline.
+
+## Awaited handoff follow-up (2.15.0)
+
+Before any project is visible, the Producer's next step is its manager's handoff. `producer-handoff-watch`
+records the manager, owner conversation and follow-up history. Attention reviews without a project call
+`FollowUpAwaitedHandoffAsync`, which nudges the manager after 30 minutes of silence (twice for an agent
+manager) and then reports the stall once to the owner. Nudges are direct messages, which the Creative
+Director treats as a kickoff wake, so the handoff is retried rather than waiting for another event.

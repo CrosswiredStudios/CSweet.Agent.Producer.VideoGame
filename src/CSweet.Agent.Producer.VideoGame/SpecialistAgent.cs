@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.14.0";
+    public override string Version => "2.15.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -200,7 +200,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         // Accepted commitments survive invocations; the host still filters them against current visibility.
         var portfolio = await context.Platform.ReadPortfolioAsync(
             new ReadPortfolioRequest(), cancellationToken);
-        if (portfolio.Workstreams.Count == 0) return;
+        if (portfolio.Workstreams.Count == 0)
+        {
+            // No project yet means the next step is the manager's handoff; follow up rather than idle.
+            await FollowUpAwaitedHandoffAsync(review.OccurredAt, context, cancellationToken);
+            return;
+        }
         var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken);
         var snapshots = new List<ProducerMetricSnapshot>();
         var phases = new Dictionary<Guid, ProducerManagementPhase>();
