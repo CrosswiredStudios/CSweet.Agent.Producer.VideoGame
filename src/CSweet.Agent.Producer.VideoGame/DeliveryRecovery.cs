@@ -39,10 +39,11 @@ public sealed partial class SpecialistAgent
         {
             var execution = await context.Platform.Work.ReadOrchestrationAsync(new(board.Id, SprintId: sprint.Id), token);
             if (execution?.Status != "Active") continue;
-            foreach (var item in execution.Items.Where(x => x.Status == "Blocked"))
+            foreach (var item in execution.Items.Where(x => x.Status is "Blocked" or "Failed"))
             {
                 var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
-                if ((DecisionEscalation(item, stage) ?? DispatchBlockerEscalation(item, stage)) is not { } escalation) continue;
+                if ((DecisionEscalation(item, stage) ?? DispatchBlockerEscalation(item, stage) ??
+                        UnhandledBlockerEscalation(board.Id, execution.Id, item, stage, DateTimeOffset.UtcNow)) is not { } escalation) continue;
                 try
                 {
                     if (await context.Platform.ReadOperatingStateAsync<ProducerDecisionEscalation>(escalation.Key, token) is not null) continue;
@@ -102,6 +103,36 @@ public sealed partial class SpecialistAgent
             $"Once it's fixed, reply `Retry ticket {id}: <what changed>`, or `Amend ticket {id}: <your decision>` to change the plan.";
         // One escalation per distinct reason for this never-started stage.
         return ($"{DecisionEscalationPrefix}{stage.Id:N}:dispatch:{AcceptanceDigest(reason)[..16]}", content);
+    }
+
+    /// <summary>How long a specific recovery path (format retry, role repair, decision routing) gets before the fallback.</summary>
+    internal static readonly TimeSpan UnhandledBlockerGrace = TimeSpan.FromMinutes(20);
+
+    /// <summary>
+    /// The fallback that keeps any stopped ticket from stalling unseen. A Blocked or Failed stage that no specific
+    /// recovery step has moved within <see cref="UnhandledBlockerGrace"/> is raised to my manager once per attempt and
+    /// reason, with the reason and the replies that move it: retry, amend, or replan. Whatever state a ticket ends up
+    /// in, someone who can decide hears about it.
+    /// </summary>
+    internal static (string Key, string Content)? UnhandledBlockerEscalation(Guid boardId, Guid executionId,
+        WorkItemExecutionResponse item, WorkStageExecutionResponse? stage, DateTimeOffset now)
+    {
+        if (stage is null || item.Status is not ("Blocked" or "Failed") || stage.Status is not ("Blocked" or "Failed")) return null;
+        if (now - stage.UpdatedAt < UnhandledBlockerGrace) return null;
+        if (CorrectableDeliveryRetry(boardId, executionId, stage) is not null) return null; // I retry those myself.
+        var reason = new[] { stage.LatestOutcome?.Summary, stage.LastError, stage.LastSummary, item.BlockedReason }
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "No reason was recorded on the stage.";
+        if (reason.Length > 2500) reason = reason[..2497] + "...";
+        var id = item.ItemIdentifier;
+        var state = stage.Status == "Failed" ? "marked failed" : "blocked";
+        var exhausted = stage.MaximumAttempts > 0 && stage.AttemptCount >= stage.MaximumAttempts;
+        var content = $"{id} has been {state} since {stage.UpdatedAt:yyyy-MM-dd HH:mm} UTC, and none of my recovery steps apply, " +
+            $"so the team can't move it forward without a decision.\n\n{reason}\n\n" +
+            (exhausted
+                ? $"This stage has used its attempt budget. Reply `Replan ticket {id}: <direction>` to carry it into a replanned sprint, "
+                : $"Once the cause is addressed, reply `Retry ticket {id}: <what changed>`, ") +
+            $"or `Amend ticket {id}: <your decision>` to change what the ticket requires.";
+        return ($"{DecisionEscalationPrefix}{stage.Id:N}:stalled:{stage.AttemptCount}:{AcceptanceDigest(reason)[..16]}", content);
     }
 
     // Rejections raised by the specialist's own deliverable validator (SubstantiveOutputValidator). They describe

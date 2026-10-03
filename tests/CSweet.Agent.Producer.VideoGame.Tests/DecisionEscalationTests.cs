@@ -104,4 +104,54 @@ public sealed class DecisionEscalationTests
         var silent = NeverStarted(null);
         Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(silent) with { BlockedReason = null }, silent));
     }
+
+    private const string NodeMissing = "Implementation remains In Progress because validation failed: - `node -v` exited 127: node: command not found";
+
+    private static WorkStageExecutionResponse Stopped(string status = "Blocked", int attempts = 1, int maximum = 0, double minutesAgo = 60) =>
+        new(Guid.NewGuid(), "specialist-execution", "AgentExecution", 0, status, "AgentInstallation", Guid.NewGuid(),
+            Guid.NewGuid(), null, attempts, "blocked", NodeMissing, NodeMissing, null, DateTimeOffset.UtcNow.AddMinutes(-minutesAgo))
+        { AssignmentRevision = 1, MaximumAttempts = maximum };
+
+    [Fact]
+    public void Any_ticket_left_blocked_with_no_recovery_step_reaches_the_owner_once()
+    {
+        // VGF943299B17-6 sat Blocked for hours: no decision tag, not a format failure, and it had been attempted.
+        var stage = Stopped();
+        Assert.Null(SpecialistAgent.DecisionEscalation(Item(stage), stage));
+        Assert.Null(SpecialistAgent.DispatchBlockerEscalation(Item(stage), stage));
+        var escalation = SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(stage), stage, DateTimeOffset.UtcNow)!.Value;
+        Assert.StartsWith("VG4CC32F61E0-22 has been blocked since", escalation.Content);
+        Assert.Contains(NodeMissing, escalation.Content);
+        Assert.Contains("Retry ticket VG4CC32F61E0-22:", escalation.Content);
+        Assert.Contains("Amend ticket VG4CC32F61E0-22:", escalation.Content);
+        Assert.StartsWith($"producer-decision:{stage.Id:N}:stalled:1:", escalation.Key);
+        Assert.True(escalation.Key.Length <= 128);
+        Assert.Equal(escalation.Key, SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(stage), stage, DateTimeOffset.UtcNow)!.Value.Key);
+        Assert.NotEqual(escalation.Key, SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(stage), stage with { AttemptCount = 2 }, DateTimeOffset.UtcNow)!.Value.Key);
+    }
+
+    [Fact]
+    public void Failed_and_exhausted_tickets_are_offered_replanning()
+    {
+        var stage = Stopped("Failed", attempts: 3, maximum: 3);
+        var content = SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(stage, "Failed"), stage, DateTimeOffset.UtcNow)!.Value.Content;
+        Assert.StartsWith("VG4CC32F61E0-22 has been marked failed since", content);
+        Assert.Contains("Replan ticket VG4CC32F61E0-22:", content);
+        Assert.DoesNotContain("Retry ticket", content);
+    }
+
+    [Fact]
+    public void Fresh_or_self_recoverable_stops_get_their_specific_recovery_first()
+    {
+        var fresh = Stopped(minutesAgo: 5);
+        Assert.Null(SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(fresh), fresh, DateTimeOffset.UtcNow));
+        var running = Stopped();
+        Assert.Null(SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(running, "Running"), running, DateTimeOffset.UtcNow));
+        Assert.Null(SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(running), running with { Status = "Running" }, DateTimeOffset.UtcNow));
+        Assert.Null(SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(running), null, DateTimeOffset.UtcNow));
+        const string format = "The deliverable contains unresolved placeholder text: todo.";
+        var correctable = Stopped(maximum: 3) with { LatestOutcome = new(Guid.NewGuid(), Guid.NewGuid(), WorkExecutionDispositions.Blocked, "blocked", format,
+            JsonSerializer.SerializeToElement(new { }), [], [format]) };
+        Assert.Null(SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(correctable), correctable, DateTimeOffset.UtcNow));
+    }
 }
