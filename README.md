@@ -3,6 +3,10 @@
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 
+## Coordination flow (2.15.5)
+
+`HandleManagerMessageAsync` acknowledges authenticated teammate check-ins and reconciles authoritative readiness without model inference. Manager setup decisions remain restricted to reporting authority. Manager responses use a 2048-token ceiling; full planning documents keep their configured budget. `RefinePitchAsync` supplies conversation text, the latest creative edits and the working brief while retaining accepted-source evidence in the saved document. Platform planning-cycle wakes and reconnect recovery release deferred commitments without waiting for the five-minute attention review.
+
 ## Direct manager kickoff (2.9.0)
 
 The Producer now answers direct Communications turns and finishes each valid turn with a final response. An explicit manager request can generate a lightweight project proposal and a role-specific team proposal through the existing approval paths. Project and hiring approvals remain visible to the manager; a submitted proposal is not an approved project, team, or hire. The Producer package provides its own lightweight game project profile, so project setup does not depend on importing the Creative Director package. The project and team proposals are separate, so an approved project may still need its approved team attached before board execution. The Producer does not require a Creative Director, accepted pitch, or GDD for this path. The older formal creative-handoff flow still applies when that workflow is used.
