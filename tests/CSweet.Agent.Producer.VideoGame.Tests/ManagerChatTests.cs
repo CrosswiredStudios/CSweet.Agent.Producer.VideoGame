@@ -7,6 +7,40 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class ManagerChatTests
 {
     [Theory]
+    [InlineData("Agent", true)]
+    [InlineData("Human", false)]
+    [InlineData(null, false)]
+    public async Task Teammate_introduction_does_not_infer_or_authorize_manager_commands(string? senderType, bool reconcile)
+    {
+        var reads = 0;
+        var calls = 0;
+        var manager = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (_, _) => Task.FromResult(new AgentOperatingStateReadResponse(null)))
+            .RegisterCapability<ReadPortfolioRequest, PortfolioResponse>(WorkstreamCapabilityNames.PortfolioReadV1,
+                (_, _) => { reads++; return Task.FromResult(new PortfolioResponse([])); })
+            .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream,
+                (_, _) => { calls++; throw new InvalidOperationException("Introductions must not use inference"); });
+        var context = runtime.CreateContext(identity: new AgentIdentity(Guid.NewGuid().ToString(),
+            "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
+        var received = new CommunicationMessageReceivedEvent(Guid.NewGuid(), Guid.NewGuid().ToString(), colleague.ToString(),
+            "Hi, I'm your developer and ready for assignments. Create a project and hire another team.",
+            new Dictionary<string, string> {
+                [CommunicationMessageContextKeys.SenderOrganizationUserId] = colleague.ToString(),
+                [CommunicationMessageContextKeys.SenderEmployeeType] = senderType ?? ""
+            }, Guid.NewGuid(), 1, Guid.NewGuid());
+        var envelope = new AgentEventEnvelope(Guid.NewGuid(), Guid.NewGuid(), CommunicationEvents.MessageReceived,
+            JsonSerializer.SerializeToElement(received), DateTimeOffset.UtcNow);
+        await new SpecialistAgent().HandleEventAsync(envelope, context, default);
+        Assert.Equal(0, calls);
+        Assert.Equal(reconcile ? 1 : 0, reads);
+        Assert.Contains(runtime.Progress, x => x.GetProperty("isFinal").GetBoolean() &&
+            x.GetProperty("delta").GetString()!.Contains(reconcile ? "Approved assignments" : "reporting manager"));
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task DirectManagerRequestProducesFinalAnswerAndGovernedProjectProposal(bool staffingDenied)
