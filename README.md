@@ -3,9 +3,11 @@
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 
-## Coordination flow (2.15.5)
+## Coordination flow (2.15.6)
 
 `HandleManagerMessageAsync` acknowledges authenticated teammate check-ins and reconciles authoritative readiness without model inference. Manager setup decisions remain restricted to reporting authority. Manager responses use a 2048-token ceiling; full planning documents keep their configured budget. `RefinePitchAsync` supplies conversation text, the latest creative edits and the working brief while retaining accepted-source evidence in the saved document. Platform planning-cycle wakes and reconnect recovery release deferred commitments without waiting for the five-minute attention review.
+
+`ReconcileSprintReadinessAsync` finalizes the selected executable leaves before sprint preflight through `FinalizeSprintDeliveriesAsync`. It preserves the current planning requirements, acceptance criteria, constraints, dependencies, accountable owner and exact stage assignments. Repository selection reuses an existing sprint binding or the approved team's sole repository option with a default branch; ambiguous or incomplete prerequisites remain pending. Existing delivery specifications are preserved. The host still validates authority, approvals and revisions, and the sprint starts only after authoritative preflight passes. Reconnect and retry resume partial finalization without duplicating delivery.
 
 ## Direct manager kickoff (2.9.0)
 
@@ -33,7 +35,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.15.5`
+- Version: `2.15.6`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews

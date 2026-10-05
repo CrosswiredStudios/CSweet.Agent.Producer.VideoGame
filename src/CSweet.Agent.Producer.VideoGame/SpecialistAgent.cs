@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.15.5";
+    public override string Version => "2.15.6";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -973,6 +973,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Completed($"Sprint {sprint.Name} is already {sprint.Status}.");
         if (!(sprint.CapacityPoints > 0))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "This sprint is still a provisional draft awaiting estimates and QA readiness.");
+        var deliveryWait = await FinalizeSprintDeliveriesAsync(item, boardId, sprintId, context, cancellationToken);
+        if (deliveryWait is not null)
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), deliveryWait);
         var start = new StartWorkSprintExecutionRequest(boardId, sprintId, sprint.Revision,
             $"producer-readiness:{sprintId:N}:{sprint.Revision}");
         var preflight = await context.Platform.Work.PreflightSprintAsync(start, cancellationToken);
