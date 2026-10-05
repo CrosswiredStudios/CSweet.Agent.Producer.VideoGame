@@ -3,7 +3,25 @@
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 
-## Coordination flow (2.15.6)
+## Coordination flow (2.16.0)
+
+`WorkflowStaffing.StaffWorkflowAsync` derives the complete delivery path from the
+approved board policy, binds eligible team members and preserves every started
+assignment. It supplies technical review, independent QA and merge authorization
+even when the technical proposal only named an implementer. Sprint readiness
+performs staffing before authoritative preflight.
+
+`producer-workflow-recovery:` personal commitments handle active and paused
+sprints as well as planned work. Work-item events and bounded reconnect reviews
+discover changed board/roster state. Recovery uses the existing
+`work.item.delivery.finalize` capability, retaining the published commit, scope,
+accountable owner, completed stages and attempt history. Only the board manager
+may change future assignments; started work requires cancellation/replanning.
+Missing staffing is repaired automatically when eligible members are available;
+uncovered roles follow existing hiring approval. Other blockers keep their
+evidence and follow bounded retry or management escalation. No new permissions
+or event subscriptions are requested. Deploy with the matching platform recovery
+validation and sprint-preflight changes.
 
 `HandleManagerMessageAsync` acknowledges authenticated teammate check-ins and reconciles authoritative readiness without model inference. Manager setup decisions remain restricted to reporting authority. Manager responses use a 2048-token ceiling; full planning documents keep their configured budget. `RefinePitchAsync` supplies conversation text, the latest creative edits and the working brief while retaining accepted-source evidence in the saved document. Platform planning-cycle wakes and reconnect recovery release deferred commitments without waiting for the five-minute attention review.
 
@@ -35,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.15.6`
+- Version: `2.16.0`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews

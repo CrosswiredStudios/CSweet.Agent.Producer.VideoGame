@@ -10,6 +10,19 @@ public sealed partial class SpecialistAgent
         AgentRuntimeContext context, CancellationToken cancellationToken)
     {
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        if (board.Board.WorkstreamId != commitment.WorkContext?.WorkstreamId ||
+            board.Board.TeamId != commitment.WorkContext?.TeamId)
+            return "Sprint delivery finalization requires the current project board and approved team.";
+        if (board.Board.TeamId is { } staffingTeam && board.Board.WorkstreamId is { } staffingProject &&
+            board.Board.ManagerOrganizationUserId is { } manager && manager.ToString() == context.Identity?.EmployeeId)
+        {
+            var roster = await ReadManagerTeamAsync(staffingTeam, context, cancellationToken);
+            var project = await context.Platform.ReadWorkstreamAsync(new(staffingProject), cancellationToken);
+            if (roster is null) return "Sprint staffing requires the current approved team.";
+            var gaps = await StaffWorkflowAsync(board.Board, roster, project.ProfileDefinitionDigest ?? "", context, cancellationToken);
+            if (gaps is not null) return gaps;
+            board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        }
         var scope = board.Items.Where(x => x.SprintId == sprintId &&
             x.ExecutionMode == WorkItemExecutionModes.Executable).ToArray();
         var pending = scope.Where(x => x.Delivery is null).ToArray();

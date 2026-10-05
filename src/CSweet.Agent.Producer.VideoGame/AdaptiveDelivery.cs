@@ -148,7 +148,8 @@ public sealed partial class SpecialistAgent
     }
 
     internal static IReadOnlyList<WorkStageAssignment> RefreshAssignments(
-        WorkItem item, AgentTeamContext roster, string profileDigest)
+        WorkItem item, AgentTeamContext roster, string profileDigest,
+        IReadOnlyList<WorkTechnicalDelegationRecommendation>? workflowRequirements = null)
     {
         var assignments = item.StageAssignments.ToList();
         var requirementsByStage = assignments.Where(x => x.Requirements is not null)
@@ -157,13 +158,32 @@ public sealed partial class SpecialistAgent
             requirementsByStage[recommendation.StageKey] = new WorkAssignmentRequirements(
                 recommendation.RequiredRoleKey, recommendation.RequiredSpecializationKeys,
                 recommendation.PreferredSpecializationKeys, recommendation.RequiredCapabilityKeys);
-        foreach (var (stage, requirements) in requirementsByStage)
+        foreach (var recommendation in workflowRequirements ?? [])
+        {
+            var required = new WorkAssignmentRequirements(recommendation.RequiredRoleKey, recommendation.RequiredSpecializationKeys,
+                recommendation.PreferredSpecializationKeys, recommendation.RequiredCapabilityKeys);
+            if (recommendation.StageKey is "technical-review" or "quality" or "merge-decision")
+                requirementsByStage[recommendation.StageKey] = requirementsByStage.TryGetValue(recommendation.StageKey, out var existing)
+                    ? existing with { RequiredRoleKey = required.RequiredRoleKey,
+                        RequiredCapabilityKeys = existing.RequiredCapabilityKeys.Concat(required.RequiredCapabilityKeys).Distinct().ToArray() }
+                    : required;
+            else requirementsByStage.TryAdd(recommendation.StageKey, required);
+        }
+        // Choose the implementation owner before filtering independent reviewers,
+        // even when legacy assignments or recommendations list review first.
+        foreach (var (stage, requirements) in requirementsByStage.OrderBy(x =>
+                     x.Key is "development" or "specialist-execution" ? 0 : 1))
         {
             var current = assignments.SingleOrDefault(x => x.StageKey == stage);
             // Preserve an eligible assignee; a new hire alone does not justify reassignment.
-            var selected = RoleTaxonomy.SelectAssignment(roster.Members
+            var implementers = assignments.Concat(item.StageAssignments).Where(x => x.StageKey == "development" ||
+                x.StageKey == "specialist-execution" && x.Requirements?.RequiredRoleKey is "game-engineer" or "software-developer").ToArray();
+            var candidates = roster.Members.Where(x => stage is not ("quality" or "technical-review" or "merge-decision") ||
+                !implementers.Any(author => author.AgentInstallationId.HasValue && author.AgentInstallationId == x.AgentInstallationId ||
+                    author.OrganizationUserId.HasValue && author.OrganizationUserId.Value.ToString() == x.EmployeeId)).ToArray();
+            var selected = RoleTaxonomy.SelectAssignment(candidates
                 .Where(x => x.AgentInstallationId == current?.AgentInstallationId).ToArray(), requirements)
-                ?? RoleTaxonomy.SelectAssignment(roster.Members, requirements);
+                ?? RoleTaxonomy.SelectAssignment(candidates, requirements);
             if (selected is null || !Guid.TryParse(selected.Teammate.EmployeeId, out var owner))
             {
                 assignments.RemoveAll(x => x.StageKey == stage);

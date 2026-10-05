@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.15.6";
+    public override string Version => "2.16.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -157,6 +157,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (item.CorrelationId?.StartsWith(WorkflowRecoveryPrefix, StringComparison.Ordinal) == true)
+            return await ReconcileWorkflowRecoveryAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(SprintRecoveryPrefix, StringComparison.Ordinal) == true)
             return await ReconcileSprintRecoveryAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(ManagerDeliveryPrefix, StringComparison.Ordinal) == true)
@@ -218,6 +220,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         foreach (var entry in portfolio.Workstreams)
         {
             var workstream = entry.Workstream;
+            var recoveryBoard = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
+            if (recoveryBoard is not null)
+                await QueueWorkflowRecoveryAsync(recoveryBoard, workstream.ProfileDefinitionDigest ?? "", context, cancellationToken);
             if (workstream.ProfileKey == "video-game-manager-brief.v1" && workstream.AccountableManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId)
             {
                 _ = await EnsureManagerDeliveryAsync(workstream, context, cancellationToken, wake: review.Reason != AgentAttentionReasons.Periodic);
