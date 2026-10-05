@@ -43,12 +43,12 @@ public sealed partial class SpecialistAgent
             {
                 var agentSender = incoming.Context?.GetValueOrDefault(CommunicationMessageContextKeys.SenderEmployeeType) == "Agent" &&
                     Guid.TryParse(incoming.Context.GetValueOrDefault(CommunicationMessageContextKeys.SenderOrganizationUserId), out _);
-                await stream.CommitAsync(agentSender
-                    ? "Thanks for checking in. Approved assignments come through the project board or a work-scoped coordination session. I will reconcile team readiness and pending planning work."
-                    : "Project setup, staffing and kickoff require direction from my reporting manager. Existing approved work continues through the project board.", cancellationToken);
                 if (agentSender)
                     await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt,
                         message.OccurredAt.AddMinutes(5), CommunicationEvents.MessageReceived), context, cancellationToken);
+                await stream.CommitAsync(agentSender
+                    ? "Thanks for checking in. Approved assignments come through the project board or a work-scoped coordination session. I have checked team readiness and pending planning work."
+                    : "Project setup, staffing and kickoff require direction from my reporting manager. Existing approved work continues through the project board.", cancellationToken);
                 return;
             }
             var producer = Guid.Parse(context.Identity!.EmployeeId);
