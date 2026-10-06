@@ -49,6 +49,15 @@ public sealed partial class SpecialistAgent
             board.Revision, profileDigest, $"producer-profile:{project:N}:{profileDigest}"), token);
         var requirements = WorkflowRequirements(configured.Policy);
         var detail = await context.Platform.Work.ReadBoardAsync(board.Id, token);
+        if (configured.Policy.Stages.Any(x => x.Key == "task-integration"))
+        {
+            var repositories = await context.Platform.SourceControl.ListTeamRepositoryOptionsAsync(new(board.TeamId!.Value), token);
+            if (repositories.Count > 1) return "Select explicit repository bindings before configuring this release; multiple authorized repositories are available.";
+            var repository = repositories.SingleOrDefault();
+            await HierarchicalProjectDelivery.PrepareAsync(project, board.Id, manager, roster,
+                repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, context, token);
+            return null;
+        }
         var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, token);
         var executions = new Dictionary<Guid, WorkSprintExecutionResponse>();
         foreach (var sprint in sprints.Where(s => s.Status is "Active" or "Paused"))

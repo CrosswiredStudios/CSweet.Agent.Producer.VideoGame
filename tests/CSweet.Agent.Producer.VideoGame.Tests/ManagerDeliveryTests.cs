@@ -22,7 +22,9 @@ public sealed class ManagerDeliveryTests
         Assert.Equal(2, fixture.Sprints.Count);
         Assert.Single(fixture.Started);
         Assert.All(fixture.Items.Values.Where(x => x.Kind == "Task"), x => {
-            Assert.Equal(3, x.StageAssignments.Count); Assert.NotNull(x.Delivery);
+            Assert.Equal(4, x.StageAssignments.Count); Assert.NotNull(x.Delivery);
+            Assert.Equal("codex/story/" + x.ParentItemId!.Value.ToString("N"), x.Delivery!.BaseBranch);
+            Assert.NotNull(x.Delivery.DeliveryPlanId);
             Assert.Equal(fixture.Developer, x.AccountableOrganizationUserId);
         });
         await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
@@ -35,6 +37,10 @@ public sealed class ManagerDeliveryTests
         await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
         Assert.Equal(2, fixture.Started.Count); Assert.Equal(2, fixture.Sprints.Count);
         fixture.CompleteSprint(2);
+        var waiting = await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
+        Assert.False(waiting.Complete);
+        Assert.Contains("release", waiting.Message, StringComparison.OrdinalIgnoreCase);
+        fixture.CompleteRelease();
         for (var stage = 0; stage < 3; stage++) await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
         Assert.Equal("Completed", fixture.Project.Status);
         var final = await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
@@ -68,6 +74,8 @@ public sealed class ManagerDeliveryTests
         public Guid Developer { get; } = Guid.NewGuid();
         private readonly Guid _producer = Guid.NewGuid(), _architect = Guid.NewGuid(), _team = Guid.NewGuid(), _board = Guid.NewGuid(), _ready = Guid.NewGuid(), _done = Guid.NewGuid(), _repo = Guid.NewGuid();
         private readonly Guid _installation = Guid.NewGuid(), _developerInstallation = Guid.NewGuid(), _architectInstallation = Guid.NewGuid();
+        private readonly Guid _qa = Guid.NewGuid(), _qaInstallation = Guid.NewGuid();
+        private WorkDeliveryPlanResponse? _delivery;
         public WorkstreamDetail Project { get; private set; }
         public AgentRuntimeContext Context { get; }
         public Dictionary<Guid, WorkItem> Items { get; } = [];
@@ -88,18 +96,29 @@ public sealed class ManagerDeliveryTests
         public Journey(string technicalRole = "game-technical-director")
         {
             Project = new(Guid.NewGuid(), "Breakout", "A playable breakout demo", ["Playable"], "concept", "Approved", _producer, null, null, null,
-                "video-game-manager-brief.v1", 2, null, "profile-digest", 2);
+                "video-game-manager-brief.v1", 3, null, "profile-digest", 2);
             AgentTeammate Member(Guid person, Guid installation, string role) => new(person.ToString(), role, "Agent", null, null, "Teammate", "Online")
-                { AgentInstallationId = installation, DeclaredRoleKeys = [role], EffectiveCapabilities = role == "software-developer" ? ["work.execution.run.v1", "software-development.implement.v1"] : ["work.execution.run.v1"], RuntimeEligibility = "Eligible" };
+                { AgentInstallationId = installation, DeclaredRoleKeys = [role], EffectiveCapabilities = role == "software-developer" ? ["work.execution.run.v1", "work.execution.run.v2", "software-development.implement.v1"] : ["work.execution.run.v1", "work.execution.run.v2"], RuntimeEligibility = "Eligible" };
             _roster = new(_team.ToString(), "demo", "Demo", 1, _producer.ToString(), "Gabriel",
-                [Member(_producer, _installation, "game-producer"), Member(_architect, _architectInstallation, technicalRole), Member(Developer, _developerInstallation, "software-developer")], [], 3, false);
+                [Member(_producer, _installation, "game-producer"), Member(_architect, _architectInstallation, technicalRole), Member(Developer, _developerInstallation, "software-developer"), Member(_qa, _qaInstallation, "software-qa")], [], 4, false);
             var runtime = new AgentTestRuntime()
                 .RegisterCapability<ReadWorkstreamRequest, WorkstreamDetail>(WorkstreamCapabilityNames.ReadV1, (_, _) => Task.FromResult(Project))
                 .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead, (_, _) => Task.FromResult(new ResourceChangeReadResponse(StaffingApproved ? [
                     new ResourceChangeRequestResponse(Guid.NewGuid(), Guid.NewGuid(), _producer, _installation, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "Demo", "Small team", 1, [], [], [], [], null,
                         "Approved", "Fulfilled", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow) { TeamId = _team }] : [])))
                 .RegisterCapability<TeamRosterV2Request, TeamRosterV2Response>(WorkstreamCapabilityNames.TeamRosterReadV2, (_, _) => Task.FromResult(new TeamRosterV2Response(_roster, null)))
-                .RegisterCapability<PrepareProjectDeliveryRequest, PreparedProjectDelivery>(ProjectDeliveryCapabilities.Prepare, (r, _) => { SetupCalls++; Assert.Equal(3, r.ParticipantIds.Count); return Task.FromResult(new PreparedProjectDelivery(Project.Id, _team, _board, Project.Revision)); })
+                .RegisterCapability<PrepareProjectDeliveryRequest, PreparedProjectDelivery>(ProjectDeliveryCapabilities.Prepare, (r, _) => { SetupCalls++; Assert.Equal(4, r.ParticipantIds.Count); return Task.FromResult(new PreparedProjectDelivery(Project.Id, _team, _board, Project.Revision)); })
+                .RegisterCapability<ReviseWorkItemPlanningRequest, WorkItem>(WorkItemCapabilities.RevisePlanning, (r, _) => Task.FromResult(Items[r.ItemId] = Items[r.ItemId] with { Planning = r.Planning, PlanningRevision = r.ExpectedPlanningRevision + 1, Revision = r.ExpectedRevision + 1 }))
+                .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>(_delivery is null ? [] : [_delivery]))
+                .RegisterCapability<ConfigureWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Configure, (r, _) => {
+                    Assert.All(r.Branches.Where(x => x.Scope == "Story"), b => Assert.StartsWith("codex/release/", b.TargetBranch));
+                    _delivery ??= new(Guid.NewGuid(), Project.Id, r.Name, _producer, "Draft", 1, 1, r.EpicItemIds, r.Branches,
+                        r.Assignments.Select(a => new WorkDeliveryScopeSnapshot(a.Scope, a.ItemId, a.BoardId, 1,
+                            a.ItemId.HasValue ? Items.Values.Where(x => x.ParentItemId == a.ItemId).Select(x => x.Id).ToArray() : r.EpicItemIds,
+                            a.ItemId.HasValue ? Items[a.ItemId.Value].Planning! : new(["Release"],["Release criteria"]), a.Stages)).ToArray(), [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+                    return Task.FromResult(_delivery);
+                })
+                .RegisterCapability<ControlWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Control, (r, _) => Task.FromResult(_delivery = _delivery! with { Status = "Active", Revision = _delivery!.Revision + 1 }))
                 .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (r, _) => Task.FromResult(new WorkBoardDetail(Board, [new(_ready, "Ready", "ToDo", 0, "Disabled", null), new(_done, "Done", "Done", 1, "Disabled", null)], Items.Values.ToArray())))
                 .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile, (r, _) => Task.FromResult(new ConfigureProfileOrchestrationResponse(Project.Id, _board, 1,
                     new(Guid.NewGuid(), Guid.NewGuid(), _board, 1, "Manager brief", "ready", "ManagerApproval", new(4,4,2,1,1), [], [], true, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), [])))
@@ -167,6 +186,12 @@ public sealed class ManagerDeliveryTests
             var sprint = Sprints.Values.Single(s => s.Sequence == number);
             Sprints[sprint.Id] = sprint with { Status = "Completed", Revision = sprint.Revision + 1 };
             foreach (var item in Items.Values.Where(x => x.SprintId == sprint.Id).ToArray()) Items[item.Id] = item with { Status = "Completed", Revision = item.Revision + 1 };
+        }
+        public void CompleteRelease()
+        {
+            _delivery = _delivery! with { Status = "Completed", UpdatedAt = DateTimeOffset.UtcNow };
+            foreach (var item in Items.Values.Where(x => x.ExecutionMode == "Container").ToArray())
+                Items[item.Id] = item with { Status = "Completed", Revision = item.Revision + 1 };
         }
     }
 }

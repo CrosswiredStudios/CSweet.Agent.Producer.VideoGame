@@ -3,7 +3,7 @@
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 
-## Coordination flow (2.17.0)
+## Coordination flow (2.18.0)
 
 `WorkflowStaffing.StaffWorkflowAsync` derives the complete delivery path from the
 approved board policy, binds eligible team members and preserves every started
@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.17.0`
+- Version: `2.18.0`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -84,7 +84,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.58.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.59.0 and `CSweet.WorkManagement.Contracts` 3.24.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -126,7 +126,7 @@ Reimport both agents to enable this protocol; legacy unrefined handoffs are bloc
 
 ## Shared collaboration SDK
 
-Uses CSweet.Agent.SDK 3.40.0 typed document references, explicit coordination read sharing,
+Uses CSweet.Agent.SDK 3.59.0 typed document references, explicit coordination read sharing,
 accepted-revision lookup, and handoff readiness checks. Pitch content and staffing judgment
 remain agent-specific. See the SDK's `docs/collaboration.md` for reusable documentation requests,
 clarification, review, and personal-work dependency waits. The matching C-Sweet host is required
@@ -287,7 +287,7 @@ records the manager, owner conversation and follow-up history. Attention reviews
 manager) and then reports the stall once to the owner. Nudges are direct messages, which the Creative
 Director treats as a kickoff wake, so the handoff is retried rather than waiting for another event.
 
-## Ticket discussion (2.17.0)
+## Ticket discussion (2.18.0)
 
 Resumes a blocked discussion wait only after the requested installation replies to the exact question revision, retaining assignment revision checks and attempt budgets. Reply text never grants approval or changes acceptance criteria.
 
@@ -298,3 +298,7 @@ requests are ignored. Informational notifications do not trigger automatic conve
 Bounded attention recovery scans the current assigned project for missed requests. The host retains
 undelivered notifications while offline; install the matching C-Sweet host update and approve new
 manifest permissions. Comments provide context, never execution authority or review approval.
+
+## Hierarchical delivery
+
+The V2 assignment identifies Task, Story, Epic or Release scope. Tasks require an authorized sprint; aggregate reviews require an active delivery plan and do not invent sprint identities. Use the exact assigned branch, commit or artifact revision. Every task requires independent QA, including documents. Managers accept aggregate candidates using current evidence; task completion does not promote to main or authorize deployment.

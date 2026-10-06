@@ -65,7 +65,7 @@ public sealed partial class SpecialistAgent
                     retained conversation and authoritative project/staffing state. Start from their vision: propose
                     a project and the smallest justified team, attach approved hires, coordinate technical planning,
                     populate the backlog, start execution and continue sprints until delivery is accepted.
-                    A short manager brief is sufficient. A Creative Director, GDD or dedicated QA employee is optional.
+                    A short manager brief is sufficient. A Creative Director and GDD are optional. Independent QA is required for every task and aggregate regression.
                     For lightweight executable projects use software-developer plus game-technical-director or
                     software-architect. Respect explicit staffing reductions and prior decisions. Existing approved
                     employees must be attached, not hired again. Do not turn an assignment request into a hiring request.
@@ -164,11 +164,13 @@ public sealed partial class SpecialistAgent
                 x.Title.Trim()[..Math.Min(x.Title.Trim().Length, 256)],
                 x.Purpose.Trim()[..Math.Min(x.Purpose.Trim().Length, 2048)],
                 1, Math.Clamp(x.Priority, 1, 100), "Next planned increment",
-                RoleTaxonomy.CoreRoleKey(x.RoleKey) == "software-developer" ? ["work.execution.run.v1", "software-development.implement.v1"] : ["work.execution.run.v1"], false, producerId, null)
+                RoleTaxonomy.CoreRoleKey(x.RoleKey) == "software-developer" ? ["work.execution.run.v2", "software-development.implement.v1"] : ["work.execution.run.v2"], false, producerId, null)
             { RoleCategoryKey = RoleTaxonomy.CoreRoleKey(x.RoleKey) }).ToList();
         if (roles.Count == 0)
             throw new PlatformCapabilityException(PlatformCapabilities.ResourceChangePropose,
                 PlatformCapabilityErrorCode.ValidationFailed, "The suggested roles did not match available game roles.");
+        if (!roles.Any(x => RoleTaxonomy.CoreRoleKey(x.RoleKey) == "software-qa"))
+            roles.Add(new ResourceChangeRole("software-qa", "game-delivery", "Software QA", "Every task requires independent QA, including artifact delivery and aggregate regression.", 1, 100, "Next planned increment", ["work.execution.run.v2"], false, producerId, null) { RoleCategoryKey = "software-qa" });
         var teamName = string.IsNullOrWhiteSpace(plan.ProjectName)
             ? "Game delivery team" : plan.ProjectName.Trim() + " team";
         if (teamName.Length > 160) teamName = teamName[..160];
@@ -222,7 +224,7 @@ public sealed partial class SpecialistAgent
             null, null, null, null,
             "The reporting manager requested a lightweight project start and a small delivery team.",
             $"producer-manager-project:{turnId:N}",
-            "video-game-manager-brief.v1", 2,
+            "video-game-manager-brief.v1", 3,
             JsonSerializer.SerializeToElement(new { metadata.WorkingTitle, managerDirection = managerDirection ?? goal },
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             authority, [], []), token);

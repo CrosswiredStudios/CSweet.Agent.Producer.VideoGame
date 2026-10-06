@@ -1,0 +1,315 @@
+{
+  "key": "video-game-manager-brief.v1",
+  "version": 3,
+  "displayName": "Manager-directed video game prototype",
+  "lifecyclePolicyKey": "video-game-manager-brief.lifecycle.v1",
+  "defaultBoardProfileKey": "project-delivery.v2",
+  "metadataSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "workingTitle": {
+        "type": "string"
+      }
+    }
+  },
+  "lifecycle": {
+    "stages": [
+      {
+        "key": "concept"
+      },
+      {
+        "key": "prototype"
+      },
+      {
+        "key": "vertical-slice"
+      },
+      {
+        "key": "completed"
+      },
+      {
+        "key": "cancelled"
+      }
+    ],
+    "transitions": [
+      {
+        "from": "concept",
+        "to": "prototype"
+      },
+      {
+        "from": "prototype",
+        "to": "vertical-slice"
+      },
+      {
+        "from": "vertical-slice",
+        "to": "completed"
+      },
+      {
+        "from": "concept",
+        "to": "cancelled"
+      },
+      {
+        "from": "prototype",
+        "to": "cancelled"
+      },
+      {
+        "from": "vertical-slice",
+        "to": "cancelled"
+      }
+    ]
+  },
+  "boardWorkflow": {
+    "columns": [
+      {
+        "name": "Backlog",
+        "wipPolicy": "Disabled",
+        "key": "backlog",
+        "category": "ToDo"
+      },
+      {
+        "name": "Ready",
+        "wipPolicy": "Disabled",
+        "key": "ready",
+        "category": "ToDo"
+      },
+      {
+        "name": "In Progress",
+        "wipLimit": 12,
+        "wipPolicy": "HardLimit",
+        "key": "in-progress",
+        "category": "InProgress"
+      },
+      {
+        "name": "Technical Review",
+        "wipLimit": 8,
+        "wipPolicy": "HardLimit",
+        "key": "technical-review",
+        "category": "InProgress"
+      },
+      {
+        "name": "QA",
+        "wipLimit": 8,
+        "wipPolicy": "HardLimit",
+        "key": "quality",
+        "category": "InProgress"
+      },
+      {
+        "name": "Producer Review",
+        "wipLimit": 8,
+        "wipPolicy": "HardLimit",
+        "key": "producer-review",
+        "category": "InProgress"
+      },
+      {
+        "name": "Done",
+        "wipPolicy": "Disabled",
+        "key": "done",
+        "category": "Done"
+      }
+    ]
+  },
+  "orchestration": {
+    "name": "Manager brief delivery",
+    "initialStageKey": "ready",
+    "stages": [
+      {
+        "key": "ready",
+        "name": "Ready",
+        "stageType": "Queue",
+        "columnKey": "ready",
+        "instructions": "Wait for sprint and activated delivery-plan authorization.",
+        "inputSchemaJson": "{\"type\":\"object\"}",
+        "outputSchemaJson": "{\"type\":\"object\"}",
+        "timeoutSeconds": 3600,
+        "retryPolicy": {
+          "maximumDelaySeconds": 300,
+          "maximumAttempts": 3,
+          "initialDelaySeconds": 30
+        }
+      },
+      {
+        "key": "development",
+        "name": "Implementation",
+        "stageType": "AgentExecution",
+        "columnKey": "in-progress",
+        "instructions": "Implement on the assigned story base and return code-published (game) or completed (software). Artifact delivery returns completed (game) or artifact-delivered (software) with artifactId, revisionId and sha256. Fix integrated work through a fresh reviewed change based on current story state.",
+        "inputSchemaJson": "{\"type\":\"object\"}",
+        "outputSchemaJson": "{\"type\":\"object\"}",
+        "timeoutSeconds": 3600,
+        "retryPolicy": {
+          "maximumDelaySeconds": 300,
+          "maximumAttempts": 3,
+          "initialDelaySeconds": 30
+        }
+      },
+      {
+        "key": "technical-review",
+        "name": "Technical Review",
+        "stageType": "AgentExecution",
+        "columnKey": "technical-review",
+        "instructions": "Independently review the exact published source and current story target. Approval authorizes trusted task integration. Return commit and target-commit evidence.",
+        "inputSchemaJson": "{\"type\":\"object\"}",
+        "outputSchemaJson": "{\"type\":\"object\"}",
+        "timeoutSeconds": 3600,
+        "retryPolicy": {
+          "maximumDelaySeconds": 300,
+          "maximumAttempts": 3,
+          "initialDelaySeconds": 30
+        }
+      },
+      {
+        "key": "task-integration",
+        "name": "Task integration",
+        "stageType": "TrustedPlatformAction",
+        "columnKey": "technical-review",
+        "instructions": "Trusted task integration into its story; independent QA must follow.",
+        "inputSchemaJson": "{\"type\":\"object\"}",
+        "outputSchemaJson": "{\"type\":\"object\"}",
+        "timeoutSeconds": 3600,
+        "retryPolicy": {
+          "maximumDelaySeconds": 300,
+          "maximumAttempts": 3,
+          "initialDelaySeconds": 30
+        },
+        "platformAction": "source-control.task.integrate.v1"
+      },
+      {
+        "key": "quality",
+        "name": "Independent QA",
+        "stageType": "AgentExecution",
+        "columnKey": "quality",
+        "instructions": "QA every exact delivery. Test the integrated story commit for code, or read the exact artifact revision for documents. Return passed or changes_requested with criterion evidence. No skip-QA route.",
+        "inputSchemaJson": "{\"type\":\"object\"}",
+        "outputSchemaJson": "{\"type\":\"object\"}",
+        "timeoutSeconds": 3600,
+        "retryPolicy": {
+          "maximumDelaySeconds": 300,
+          "maximumAttempts": 3,
+          "initialDelaySeconds": 30
+        }
+      },
+      {
+        "key": "done",
+        "name": "Done",
+        "stageType": "Terminal",
+        "columnKey": "done",
+        "instructions": "Task QA passed; parent regression and acceptance continue independently.",
+        "inputSchemaJson": "{\"type\":\"object\"}",
+        "outputSchemaJson": "{\"type\":\"object\"}",
+        "timeoutSeconds": 3600,
+        "retryPolicy": {
+          "maximumDelaySeconds": 300,
+          "maximumAttempts": 3,
+          "initialDelaySeconds": 30
+        },
+        "isSuccessfulTerminal": true
+      }
+    ],
+    "transitions": [
+      {
+        "outcomeCode": "ready",
+        "toStageKey": "development",
+        "fromStageKey": "ready"
+      },
+      {
+        "outcomeCode": "completed",
+        "toStageKey": "technical-review",
+        "fromStageKey": "development"
+      },
+      {
+        "outcomeCode": "artifact-delivered",
+        "toStageKey": "quality",
+        "fromStageKey": "development"
+      },
+      {
+        "outcomeCode": "approved",
+        "toStageKey": "task-integration",
+        "fromStageKey": "technical-review"
+      },
+      {
+        "outcomeCode": "rejected",
+        "toStageKey": "development",
+        "maximumTraversals": 3,
+        "fromStageKey": "technical-review"
+      },
+      {
+        "outcomeCode": "merged",
+        "toStageKey": "quality",
+        "fromStageKey": "task-integration"
+      },
+      {
+        "outcomeCode": "passed",
+        "toStageKey": "done",
+        "fromStageKey": "quality"
+      },
+      {
+        "outcomeCode": "changes_requested",
+        "toStageKey": "development",
+        "maximumTraversals": 3,
+        "fromStageKey": "quality"
+      },
+      {
+        "outcomeCode": "failed",
+        "toStageKey": "development",
+        "maximumTraversals": 3,
+        "fromStageKey": "quality"
+      }
+    ],
+    "mergeMode": "ManagerApproval",
+    "concurrency": {
+      "defaultAssignee": 1,
+      "defaultStage": 2,
+      "board": 2,
+      "global": 8,
+      "organization": 4
+    }
+  },
+  "assignmentPolicy": {
+    "planningQuorums": [],
+    "roles": [
+      {
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v2",
+          "software-development.implement.v1"
+        ],
+        "roleKey": "software-developer",
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ]
+      },
+      {
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v2"
+        ],
+        "roleKey": "software-architect",
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ]
+      },
+      {
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v2"
+        ],
+        "roleKey": "game-producer",
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ]
+      },
+      {
+        "eligibleWorkItemTypeKeys": [
+          "general.task.v1"
+        ],
+        "defaultRelevantSpecializationKeys": [],
+        "requiredCapabilityKeys": [
+          "work.execution.run.v2"
+        ],
+        "roleKey": "game-technical-director"
+      }
+    ],
+    "skillMatchMode": "RequiredThenPreferred",
+    "exactRoleRequired": true
+  }
+}

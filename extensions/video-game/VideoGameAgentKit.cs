@@ -71,7 +71,7 @@ public static class SpecialistAssignmentValidator
         if (!string.Equals(requirements.RequiredRoleKey, expectedRoleKey, StringComparison.Ordinal) ||
             selection.AgentInstallationId == Guid.Empty || selection.TeamRosterRevision < 1 ||
             !IsSha256(selection.ProfileDefinitionDigest) || !IsSha256(selection.DecisionFingerprint) ||
-            !requirements.RequiredCapabilityKeys.Contains("work.execution.run.v1", StringComparer.Ordinal) ||
+            !(requirements.RequiredCapabilityKeys.Contains("work.execution.run.v1", StringComparer.Ordinal) || requirements.RequiredCapabilityKeys.Contains("work.execution.run.v2", StringComparer.Ordinal)) ||
             requirements.RequiredSpecializationKeys.Except(selection.MatchedSpecializationKeys, StringComparer.Ordinal).Any())
             throw new UnauthorizedAccessException("The canonical assignment does not prove exact role, skill, and execution eligibility.");
         var package = input.Planning.ArtifactPackageDigest
@@ -567,11 +567,11 @@ public static class VideoGameSpecialistConformance
         var provided = root.GetProperty("provides").EnumerateArray()
             .Select(x => x.GetProperty("name").GetString()).Where(x => x is not null).Select(x => x!).ToHashSet(StringComparer.Ordinal);
         var executionCapabilities = provided.Where(x =>
-            x == WorkManagementCapabilityNames.ExecutionRunV1 ||
+            x == WorkManagementCapabilityNames.ExecutionRunV1 || x == WorkManagementCapabilityNames.ExecutionRunV2 ||
             x.StartsWith("video-game.", StringComparison.Ordinal) && x.EndsWith(".execute.v1", StringComparison.Ordinal))
             .ToHashSet(StringComparer.Ordinal);
-        if (!executionCapabilities.SetEquals([WorkManagementCapabilityNames.ExecutionRunV1]))
-            errors.Add("Specialists must provide only work.execution.run.v1; legacy role-specific execution capabilities are rejected.");
+        if (!executionCapabilities.SetEquals([WorkManagementCapabilityNames.ExecutionRunV1, WorkManagementCapabilityNames.ExecutionRunV2]))
+            errors.Add("Specialists must preserve V1 and provide V2 task execution; legacy role-specific execution capabilities are rejected.");
         var required = root.GetProperty("requires").EnumerateArray()
             .Select(x => x.GetProperty("name").GetString()).Where(x => x is not null).ToHashSet(StringComparer.Ordinal);
         foreach (var capability in RequiredCapabilities)

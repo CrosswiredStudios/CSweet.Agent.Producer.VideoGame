@@ -3,7 +3,8 @@
   "manifestVersion": "2.0",
   "kind": "agent",
   "rolePolicy": {
-    "baseType": "manager", "profile": "manager.v1",
+    "baseType": "manager",
+    "profile": "manager.v1",
     "declaredRoleKeys": [
       "manager",
       "game-producer"
@@ -19,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.17.0",
+  "version": "2.18.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -41,6 +42,11 @@
     "provides": [
       {
         "key": "video-game-manager-brief.v1",
+        "version": 3,
+        "definitionResource": "profiles/video-game-manager-brief.v3.json"
+      },
+      {
+        "key": "video-game-manager-brief.v1",
         "version": 1,
         "definitionResource": "profiles/video-game-manager-brief.v1.json"
       },
@@ -53,6 +59,232 @@
     "requires": []
   },
   "provides": [
+    {
+      "name": "work.execution.run.v2",
+      "description": "Execute the authoritative task or delivery-plan scope with exact revision evidence and independent QA.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "executionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "stageExecutionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workstreamId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "boardId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "organizationUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "itemId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "deliveryPlanId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "sprintId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "sprintExecutionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "agentInstallationId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "policyRevisionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "scopeRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "assignmentRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "planningRevision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "traversal": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "attempt": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "identifier": {
+            "type": "string"
+          },
+          "stageKey": {
+            "type": "string"
+          },
+          "instructions": {
+            "type": "string"
+          },
+          "deadline": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "scope": {
+            "enum": [
+              "Task",
+              "Story",
+              "Epic",
+              "Release"
+            ]
+          },
+          "item": {
+            "type": "object"
+          },
+          "input": {
+            "type": "object"
+          },
+          "priorOutcomes": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "permittedOutcomes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "candidate": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "executionId",
+          "stageExecutionId",
+          "attemptId",
+          "organizationId",
+          "workstreamId",
+          "boardId",
+          "scope",
+          "scopeRevision",
+          "organizationUserId",
+          "assignmentRevision",
+          "planningRevision",
+          "stageKey",
+          "attempt",
+          "deadline",
+          "instructions",
+          "item",
+          "input",
+          "priorOutcomes",
+          "evidence",
+          "permittedOutcomes"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "stageExecutionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "attemptId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "disposition": {
+            "enum": [
+              "Completed",
+              "Blocked",
+              "Failed"
+            ]
+          },
+          "outcomeCode": {
+            "type": "string"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "output": {},
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "diagnostics": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "stageExecutionId",
+          "attemptId",
+          "disposition",
+          "outcomeCode",
+          "summary",
+          "output",
+          "evidence",
+          "diagnostics"
+        ],
+        "additionalProperties": false
+      },
+      "executionTimeoutSeconds": 3600,
+      "idempotency": "work-item",
+      "riskClass": "standard"
+    },
     {
       "name": "work.execution.run.v1",
       "description": "Leads project delivery, boards, sprints, schedules, budgets, dependencies, staffing, risks, and status reporting.",
@@ -145,6 +377,42 @@
     }
   ],
   "requires": [
+    {
+      "name": "work.delivery.read.v1",
+      "scope": "organization",
+      "purpose": "Read or manage explicitly authorized delivery scope and exact evidence within assigned role grants.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delivery.evidence.read.v1",
+      "scope": "organization",
+      "purpose": "Read or manage explicitly authorized delivery scope and exact evidence within assigned role grants.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delivery.configure.v1",
+      "scope": "organization",
+      "purpose": "Read or manage explicitly authorized delivery scope and exact evidence within assigned role grants.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delivery.control.v1",
+      "scope": "organization",
+      "purpose": "Read or manage explicitly authorized delivery scope and exact evidence within assigned role grants.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delivery.accept.v1",
+      "scope": "organization",
+      "purpose": "Read or manage explicitly authorized delivery scope and exact evidence within assigned role grants.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delivery.recover.v1",
+      "scope": "organization",
+      "purpose": "Read or manage explicitly authorized delivery scope and exact evidence within assigned role grants.",
+      "modelVisible": false
+    },
     {
       "name": "work.item.comments.read",
       "scope": "team",
@@ -555,6 +823,10 @@
       "name": "platform.management.incident.report.v1",
       "scope": "organization",
       "purpose": "Inspect assigned project incidents and escalate through the authorized reporting hierarchy."
+    },
+    {
+      "name": "platform.toolchain.catalog.read.v2",
+      "required": true
     }
   ],
   "events": {
@@ -577,6 +849,7 @@
       "com.csweet.decision.decided.v1",
       "com.csweet.work.sprint.changed.v1",
       "com.csweet.work.execution.changed.v1",
+      "com.csweet.work-delivery.changed.v1",
       "com.csweet.workstream.project-setup.v1",
       "com.csweet.repository.provisioning.changed.v1",
       "com.csweet.project-health.review-due.v1",

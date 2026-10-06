@@ -88,9 +88,9 @@ public sealed partial class SpecialistAgent
         var setup = await context.Platform.Projects.PrepareDeliveryAsync(new(projectId, approved.Id, participants,
             project.Revision, $"producer-project-setup:{projectId:N}"), ct);
         project = await context.Platform.ReadWorkstreamAsync(new(projectId), ct);
-        if (project.ProfileVersion != 2)
+        if (project.ProfileVersion != 3)
         {
-            if (setup.AvailableProfile is not { Version: 2 } target) return (false, "The delivery profile update must be installed before this project can execute.");
+            if (setup.AvailableProfile is not { Version: 3 } target) return (false, "The delivery profile update must be installed before this project can execute.");
             var upgrade = await context.Platform.ProposeWorkstreamChangeAsync(new(projectId, project.Revision,
                 "Enable the approved team's delivery workflow", JsonSerializer.SerializeToElement(new { profileUpgrade = target }, ManagerJson),
                 "Add technical planning, implementation, independent review and governed merge to this existing empty project.",
@@ -134,15 +134,10 @@ public sealed partial class SpecialistAgent
         var repositoryOption = (await context.Platform.SourceControl.ListTeamRepositoryOptionsAsync(new(teamId), ct)).SingleOrDefault(x => x.RepositoryId == repositoryId);
         if (repositoryOption is null) return (false, "The provisioned repository is not yet available to the approved team.");
         board = await context.Platform.Work.ReadBoardAsync(setup.BoardId, ct);
-        foreach (var ticket in board.Items.Where(x => x.ProposalProvenance?.CoordinationSessionId == session.Id && x.ExecutionMode == WorkItemExecutionModes.Executable && x.Delivery is null))
-        {
-            var assignments = RefreshAssignments(ticket, roster, project.ProfileDefinitionDigest!);
-            if (assignments.Count != 3) return (false, "A planned delivery stage no longer has eligible approved staffing.");
-            var delivery = new WorkItemDeliverySpecification(repositoryId, ticket.Planning!.Requirements, ticket.Planning.AcceptanceCriteria, ticket.Planning.Constraints)
-                { BaseBranch = repositoryOption.DefaultBranch, DependencyItemIds = ticket.Planning.DependencyItemIds };
-            await context.Platform.Work.FinalizeItemDeliveryAsync(new(setup.BoardId, ticket.Id, delivery,
-                Guid.Parse(developer.EmployeeId), assignments, ticket.Revision, $"producer-manager-finalize:{ticket.Id:N}:{ticket.PlanningRevision}:{roster.Revision}"), ct);
-        }
+        var deliveryPlan = await HierarchicalProjectDelivery.PrepareAsync(projectId, setup.BoardId,
+            project.AccountableManagerOrganizationUserId, roster, repositoryId, repositoryOption.DefaultBranch,
+            project.ProfileDefinitionDigest!, true, context, ct,
+            technicalRoleOverride: architect.DeclaredRoleKeys.Contains("game-technical-director") ? "game-technical-director" : "software-architect");
         var sprints = await context.Platform.Work.ListSprintsAsync(setup.BoardId, ct);
         var active = sprints.SingleOrDefault(x => x.Status == "Active");
         if (active is not null)
@@ -161,15 +156,14 @@ public sealed partial class SpecialistAgent
             board = await context.Platform.Work.ReadBoardAsync(setup.BoardId, ct);
             if (!board.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable) || board.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable && x.Status is not ("Completed" or "Done")))
                 return (false, "Sprint execution ended with unresolved delivery work. Reconcile the existing tickets before completion.");
-            var doneColumn = board.Columns.Single(x => x.Name == "Done").Id;
-            foreach (var container in board.Items.Where(x => x.ExecutionMode == WorkItemExecutionModes.Container && x.Status is not ("Completed" or "Done" or "Cancelled")).OrderByDescending(x => x.ParentItemId.HasValue))
-                await context.Platform.Work.MoveItemAsync(new(setup.BoardId, container.Id, doneColumn, container.Revision, $"producer-container-complete:{container.Id:N}"), ct);
+            if (deliveryPlan.Status != "Completed")
+                return (false, "Task sprints are complete. Story regression, epic acceptance and release validation continue under the activated delivery plan.");
             // The final project transition remains governed by its approved lifecycle and authority envelope.
             var targetStage = project.LifecycleStage switch { "concept" => "prototype", "prototype" => "vertical-slice", "vertical-slice" => "completed", _ => null };
             if (targetStage is null) return (false, "All planned sprints have delivered; the current lifecycle stage needs reconciliation before project closure.");
             var transition = await context.Platform.ProposeWorkstreamChangeAsync(new(projectId, project.Revision,
                 "Record verified delivery completion", JsonSerializer.SerializeToElement(new { lifecycleStage = targetStage }),
-                "All planned executable tickets have completed their technical review, producer acceptance and governed merge stages.",
+                "All scoped tasks, stories and epics have completed their required validation and acceptance; every release repository promotion is confirmed.",
                 $"producer-manager-complete:{projectId:N}:{project.Revision}"), ct);
             return (false, $"All planned sprints have delivered. Lifecycle transition to {targetStage}: {transition.Message ?? (transition.Applied ? "Applied." : "Awaiting a recorded decision.")}");
         }
@@ -186,8 +180,8 @@ public sealed partial class SpecialistAgent
         var board = await context.Platform.Work.ReadBoardAsync(setup.BoardId, ct);
         var ready = board.Columns.Single(x => x.Name == "Ready").Id;
         var prefix = $"delivery:{project.Id:N}:{plan.Fingerprint[..16]}";
-        var epic = await context.Platform.Work.CreateItemAsync(new(setup.BoardId, project.Name, plan.Architecture, "Epic", "High", null, null, null, prefix + ":epic") { TypeKey = WorkItemTypeKeys.GeneralEpicV1 }, ct);
-        var story = await context.Platform.Work.CreateItemAsync(new(setup.BoardId, project.Outcome[..Math.Min(240, project.Outcome.Length)], plan.Architecture, "Story", "High", null, epic.Id, null, prefix + ":story") { TypeKey = WorkItemTypeKeys.GeneralStoryV1 }, ct);
+        var epic = await context.Platform.Work.CreateItemAsync(new(setup.BoardId, project.Name, plan.Architecture, "Epic", "High", null, null, null, prefix + ":epic") { TypeKey = WorkItemTypeKeys.ProjectEpicV2 }, ct);
+        var story = await context.Platform.Work.CreateItemAsync(new(setup.BoardId, project.Outcome[..Math.Min(240, project.Outcome.Length)], plan.Architecture, "Story", "High", null, epic.Id, null, prefix + ":story") { TypeKey = WorkItemTypeKeys.ProjectStoryV2 }, ct);
         var ids = new Dictionary<string, Guid>(StringComparer.Ordinal);
         foreach (var sprintGroup in plan.Items.GroupBy(x => x.Sprint).OrderBy(x => x.Key))
         {
@@ -195,17 +189,17 @@ public sealed partial class SpecialistAgent
                 string.Join("; ", sprintGroup.Select(x => x.Title)), null, null, prefix + $":sprint:{sprintGroup.Key}") { Sequence = sprintGroup.Key }, ct);
             foreach (var proposed in sprintGroup)
             {
-                var constraints = (proposed.Constraints ?? []).Append("project-delivery:manager-brief-v2").Distinct().ToArray();
+                var constraints = (proposed.Constraints ?? []).Append("project-delivery:hierarchical-v3").Distinct().ToArray();
                 var planning = new WorkItemPlanningSpecification(proposed.Requirements, proposed.AcceptanceCriteria, constraints)
                 {
                     ArchitectureArtifactDigest = artifact.Digest,
                     DependencyItemIds = (proposed.Dependencies ?? []).Select(key => ids[key]).ToArray(),
                     DelegationRecommendations = [new("development", "software-developer", ["work.execution.run.v1", "software-development.implement.v1"], null, true, "Implement and validate the ticket."),
-                        new("quality", technicalRole, ["work.execution.run.v1"], null, true, "Independently review the exact patch and actual implementation validation evidence."),
-                        new("merge-decision", "game-producer", ["work.execution.run.v1"], null, true, "Accept the delivered criteria and authorize governed merge.")]
+                        new("technical-review", technicalRole, ["work.execution.run.v2"], null, true, "Independently review the exact task patch and story target before integration."),
+                        new("quality", "software-qa", ["work.execution.run.v2"], null, true, "Test the exact story commit produced by task integration.")]
                 };
                 var ticket = await context.Platform.Work.CreateItemAsync(new(setup.BoardId, proposed.Title, proposed.Description, "Task", "High", ready,
-                    story.Id, null, prefix + ":ticket:" + proposed.Key) { TypeKey = WorkItemTypeKeys.GeneralTaskV1, Planning = planning,
+                    story.Id, null, prefix + ":ticket:" + proposed.Key) { TypeKey = WorkItemTypeKeys.ProjectTaskV2, Planning = planning,
                     ProposalProvenance = new(session.Id, artifact.Digest, proposed.Key) }, ct);
                 ids[proposed.Key] = ticket.Id;
                 // Re-read after replay: receipts describe the original mutation, not the current item revision.
