@@ -19,7 +19,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.16.0",
+  "version": "2.17.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -145,6 +145,12 @@
     }
   ],
   "requires": [
+    {
+      "name": "work.item.comments.read",
+      "scope": "team",
+      "purpose": "Read current ticket context to answer directed discussion and recover missed notifications.",
+      "modelVisible": false
+    },
     {
       "name": "work.calendar.read.v1",
       "scope": "organization",
@@ -553,6 +559,7 @@
   ],
   "events": {
     "subscribes": [
+      "com.csweet.work.item.discussion.changed.v1",
       "com.csweet.calendar.reminder-due.v1",
       "com.csweet.user.message.received.v1",
       "com.csweet.agent.onboarded.v1",

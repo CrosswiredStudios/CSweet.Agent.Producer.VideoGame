@@ -16,12 +16,38 @@ public sealed partial class SpecialistAgent
             foreach (var item in execution.Items.Where(x => x.Status == "Blocked"))
             {
                 var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
-                if (stage is null || CorrectableDeliveryRetry(board.Id, execution.Id, stage) is not { } request) continue;
+                if (stage is null) continue;
+                var request = CorrectableDeliveryRetry(board.Id, execution.Id, stage);
+                if (request is null && stage.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) == true)
+                {
+                    var comments = await TicketConversations.Discussion.ReadAsync(board.Id, item.WorkItemId, context, token);
+                    request = AnsweredDiscussionRetry(board.Id, execution.Id, item.WorkItemId, stage, comments);
+                }
+                if (request is null) continue;
                 await context.Platform.Work.RetryBlockedStageAsync(request, token);
             }
         }
     }
 
+    internal static RetryWorkStageExecutionRequest? AnsweredDiscussionRetry(Guid boardId, Guid executionId, Guid itemId,
+        WorkStageExecutionResponse stage, IReadOnlyList<WorkItemComment> comments)
+    {
+        if (stage.Status != "Blocked" || stage.LatestOutcome?.Disposition != WorkExecutionDispositions.Blocked ||
+            stage.LatestOutcome.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) != true ||
+            stage.AssignmentRevision < 1 || stage.AttemptCount < 1 || stage.AttemptCount >= stage.MaximumAttempts) return null;
+        TicketConversations.Discussion.ResponseWait? wait;
+        try { wait = stage.LatestOutcome.Output.Deserialize<TicketConversations.Discussion.ResponseWait>(new JsonSerializerOptions(JsonSerializerDefaults.Web)); }
+        catch (JsonException) { return null; }
+        if (wait is null || wait.BoardId != boardId || wait.ItemId != itemId ||
+            !comments.Any(c => c.Id == wait.CommentId && c.Revision == wait.CommentRevision && c.Kind == "discussion.request" &&
+                c.AuthorKind == "AgentInstallation" && c.AuthorSubjectId == stage.AgentInstallationId)) return null;
+        var correlation = TicketConversations.Discussion.Correlation(wait.CommentId, wait.CommentRevision);
+        if (!comments.Any(c => c.Kind == "discussion.reply" && c.CausationId == correlation &&
+            c.AuthorKind == "AgentInstallation" && c.AuthorSubjectId == wait.RespondingInstallationId)) return null;
+        return new(boardId, executionId, stage.Id, $"producer-discussion-resume:{stage.Id:N}:{correlation}",
+            "The requested teammate replied on the ticket. Read the discussion and continue the existing assignment; all review and validation requirements remain in force.")
+            { ExpectedAssignmentRevision = stage.AssignmentRevision };
+    }
     /// <summary>Cross-agent convention: a Blocked outcome carrying this diagnostic needs a management decision.</summary>
     internal const string DecisionRequiredDiagnostic = "decision-required:v1";
     private const string DecisionEscalationPrefix = "producer-decision:";

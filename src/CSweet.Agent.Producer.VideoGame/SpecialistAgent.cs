@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.16.0";
+    public override string Version => "2.17.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -197,6 +197,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         CancellationToken cancellationToken)
     {
 
+        await RecoverDiscussionAsync(context, cancellationToken);
         var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
             ProjectStateKeys.Portfolio("producer"), cancellationToken);
         // Accepted commitments survive invocations; the host still filters them against current visibility.
@@ -424,6 +425,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (message.EventType == TicketConversations.Discussion.Changed)
+        {
+            await TicketConversations.Discussion.HandleAsync(message, context, ct => DiscussionClientAsync(context, ct), cancellationToken);
+            await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt,
+                message.OccurredAt.AddMinutes(5), message.EventType), context, cancellationToken);
+            return;
+        }
         if (message.EventType == CommunicationEvents.MessageReceived)
         {
             await HandleManagerMessageAsync(message, context, cancellationToken);

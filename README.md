@@ -3,7 +3,7 @@
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 
-## Coordination flow (2.16.0)
+## Coordination flow (2.17.0)
 
 `WorkflowStaffing.StaffWorkflowAsync` derives the complete delivery path from the
 approved board policy, binds eligible team members and preserves every started
@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.16.0`
+- Version: `2.17.0`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -286,3 +286,15 @@ records the manager, owner conversation and follow-up history. Attention reviews
 `FollowUpAwaitedHandoffAsync`, which nudges the manager after 30 minutes of silence (twice for an agent
 manager) and then reports the stall once to the owner. Nudges are direct messages, which the Creative
 Director treats as a kickoff wake, so the handoff is retried rather than waiting for another event.
+
+## Ticket discussion (2.17.0)
+
+Resumes a blocked discussion wait only after the requested installation replies to the exact question revision, retaining assignment revision checks and attempt budgets. Reply text never grants approval or changes acceptance criteria.
+
+The agent subscribes to `com.csweet.work.item.discussion.changed.v1` and uses grant-governed item,
+comment, board and orchestration reads. Ask with `@Full Name: your question` on a team ticket.
+Replies use `discussion.reply` and an exact comment/revision correlation; duplicates and stale
+requests are ignored. Informational notifications do not trigger automatic conversation loops.
+Bounded attention recovery scans the current assigned project for missed requests. The host retains
+undelivered notifications while offline; install the matching C-Sweet host update and approve new
+manifest permissions. Comments provide context, never execution authority or review approval.
