@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.18.0`
+- Version: `2.18.1`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -138,8 +138,9 @@ Uses SDK 3.40.0 for acknowledged LLM waiting, conversation activity, and host-au
 
 ## Hiring kickoff
 
-Onboarding contacts the authoritative Creative Director, introduces the Producer in the owner's
-conversation, and persists the kickoff before acknowledging the lifecycle event. Stable message
+Onboarding introduces the Producer only to the authoritative manager (including a CEO who directly
+manages the Producer), and persists the kickoff before acknowledging the lifecycle event. A hiring
+CEO who is not the manager receives no onboarding introduction. Stable message
 keys and durable state prevent duplicate introductions on retries. Project setup must be ready
 before the existing exact-document pitch refinement workflow begins. That workflow retains the
 shared brief and accepted handoff before the Producer proposes workload-backed staffing.

@@ -25,7 +25,6 @@ public sealed partial class SpecialistAgent
                 throw new InvalidOperationException("Producer onboarding requires an authoritative manager.");
 
             var managerName = context.Identity?.ManagerDisplayName;
-            var managerIsOwner = managerId == onboarded.HiringOrganizationUserId;
             // The kickoff names the next step for both kinds of manager: a Creative Director hands over
             // the accepted pitch and GDD, while an owner-manager can start from a short brief.
             await context.Platform.Communication.SendDirectMessageAsync(managerId,
@@ -35,15 +34,6 @@ public sealed partial class SpecialistAgent
                 "and any time, budget, or team constraints you already know. A short brief is enough to " +
                 "start a project proposal and a small hiring plan.",
                 $"{key}:manager", cancellationToken);
-            await context.Platform.Communication.SendMessageAsync(onboarded.ConversationId,
-                managerIsOwner
-                    ? "I am ready to start from your direction. Share a lightweight goal and I can propose " +
-                      "the project and the smallest justified team. Project creation and hiring will follow " +
-                      "the platform's approval steps."
-                    : $"I have joined as Producer, reporting to {managerName ?? "my manager"}. I will start from " +
-                      "their accepted direction and propose the smallest justified team through the platform's " +
-                      "approval steps. If the handoff stalls, I will tell you here.",
-                $"{key}:owner", cancellationToken);
             // Record what the Producer now waits for (before the onboarding record, so a retry rewrites it),
             // letting attention reviews follow up with the manager and escalate to the owner.
             var watch = new ProducerHandoffWatch(managerId, managerName, onboarded.HiringOrganizationUserId,
