@@ -15,8 +15,22 @@ public sealed partial class SpecialistAgent
     /// A platform refusal is an authority problem: no retry of mine can clear it, and letting it escape as an
     /// unhandled failure only shows "execution stopped unexpectedly" while the whole project waits unseen.
     /// </summary>
-    internal static bool IsAccessRefusal(PlatformCapabilityException exception) =>
-        exception.Code == PlatformCapabilityErrorCode.Denied;
+    internal static bool IsAccessRefusal(PlatformCapabilityException exception)
+    {
+        if (exception.Code == PlatformCapabilityErrorCode.Denied ||
+            exception.FailureCode?.EndsWith("denied", StringComparison.OrdinalIgnoreCase) == true) return true;
+        // The MCP runtime reports every broker tool error as Unavailable; the refusal itself is in the error payload.
+        var text = exception.Message?.Trim() ?? "";
+        if (!text.StartsWith('{')) return false;
+        try
+        {
+            using var json = JsonDocument.Parse(text);
+            return json.RootElement.ValueKind == JsonValueKind.Object &&
+                json.RootElement.TryGetProperty("code", out var code) && code.ValueKind == JsonValueKind.String &&
+                string.Equals(code.GetString(), nameof(PlatformCapabilityErrorCode.Denied), StringComparison.OrdinalIgnoreCase);
+        }
+        catch (JsonException) { return false; }
+    }
 
     /// <summary>The platform's own refusal sentence, without the transport envelope, bounded for a message.</summary>
     internal static string RefusalReason(PlatformCapabilityException exception)

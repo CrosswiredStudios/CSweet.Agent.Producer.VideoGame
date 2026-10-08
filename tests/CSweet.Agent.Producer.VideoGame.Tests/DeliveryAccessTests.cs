@@ -36,6 +36,22 @@ public sealed class DeliveryAccessTests
         Assert.Equal(expected, SpecialistAgent.RefusalReason(
             new PlatformCapabilityException("work.delivery.read.v1", PlatformCapabilityErrorCode.Denied, message)));
 
+    [Fact]
+    public void A_refusal_is_recognised_in_the_shape_the_live_runtime_reports_it()
+    {
+        // McpAgentRuntimeClient reports every broker tool error as Unavailable; the refusal is in the payload text.
+        Assert.True(SpecialistAgent.IsAccessRefusal(new PlatformCapabilityException("work.delivery.read.v1",
+            PlatformCapabilityErrorCode.Unavailable,
+            "{\"code\":\"Denied\",\"message\":\"The project delivery grant is required: work.delivery.read.v1\"}")));
+        Assert.True(SpecialistAgent.IsAccessRefusal(new PlatformCapabilityException("work.delivery.read.v1",
+            PlatformCapabilityErrorCode.Unavailable, "refused", failureCode: "platform.capability.denied")));
+        Assert.True(SpecialistAgent.IsAccessRefusal(new PlatformCapabilityException("x", PlatformCapabilityErrorCode.Denied, "no")));
+        Assert.False(SpecialistAgent.IsAccessRefusal(new PlatformCapabilityException("work.delivery.read.v1",
+            PlatformCapabilityErrorCode.Unavailable, "{\"code\":\"Conflict\",\"message\":\"changed\"}")));
+        Assert.False(SpecialistAgent.IsAccessRefusal(new PlatformCapabilityException("platform.llm.chat",
+            PlatformCapabilityErrorCode.Unavailable, "The model service is unavailable.", failureCode: "llm.provider_unavailable")));
+    }
+
     [Theory]
     [InlineData("Retry staffing: added Gabriel to Prism Break", true)]
     [InlineData("retry staffing:   access fixed  ", true)]
