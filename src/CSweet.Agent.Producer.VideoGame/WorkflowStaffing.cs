@@ -148,10 +148,22 @@ public sealed partial class SpecialistAgent
         var workstream = await context.Platform.ReadWorkstreamAsync(new(project), token);
         var roster = await ReadManagerTeamAsync(team, context, token);
         if (roster is null) return PersonalTodoResult.Blocked("The approved team is unavailable.");
-        var gap = await StaffWorkflowAsync(board, roster, workstream.ProfileDefinitionDigest ?? "", context, token);
-        await RetryCorrectableDeliveryFailuresAsync(board, context, token);
-        await EscalateDecisionBlockersAsync(board, context, token);
-        await ReviewBoardDeliveriesAsync(board, context, token);
+        string? gap;
+        try
+        {
+            gap = await StaffWorkflowAsync(board, roster, workstream.ProfileDefinitionDigest ?? "", context, token);
+            await RetryCorrectableDeliveryFailuresAsync(board, context, token);
+            await EscalateDecisionBlockersAsync(board, context, token);
+            await ReviewBoardDeliveriesAsync(board, context, token);
+        }
+        catch (PlatformCapabilityException refusal) when (IsAccessRefusal(refusal))
+        {
+            // Missing authority is a management decision, not a crash: raise it once and keep rechecking.
+            await EscalateDeliveryAccessAsync(board, workstream.Name, refusal, context, token);
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(UnhandledBlockerGrace),
+                $"Waiting for project access: the platform denied {refusal.Capability}, so staffing can't continue. " +
+                "I raised it to my manager; adding me under Projects → Manage members resolves it.");
+        }
         var current = await context.Platform.Work.ReadBoardAsync(boardId, token);
         if (gap is not null || current.Items.Any(t => t.Status is "Blocked" or "Failed"))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(UnhandledBlockerGrace),

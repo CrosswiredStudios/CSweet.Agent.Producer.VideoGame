@@ -37,6 +37,13 @@ public sealed partial class SpecialistAgent
                 await stream.CommitAsync(result, cancellationToken);
                 return;
             }
+            if (TryReadStaffingRetry(currentMessage, out _))
+            {
+                await stream.CommitAsync(recoverySupervisor
+                    ? await RetryStaffingAsync(incoming.TurnId, context, cancellationToken)
+                    : "A staffing recheck requires direction from my reporting chain.", cancellationToken);
+                return;
+            }
             // Teammate onboarding must not consume the provider slot while delivery
             // planning is waiting. Authority comes from broker context, not message text.
             if (!isManager)
