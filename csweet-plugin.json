@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.18.4",
+  "version": "2.19.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -827,6 +827,11 @@
     {
       "name": "platform.toolchain.catalog.read.v2",
       "required": true
+    },
+    {
+      "name": "platform.project-approval.read.v1",
+      "scope": "organization",
+      "purpose": "Read current assigned or submitted project proposals, review outcomes and spending authority."
     }
   ],
   "events": {
@@ -853,7 +858,8 @@
       "com.csweet.workstream.project-setup.v1",
       "com.csweet.repository.provisioning.changed.v1",
       "com.csweet.project-health.review-due.v1",
-      "com.csweet.management.incident.changed.v1"
+      "com.csweet.management.incident.changed.v1",
+      "com.csweet.project-approval.decided.v1"
     ]
   },
   "configuration": [

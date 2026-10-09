@@ -198,7 +198,7 @@ public sealed partial class SpecialistAgent
             TeamDescription = plan.ProjectOutcome
         }, token);
     }
-    private static Task<MutationResponse> ProposeManagerProjectAsync(
+    private static async Task<MutationResponse> ProposeManagerProjectAsync(
         string name, string outcome, Guid producerId, Guid turnId,
         AgentRuntimeContext context, CancellationToken token, string? managerDirection = null)
     {
@@ -222,7 +222,7 @@ public sealed partial class SpecialistAgent
              "publication", "launch", "sunset"],
             ["work-planning", "routine-staffing", "build", "validation",
              "preview", "evaluation", "gate-submit"], null);
-        return context.Platform.ProposeWorkstreamAsync(new WorkstreamPlanProposalV2Request(
+        var result = await context.Platform.ProposeWorkstreamAsync(new WorkstreamPlanProposalV2Request(
             title, goal,
             ["A playable demo demonstrates the manager's requested game loop.",
              "Visual effects and performance are validated on the agreed target."],
@@ -235,5 +235,7 @@ public sealed partial class SpecialistAgent
             JsonSerializer.SerializeToElement(new { metadata.WorkingTitle, managerDirection = managerDirection ?? goal },
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             authority, [], []), token);
+        if (result.ApprovalId is { } id) await RememberSubmittedProjectAsync(id, context, token);
+        return result;
     }
 }
