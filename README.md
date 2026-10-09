@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.18.3`
+- Version: `2.18.4`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -71,7 +71,7 @@ dotnet run --project src/CSweet.Agent.Producer.VideoGame -- --self-test
 The tests run entirely in memory and require no C-Sweet instance or credentials.
 
 The installation settings **Maximum context-window tokens** (`maxContextWindowTokens`, default
-220,000) and **Maximum output tokens** (`maxOutputTokens`, default 32,000) configure the Producer's
+256,000) and **Maximum output tokens** (`maxOutputTokens`, default 128,000) configure the Producer's
 planning ceiling and per-response output budget for pitch refinement, delivery review, and
 specialist work. The output budget includes model reasoning and must remain below the context
 ceiling. The agent imposes no fixed maximum, so both values can match the selected model. These
