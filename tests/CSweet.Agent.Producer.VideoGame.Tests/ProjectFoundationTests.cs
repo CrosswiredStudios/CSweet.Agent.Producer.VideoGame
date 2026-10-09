@@ -9,7 +9,7 @@ public sealed class ProjectFoundationTests
     [Fact]
     public async Task MissedRevisionEventIsRecoveredFromDurableIndexWithoutDuplicateResubmission()
     {
-        var producer = Guid.NewGuid(); var oldId = Guid.NewGuid(); var newId = Guid.NewGuid(); var models = 0;
+        var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var oldId = Guid.NewGuid(); var newId = Guid.NewGuid(); var models = 0;
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var plan = new WorkstreamPlanProposalV2Request("Game", "Original outcome", ["Playable"], "Concept", producer, null, [], [],
             null, null, null, null, "Deliver", "original", "game", 1, JsonSerializer.SerializeToElement(new { }),
@@ -32,7 +32,8 @@ public sealed class ProjectFoundationTests
                 return Task.FromResult(JsonSerializer.SerializeToElement(new { text = JsonSerializer.Serialize(plan with { Outcome = "Measurable delivery outcome" }, json), role = "assistant" })); })
             .RegisterCapability<WorkstreamPlanProposalV2Request, MutationResponse>("platform.workstream.plan.propose.v2", (r, _) => {
                 submissions.Add(r); return Task.FromResult(new MutationResponse(false, 0, newId, "Pending")); });
-        var context = runtime.CreateContext(); var agent = new SpecialistAgent();
+        var context = runtime.CreateContext(identity: new(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
+        var agent = new SpecialistAgent();
         var configured = await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(), AgentConfigurationCapabilities.Update,
             JsonSerializer.SerializeToElement(new UpdateAgentConfigurationRequest(new Dictionary<string, JsonElement> {
                 ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid()), ["llmModel"] = JsonSerializer.SerializeToElement("test") }))), context, default);
@@ -45,6 +46,19 @@ public sealed class ProjectFoundationTests
         Assert.Equal(producer, revised.AccountableManagerOrganizationUserId);
         Assert.Contains("launch", revised.AuthorityEnvelope.HumanRequiredActionKeys);
         Assert.Contains(newId.ToString(), cache[indexKey].Payload.GetRawText());
+        var request = new AgentCoordinationTurnRequest(Guid.NewGuid(), 3, 3, "Create project", "Review revision", [],
+            new(producer, Guid.NewGuid(), "Producer", "Producer"), new(manager, Guid.NewGuid(), "Director", "Director"), false,
+            [new(Guid.NewGuid(), 0, manager, "Continue", "Prepare proposal", DateTimeOffset.UtcNow,
+                new("video-game.project-foundation.request.v1", "1.0", "vision", 1, true, JsonSerializer.SerializeToElement(plan, json), "digest")),
+             new(Guid.NewGuid(), 2, manager, "Continue", "Make acceptance measurable.", DateTimeOffset.UtcNow,
+                new("video-game.project-foundation.decision.v1", "1.0", "vision", 1, true,
+                    JsonSerializer.SerializeToElement(new { proposalId = oldId, decisionKind = "RequestRevision" }), "decision-digest"))]);
+        var coordinated = await agent.HandleCoordinationTurnAsync(request, context, default);
+        Assert.Equal("Continue", coordinated.Disposition);
+        Assert.Equal(newId, coordinated.Artifact!.Payload.GetProperty("proposalId").GetGuid());
+        Assert.Equal(1, models);
+        Assert.Equal(2, submissions.Count);
+        Assert.Equal(submissions[0].IdempotencyKey, submissions[1].IdempotencyKey);
     }
 
     [Fact]

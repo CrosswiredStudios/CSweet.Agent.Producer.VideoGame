@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.19.0";
+    public override string Version => "2.19.1";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -445,7 +445,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             await HandleOnboardedAsync(message, context, cancellationToken);
             return;
         }
-        if (message.EventType is "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
+        if (message.EventType is "com.csweet.project-approval.decided.v1" or "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
             "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1" or
             WorkstreamEventNames.DecisionDecidedV1 or WorkstreamEventNames.SprintChangedV1 or
             WorkstreamEventNames.ExecutionChangedV1 or WorkDeliveryCapabilities.Changed or SourceControlEvents.RepositoryProvisioningChanged or ManagementEvents.ResourceChangeDecided or

@@ -1,7 +1,6 @@
 using System.Text.Json;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
-using Microsoft.Extensions.AI;
 using CrosswiredStudios.VideoGame.AgentKit;
 
 namespace CSweet.Agent.Producer.VideoGame;
@@ -31,16 +30,11 @@ public sealed partial class SpecialistAgent
             await CrosswiredStudios.VideoGame.PitchCollaboration.PitchProtocol.CachedAsync($"producer-project-revision:{id:N}", context, async () =>
             {
                 var template = review.GetProperty("binding").GetProperty("payload").Deserialize<WorkstreamPlanProposalV2Request>(ProjectFoundationJson)!;
-                var model = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the Producer model."),
-                    Settings.GetString("llmModel"), new AgentLlmInvocationContext(null, null, "producer-project-revision")));
-                var response = await model.GetResponseAsync([
-                    new ChatMessage(ChatRole.System, "Revise the exact project proposal in response to manager feedback. Return the complete proposal JSON. Refine outcome, rationale, successCriteria and initialMilestones only; retain accepted scope, ownership, team, evidence, profile and authority. Do not assert approval or invent spending data."),
-                    new ChatMessage(ChatRole.User, JsonSerializer.Serialize(new { template, feedback = decision.GetProperty("comment").GetString() }, ProjectFoundationJson))
-                ], ResponseOptions(), token);
-                var raw = response.Text.Trim().Trim('`'); if (raw.StartsWith("json", StringComparison.OrdinalIgnoreCase)) raw = raw[4..].Trim();
-                var draft = JsonSerializer.Deserialize<WorkstreamPlanProposalV2Request>(raw, ProjectFoundationJson) ?? throw new InvalidOperationException("Revised proposal unavailable.");
-                var proposal = await context.Platform.ProposeWorkstreamAsync(template with { Outcome = draft.Outcome, Rationale = draft.Rationale,
-                    SuccessCriteria = draft.SuccessCriteria, InitialMilestones = draft.InitialMilestones, IdempotencyKey = $"producer-project-revised:{id:N}" }, token);
+                var prepared = await PrepareProjectDraftAsync($"producer-project-revision-plan:{id:N}",
+                    template with { IdempotencyKey = $"producer-project-revised:{id:N}" },
+                    new { feedback = decision.GetProperty("comment").GetString() }, "producer-project-revision", context, token);
+                if (prepared.Plan is null) throw new InvalidOperationException(prepared.Error);
+                var proposal = await context.Platform.ProposeWorkstreamAsync(prepared.Plan, token);
                 if (proposal.ApprovalId is not { } revisedId) throw new InvalidOperationException("Revised proposal has no approval ID.");
                 await RememberSubmittedProjectAsync(revisedId, context, token);
                 return new ProjectRecovery("Revised");
@@ -64,39 +58,49 @@ public sealed partial class SpecialistAgent
         if (feedback is not null && feedback.Payload.GetProperty("decisionKind").GetString() != "RequestRevision")
             return AgentCoordinationTurnResult.Completed("The project review is recorded; production waits for the authoritative created project.");
         if (request.IsFinalization) return AgentCoordinationTurnResult.Blocked("Project review remains incomplete; no project creation is assumed.");
+        var cacheKey = $"project-foundation-plan:{request.SessionId:N}:{request.TurnOrdinal}";
+        var commandKey = $"producer-project-foundation:{request.SessionId:N}:{request.TurnOrdinal}";
+        string? revisionFeedback = null;
+        if (feedback is not null)
+        {
+            var previousId = feedback.Payload.GetProperty("proposalId").GetGuid();
+            var reviews = await context.Platform.InvokeAsync<object, JsonElement[]>("platform.project-approval.read.v1", new { proposalId = previousId }, token);
+            if (reviews.Length != 1 || !reviews[0].TryGetProperty("decision", out var decision) ||
+                decision.ValueKind != JsonValueKind.Object || decision.GetProperty("decision").GetString() != "RequestRevision")
+                return AgentCoordinationTurnResult.Blocked("Project revision requires the authoritative manager revision decision.");
+            template = reviews[0].GetProperty("binding").GetProperty("payload").Deserialize<WorkstreamPlanProposalV2Request>(ProjectFoundationJson)!;
+            if (template.AccountableManagerOrganizationUserId != request.Self.OrganizationUserId)
+                return AgentCoordinationTurnResult.Blocked("The revision must retain this Producer as delivery lead.");
+            // The attention recovery path and the collaboration must submit the same revision command.
+            cacheKey = $"producer-project-revision-plan:{previousId:N}";
+            commandKey = $"producer-project-revised:{previousId:N}";
+            revisionFeedback = decision.GetProperty("comment").GetString();
+        }
         var source = new List<string>();
         foreach (var evidence in template.InitialEvidence.Where(x => x.Kind == "artifact"))
         {
             var accepted = await context.Platform.Artifacts.ReadAcceptedAsync(new(evidence.ResourceId, evidence.RevisionId!.Value, evidence.Digest!), token);
             source.Add(accepted.Revision.Content);
         }
-        // Persist the model's exact proposed command before submission; duplicate deliveries reuse it.
-        var plan = await CrosswiredStudios.VideoGame.PitchCollaboration.PitchProtocol.CachedAsync(
-            $"project-foundation-plan:{request.SessionId:N}:{request.TurnOrdinal}", context, async () =>
-            {
-                var model = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the Producer model."),
-                    Settings.GetString("llmModel"), new AgentLlmInvocationContext(null, null, "producer-project-proposal")));
-                var response = await model.GetResponseAsync([
-                    new ChatMessage(ChatRole.System, """
-                        Prepare the project creation proposal as delivery lead. Return the complete supplied
-                        WorkstreamPlanProposalV2Request JSON, refining outcome, rationale, successCriteria and
-                        initialMilestones against accepted evidence and manager feedback. Preserve all identity,
-                        profile, team, supervisor, evidence, authority, budget and date fields exactly. Do not
-                        expand accepted scope. Unspecified budgets are allowed: current default spending authority
-                        is unlimited while real-money spending is unavailable. The manager reviews the submitted
-                        plan and can request changes or escalate exceptions. Never assert that approval occurred.
-                        """),
-                    new ChatMessage(ChatRole.User, JsonSerializer.Serialize(new { template, source, feedback = feedback?.Payload }, ProjectFoundationJson))
-                ], ResponseOptions(), token);
-                var raw = response.Text.Trim().Trim('`');
-                if (raw.StartsWith("json", StringComparison.OrdinalIgnoreCase)) raw = raw[4..].Trim();
-                var draft = JsonSerializer.Deserialize<WorkstreamPlanProposalV2Request>(raw, ProjectFoundationJson)
-                    ?? throw new InvalidOperationException("Producer project proposal unavailable.");
-                return template with { Outcome = draft.Outcome, Rationale = draft.Rationale, SuccessCriteria = draft.SuccessCriteria,
-                    InitialMilestones = draft.InitialMilestones, IdempotencyKey = $"producer-project-foundation:{request.SessionId:N}:{request.TurnOrdinal}" };
-            }, token);
-        var result = await context.Platform.ProposeWorkstreamAsync(plan, token);
+        var prepared = await PrepareProjectDraftAsync(
+            cacheKey, template with { IdempotencyKey = commandKey },
+            new { source, feedback = revisionFeedback }, "producer-project-proposal", context, token,
+            request.Transcript.Any(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
+                x.Disposition == AgentCoordinationDispositions.Blocked) ? $"{request.SessionId:N}:{request.TurnOrdinal}" : "initial");
+        if (prepared.Plan is null) return AgentCoordinationTurnResult.Blocked(prepared.Error!);
+        MutationResponse result;
+        try
+        {
+            result = await context.Platform.ProposeWorkstreamAsync(prepared.Plan, token);
+        }
+        catch (PlatformCapabilityException ex) when (ex.Code == PlatformCapabilityErrorCode.ValidationFailed)
+        {
+            return AgentCoordinationTurnResult.Blocked(
+                "The platform rejected the Producer project proposal request. " +
+                "The manager must check existing approvals and this validation error before retrying collaboration: " + ex.Message);
+        }
         if (result.ApprovalId is not { } proposalId) return AgentCoordinationTurnResult.Blocked("Project proposal did not return an approval ID.");
+        await RememberSubmittedProjectAsync(proposalId, context, token);
         return AgentCoordinationTurnResult.Continue("Submitted the project proposal for manager review.",
             new AgentCoordinationArtifactSubmission("video-game.project-foundation.proposal.v1", "1.0", original!.Key, 1, true,
                 JsonSerializer.SerializeToElement(new { proposalId }, ProjectFoundationJson)));
