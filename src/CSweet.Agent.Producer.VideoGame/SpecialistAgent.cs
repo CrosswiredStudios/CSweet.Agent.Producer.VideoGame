@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.19.2";
+    public override string Version => "2.19.3";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -409,6 +409,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (request.Capability == WorkManagementCapabilityNames.ExecutionRunV1)
         {
             var assignment = DeserializePayload<WorkExecutionAssignmentV1>(request.Arguments);
+            if (assignment is not null && ArtifactDeliveryReview.Supports(assignment))
+                return await ArtifactDeliveryReview.ExecuteAsync(assignment, context,
+                    context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure an evidence review provider."), Settings.GetString("llmModel"))), cancellationToken);
             if (ProjectDeliveryReview.Supports(assignment) && assignment!.StageKey == "merge-decision")
                 return await ProjectDeliveryReview.ExecuteAsync(assignment, context,
                     context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure a review provider."), Settings.GetString("llmModel"))), true, cancellationToken);

@@ -54,9 +54,16 @@ public sealed partial class SpecialistAgent
             var repositories = await context.Platform.SourceControl.ListTeamRepositoryOptionsAsync(new(board.TeamId!.Value), token);
             if (repositories.Count > 1) return "Select explicit repository bindings before configuring this release; multiple authorized repositories are available.";
             var repository = repositories.SingleOrDefault();
-            await HierarchicalProjectDelivery.PrepareAsync(project, board.Id, manager, roster,
-                repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, context, token);
-            return null;
+            try
+            {
+                await HierarchicalProjectDelivery.PrepareAsync(project, board.Id, manager, roster,
+                    repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, context, token);
+                return null;
+            }
+            catch (DeliveryStaffingException gap)
+            {
+                return gap.Message;
+            }
         }
         var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, token);
         var executions = new Dictionary<Guid, WorkSprintExecutionResponse>();

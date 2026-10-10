@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.19.2`
+- Version: `2.19.3`
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
@@ -307,3 +307,5 @@ The V2 assignment identifies Task, Story, Epic or Release scope. Tasks require a
 ## Manager-reviewed project proposals
 
 The Producer can submit projects from a lightweight reporting-manager brief or a Creative Director's accepted project template. The reporting manager reviews the stored command; the Producer revises requested changes and waits for authoritative project creation before delivery. `platform.project-approval.read.v1` reads submitted review outcomes; `com.csweet.project-approval.decided.v1` wakes recovery, with a bounded durable proposal index covering missed events. Model refinements preserve profile, team, lead, evidence and authority. Spending defaults to unlimited while real-money spending is unavailable; manager review still enforces any configured positive delegated budget limit.
+
+QA plans/reports are reviewed by the Producer as exact evidence artifacts. One QA agent can author them and independently verify the implementation. Missing workflow staffing is surfaced as a task-specific blocker. No additional grants are requested.
