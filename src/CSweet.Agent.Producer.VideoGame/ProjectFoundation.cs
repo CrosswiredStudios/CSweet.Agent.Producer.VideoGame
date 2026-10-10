@@ -30,6 +30,14 @@ public sealed partial class SpecialistAgent
             await CrosswiredStudios.VideoGame.PitchCollaboration.PitchProtocol.CachedAsync($"producer-project-revision:{id:N}", context, async () =>
             {
                 var template = review.GetProperty("binding").GetProperty("payload").Deserialize<WorkstreamPlanProposalV2Request>(ProjectFoundationJson)!;
+                if (template.ProfileKey == "video-game-manager-brief.v1" &&
+                    !(template.ProfileData.TryGetProperty("separateNewProject", out var separate) && separate.ValueKind == JsonValueKind.True))
+                {
+                    var portfolio = await context.Platform.ReadPortfolioAsync(new(), token);
+                    if (portfolio.Workstreams.Any(x => x.Workstream.AccountableManagerOrganizationUserId == template.AccountableManagerOrganizationUserId &&
+                        x.Workstream.Status is not ("Completed" or "Cancelled")))
+                        return new ProjectRecovery("ContinueExistingProject");
+                }
                 var prepared = await PrepareProjectDraftAsync($"producer-project-revision-plan:{id:N}",
                     template with { IdempotencyKey = $"producer-project-revised:{id:N}" },
                     new { feedback = decision.GetProperty("comment").GetString() }, "producer-project-revision", context, token);

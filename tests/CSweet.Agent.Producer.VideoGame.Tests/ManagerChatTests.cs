@@ -7,6 +7,75 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class ManagerChatTests
 {
     [Theory]
+    [InlineData("video-game-production.v2")]
+    [InlineData("video-game-manager-brief.v1")]
+    public void RevisedTitleReusesTheOnlyExistingGameAcrossProfiles(string profile)
+    {
+        var game = Project("Pulse Break", profile);
+        Assert.Equal(game, SpecialistAgent.SelectManagerProject([game], null, "Chiptune Breakout", false));
+        Assert.Null(SpecialistAgent.SelectManagerProject([game], null, "Another game", true));
+        Assert.Equal(game, SpecialistAgent.SelectManagerProject([game], game.Id, "Changed title", false));
+    }
+
+    [Fact]
+    public void AmbiguousAndUnavailableProjectsCannotSilentlyCreateAnotherGame()
+    {
+        var first = Project("Pulse Break", "video-game-production.v2");
+        var second = Project("Other", "video-game-manager-brief.v1");
+        Assert.Null(SpecialistAgent.SelectManagerProject([first, second], null, "Revised game", false));
+        Assert.Null(SpecialistAgent.SelectManagerProject([first], Guid.NewGuid(), first.Name, false));
+        Assert.Equal(first, SpecialistAgent.SelectManagerProject([first, second], null, first.Name, false));
+    }
+
+    private static WorkstreamDetail Project(string name, string profile) => new(Guid.NewGuid(), name, "Deliver game",
+        ["Playable"], "Concept", "Approved", Guid.NewGuid(), null, null, null, profile, 3, null, "digest", 1);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ManagerChatReusesProductionProjectsOrPendingSetupForRenamedGame(bool pending)
+    {
+        var manager = Guid.NewGuid(); var producer = Guid.NewGuid();
+        var game = Project("Pulse Break", "video-game-production.v2") with { AccountableManagerOrganizationUserId = producer };
+        var proposal = Guid.NewGuid();
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(pending && r.StateKey == "producer-submitted-project-proposals"
+                    ? new(Guid.NewGuid(), r.StateKey, "test", 1, "Active", new Dictionary<string, string>(), [], r.StateKey, [], Guid.NewGuid(),
+                        JsonSerializer.SerializeToElement(new { proposalIds = new[] { proposal } }), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                    : null)))
+            .RegisterCapability<JsonElement, JsonElement>("platform.project-approval.read.v1", (_, _) =>
+                Task.FromResult(JsonSerializer.SerializeToElement(new[] { new { proposalId = proposal, status = "Pending" } })))
+            .RegisterCapability<JsonElement, CommunicationMessages>(CommunicationCapabilities.ChatRead, (_, _) => Task.FromResult(new CommunicationMessages([])))
+            .RegisterCapability<ReadPortfolioRequest, PortfolioResponse>(WorkstreamCapabilityNames.PortfolioReadV1,
+                (_, _) => Task.FromResult(new PortfolioResponse(pending ? [] : [new(game, null, [], [])])))
+            .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
+                (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
+            .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (request, _) =>
+            {
+                if (!pending)
+                {
+                    Assert.Contains(game.Id.ToString(), request.GetRawText());
+                    Assert.Contains("video-game-production.v2", request.GetRawText());
+                }
+                return Task.FromResult(JsonSerializer.SerializeToElement(new {
+                    text = """{"response":"Refine the same game.","createProject":true,"projectName":"Chiptune Breakout","projectOutcome":"Deliver the refined game."}""", role = "assistant"
+                }));
+            })
+            .RegisterCapability<WorkstreamPlanProposalV2Request, MutationResponse>(PlatformCapabilities.WorkstreamPlanProposeV2,
+                (_, _) => throw new InvalidOperationException("A renamed game must not create a new proposal."));
+        var context = runtime.CreateContext(identity: new(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
+        var incoming = new CommunicationMessageReceivedEvent(Guid.NewGuid(), Guid.NewGuid().ToString(), manager.ToString(),
+            "Refine our accepted game into this single-developer brief.",
+            new Dictionary<string, string> { [CommunicationMessageContextKeys.SenderOrganizationUserId] = manager.ToString() },
+            Guid.NewGuid(), 1, Guid.NewGuid());
+        await new SpecialistAgent().HandleEventAsync(new(Guid.NewGuid(), Guid.NewGuid(), CommunicationEvents.MessageReceived,
+            JsonSerializer.SerializeToElement(incoming), DateTimeOffset.UtcNow), context, default);
+        Assert.Contains(runtime.Progress, x => x.GetProperty("isFinal").GetBoolean() &&
+            x.GetProperty("delta").GetString()!.Contains(pending ? "Reusing the pending project setup" : "Reusing the approved project Pulse Break"));
+    }
+
+    [Theory]
     [InlineData("Agent", true)]
     [InlineData("Human", false)]
     [InlineData(null, false)]

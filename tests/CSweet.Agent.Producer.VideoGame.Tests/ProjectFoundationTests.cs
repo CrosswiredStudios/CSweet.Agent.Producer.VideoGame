@@ -7,6 +7,39 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class ProjectFoundationTests
 {
     [Fact]
+    public async Task DuplicateRevisionFeedbackContinuesExistingGameWithoutResubmission()
+    {
+        var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var proposal = Guid.NewGuid();
+        var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var plan = new WorkstreamPlanProposalV2Request("Renamed game", "Refined brief", ["Playable"], "Concept", producer, null, [], [],
+            null, null, null, null, "Deliver", "original", "video-game-manager-brief.v1", 3, JsonSerializer.SerializeToElement(new { }),
+            new(null, 14, [], ["launch"], ["work-planning"], null), [], []);
+        const string indexKey = "producer-submitted-project-proposals";
+        var states = new Dictionary<string, AgentOperatingStateResponse> { [indexKey] = new(Guid.NewGuid(), indexKey, "test", 1, "Active",
+            new Dictionary<string, string>(), [], "index", [], Guid.NewGuid(), JsonSerializer.SerializeToElement(new { proposalIds = new[] { proposal } }),
+            1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow) };
+        var game = new WorkstreamDetail(Guid.NewGuid(), "Pulse Break", "Original game", ["Playable"], "Concept", "Approved", producer,
+            null, null, null, "video-game-production.v2", 6, null, "digest", 1);
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(r.StateKey))))
+            .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
+                (r, _) => Task.FromResult(states[r.StateKey] = new(Guid.NewGuid(), r.StateKey, r.SchemaId, r.SchemaVersion, r.Status,
+                    r.SourceRevisions, r.ConditionCodes, r.DecisionFingerprint, r.OpenCommitmentCorrelations, r.AttentionReviewId, r.Payload, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)))
+            .RegisterCapability<JsonElement, JsonElement[]>("platform.project-approval.read.v1", (_, _) => Task.FromResult(new[] {
+                JsonSerializer.SerializeToElement(new { status = "Cancelled", binding = new { payload = plan },
+                    decision = new { decision = "RequestRevision", comment = "Continue the existing game." } }, json) }))
+            .RegisterCapability<ReadPortfolioRequest, PortfolioResponse>(WorkstreamCapabilityNames.PortfolioReadV1,
+                (_, _) => Task.FromResult(new PortfolioResponse([new(game, null, [], [])])))
+            .RegisterCapability<WorkstreamPlanProposalV2Request, MutationResponse>(PlatformCapabilities.WorkstreamPlanProposeV2,
+                (_, _) => throw new InvalidOperationException("A duplicate rejected by review must not resubmit another creation."));
+        var context = runtime.CreateContext(identity: new(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
+        await new SpecialistAgent().RecoverSubmittedProjectsAsync(context, default);
+        await new SpecialistAgent().RecoverSubmittedProjectsAsync(context, default);
+        Assert.Contains(states.Values, x => x.Payload.GetRawText().Contains("ContinueExistingProject"));
+    }
+
+    [Fact]
     public async Task MissedRevisionEventIsRecoveredFromDurableIndexWithoutDuplicateResubmission()
     {
         var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var oldId = Guid.NewGuid(); var newId = Guid.NewGuid(); var models = 0;

@@ -10,7 +10,7 @@ public sealed partial class SpecialistAgent
 {
     private sealed record ManagerHiringRole(string RoleKey, string Title, string Purpose, int Priority);
     private sealed record ManagerTurnPlan(string Response, bool CreateProject, string? ProjectName, string? ProjectOutcome,
-        IReadOnlyList<ManagerHiringRole>? TeamRoles, Guid? ProjectId = null, bool StartDelivery = false);
+        IReadOnlyList<ManagerHiringRole>? TeamRoles, Guid? ProjectId = null, bool StartDelivery = false, bool SeparateNewProject = false);
 
     private async Task HandleManagerMessageAsync(AgentEventEnvelope message, AgentRuntimeContext context, CancellationToken cancellationToken)
     {
@@ -62,7 +62,7 @@ public sealed partial class SpecialistAgent
             var history = await context.Platform.Communication.ReadChatAsync(conversation, cancellationToken);
             var portfolio = await context.Platform.ReadPortfolioAsync(new(), cancellationToken);
             var projects = portfolio.Workstreams.Where(x => x.Workstream.AccountableManagerOrganizationUserId == producer &&
-                x.Workstream.ProfileKey == "video-game-manager-brief.v1").Select(x => x.Workstream).ToArray();
+                x.Workstream.Status is not ("Completed" or "Cancelled")).Select(x => x.Workstream).ToArray();
             var staffing = await context.Platform.ReadResourceChangesAsync(new(), cancellationToken);
             var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? incoming.ProviderProfileId,
                 Settings.GetString("llmModel"), new AgentLlmInvocationContext(conversation, incoming.TurnId, "producer-manager-chat")));
@@ -77,8 +77,12 @@ public sealed partial class SpecialistAgent
                     software-architect. Respect explicit staffing reductions and prior decisions. Existing approved
                     employees must be attached, not hired again. Do not turn an assignment request into a hiring request.
                     Return JSON {response,createProject,projectName,projectOutcome,teamRoles:[{roleKey,title,purpose,priority}],
-                    projectId,startDelivery}. Only set createProject for an authorized new project; reuse projectId
-                    from the supplied state for follow-ups. Set startDelivery for requests to attach staff, plan,
+                    projectId,startDelivery,separateNewProject}. Only set createProject for an authorized new project; reuse projectId
+                    from the supplied state for follow-ups, renamed games, revised briefs and changed delivery scope.
+                    Existing projects from every profile are authoritative. Set separateNewProject only when the
+                    CURRENT direction explicitly requests another independent game alongside existing projects.
+                    Refining the accepted game or changing its working title never authorizes a second project.
+                    Set startDelivery for requests to attach staff, plan,
                     populate tickets, start work or continue delivery. A new vision with authorization to execute can
                     set both createProject and teamRoles. Do not interpret historical requests as new commands.
                     Preserve the user's actual goal and requirements in projectOutcome. Use null for unresolved IDs.
@@ -91,14 +95,34 @@ public sealed partial class SpecialistAgent
                     projects, staffing = staffing.Requests.Where(x => x.RequesterInstallationId.ToString() == context.InstallationId) }, ManagerJson))
             ], new ChatOptions { MaxOutputTokens = Math.Min(ResolveOutputTokens(Settings), 2048) }, cancellationToken);
             var plan = ParseManagerTurn(response.Text.Trim());
-            var selected = plan.ProjectId.HasValue ? projects.SingleOrDefault(x => x.Id == plan.ProjectId) :
-                projects.SingleOrDefault(x => string.Equals(x.Name, plan.ProjectName, StringComparison.OrdinalIgnoreCase));
-            if (selected is null && !plan.CreateProject && projects.Length == 1) selected = projects[0];
+            var selected = SelectManagerProject(projects, plan.ProjectId, plan.ProjectName, plan.SeparateNewProject);
+            if (plan.ProjectId.HasValue && selected is null)
+                throw new InvalidOperationException("The selected project is not an active project owned by this Producer. Choose an available project before setup continues.");
+            if (selected is null && projects.Length > 0 && !plan.SeparateNewProject &&
+                (plan.CreateProject || plan.StartDelivery || plan.TeamRoles is { Count: > 0 }))
+                throw new InvalidOperationException("Choose which existing project this direction belongs to. A revised brief or working title must reuse its project; a separate game requires explicit direction.");
             var results = new List<string>();
-            if (plan.CreateProject && selected is null && !string.IsNullOrWhiteSpace(plan.ProjectName) && !string.IsNullOrWhiteSpace(plan.ProjectOutcome))
+            if (selected is not null && plan.CreateProject)
+                results.Add($"Reusing the approved project {selected.Name} ({selected.Id:D}) for this game.");
+            Guid? pendingProposal = null;
+            if (plan.CreateProject && selected is null && !plan.SeparateNewProject)
+            {
+                var submitted = await context.Platform.ReadOperatingStateAsync<SubmittedProjects>(SubmittedProjectsKey, cancellationToken);
+                foreach (var id in submitted?.Payload.ProposalIds ?? [])
+                {
+                    var reviews = await context.Platform.InvokeAsync<object, JsonElement[]>("platform.project-approval.read.v1", new { proposalId = id }, cancellationToken);
+                    if (reviews.Length != 1 || reviews[0].GetProperty("status").GetString() != "Pending") continue;
+                    if (pendingProposal.HasValue)
+                        throw new InvalidOperationException("More than one project setup is pending. Resolve the existing proposals before requesting another game.");
+                    pendingProposal = id;
+                }
+                if (pendingProposal.HasValue)
+                    results.Add($"Reusing the pending project setup (request {pendingProposal:D}); approval is required before delivery continues.");
+            }
+            if (plan.CreateProject && selected is null && !pendingProposal.HasValue && !string.IsNullOrWhiteSpace(plan.ProjectName) && !string.IsNullOrWhiteSpace(plan.ProjectOutcome))
             {
                 var result = await ProposeManagerProjectAsync(plan.ProjectName, plan.ProjectOutcome, producer, incoming.TurnId, context, cancellationToken,
-                    string.Join("\n", history.Messages.Where(x => x.SenderOrganizationUserId == manager).Select(x => x.Content).Append(incoming.Message)));
+                    string.Join("\n", history.Messages.Where(x => x.SenderOrganizationUserId == manager).Select(x => x.Content).Append(incoming.Message)), plan.SeparateNewProject);
                 results.Add(result.ApprovalId.HasValue ? $"Submitted project setup for approval (request {result.ApprovalId:D})." : "Submitted the project setup proposal.");
             }
             if (plan.TeamRoles is { Count: > 0 })
@@ -115,11 +139,20 @@ public sealed partial class SpecialistAgent
             }
             if (selected is not null && (plan.StartDelivery || plan.TeamRoles is { Count: > 0 }))
             {
-                await SaveManagerDeliveryAsync(selected.Id, current => current with { Direction =
-                    string.Join("\n", history.Messages.Where(x => x.SenderOrganizationUserId == manager).OrderBy(x => x.Sequence).TakeLast(40).Select(x => x.Content).Append(incoming.Message)) }, context, cancellationToken);
-                await EnsureManagerDeliveryAsync(selected, context, cancellationToken);
-                var progress = await AdvanceManagerDeliveryAsync(selected.Id, context, cancellationToken);
-                results.Add(progress.Message);
+                if (selected.ProfileKey != "video-game-manager-brief.v1")
+                {
+                    await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt,
+                        message.OccurredAt.AddMinutes(5), CommunicationEvents.MessageReceived), context, cancellationToken);
+                    results.Add($"Delivery continues through the existing production project {selected.Name} and its accepted handoff.");
+                }
+                else
+                {
+                    await SaveManagerDeliveryAsync(selected.Id, current => current with { Direction =
+                        string.Join("\n", history.Messages.Where(x => x.SenderOrganizationUserId == manager).OrderBy(x => x.Sequence).TakeLast(40).Select(x => x.Content).Append(incoming.Message)) }, context, cancellationToken);
+                    await EnsureManagerDeliveryAsync(selected, context, cancellationToken);
+                    var progress = await AdvanceManagerDeliveryAsync(selected.Id, context, cancellationToken);
+                    results.Add(progress.Message);
+                }
             }
             if (results.Count == 0 && selected is not null)
             {
@@ -135,6 +168,15 @@ public sealed partial class SpecialistAgent
             await stream.CommitAsync("I could not finish the requested setup: " + error.Message +
                 " Existing approvals and completed operations are retained; I have not confirmed that a sprint started.", cancellationToken);
         }
+    }
+    internal static WorkstreamDetail? SelectManagerProject(IReadOnlyList<WorkstreamDetail> projects,
+        Guid? projectId, string? name, bool separateNewProject)
+    {
+        if (projectId.HasValue) return projects.SingleOrDefault(x => x.Id == projectId);
+        var matches = projects.Where(x => string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase)).ToArray();
+        if (matches.Length == 1) return matches[0];
+        // A title/brief change must not create a second project for the Producer's only active game.
+        return !separateNewProject && projects.Count == 1 ? projects[0] : null;
     }
     private static ManagerTurnPlan ParseManagerTurn(string raw)
     {
@@ -200,7 +242,7 @@ public sealed partial class SpecialistAgent
     }
     private static async Task<MutationResponse> ProposeManagerProjectAsync(
         string name, string outcome, Guid producerId, Guid turnId,
-        AgentRuntimeContext context, CancellationToken token, string? managerDirection = null)
+        AgentRuntimeContext context, CancellationToken token, string? managerDirection = null, bool separateNewProject = false)
     {
         var title = name.Trim();
         if (title.Length > 160) title = title[..160];
@@ -232,7 +274,7 @@ public sealed partial class SpecialistAgent
             "The reporting manager requested a lightweight project start and a small delivery team.",
             $"producer-manager-project:{turnId:N}",
             "video-game-manager-brief.v1", 3,
-            JsonSerializer.SerializeToElement(new { metadata.WorkingTitle, managerDirection = managerDirection ?? goal },
+            JsonSerializer.SerializeToElement(new { metadata.WorkingTitle, managerDirection = managerDirection ?? goal, separateNewProject },
                 new JsonSerializerOptions(JsonSerializerDefaults.Web)),
             authority, [], []), token);
         if (result.ApprovalId is { } id) await RememberSubmittedProjectAsync(id, context, token);
