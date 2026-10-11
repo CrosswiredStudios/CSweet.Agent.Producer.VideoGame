@@ -56,6 +56,7 @@ public sealed partial class SpecialistAgent
             var repository = repositories.SingleOrDefault();
             try
             {
+                await RepairQaReportPlanningAsync(board, context, token);
                 await HierarchicalProjectDelivery.PrepareAsync(project, board.Id, manager, roster,
                     repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, context, token);
                 return null;

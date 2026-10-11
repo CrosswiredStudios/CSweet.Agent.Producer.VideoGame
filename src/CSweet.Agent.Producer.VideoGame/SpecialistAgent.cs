@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.19.3";
+    public override string Version => "2.19.4";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -1279,6 +1279,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                         [proposal.Description], proposal.AcceptanceCriteria,
                         designer.DesignConstraints.Concat(technical.TechnicalConstraints).Concat(retainedConstraints ?? []).Distinct(StringComparer.Ordinal).ToList())
                     {
+                        DeliveryKind = ProposalDeliveryKind(proposal.AccountableRoleKey),
                         DependencyItemIds = proposal.DependencyProposalKeys.Select(key => byKey[key].Id).ToList(),
                         DelegationRecommendations = executable
                             ? [new WorkTechnicalDelegationRecommendation("specialist-execution", proposal.AccountableRoleKey,
@@ -1312,6 +1313,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             var sourceArtifact = sourceIsTechnical ? technicalArtifact : designerArtifact;
             var planning = existing.Planning with
             {
+                DeliveryKind = proposal.AccountableRoleKey == "game-quality-assurance" && existing.Delivery is null &&
+                    existing.Status is "Ready" or "Open" or "Backlog" or "Planned" ? "Artifact" : existing.Planning.DeliveryKind,
                 Requirements = [proposal.Description],
                 AcceptanceCriteria = proposal.AcceptanceCriteria,
                 Constraints = designer.DesignConstraints.Concat(technical.TechnicalConstraints).Concat(retainedConstraints ?? []).Distinct(StringComparer.Ordinal).ToList(),

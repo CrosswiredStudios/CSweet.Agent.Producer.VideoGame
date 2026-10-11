@@ -53,13 +53,20 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.19.3`
+- Version: `2.19.4`
+
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
 - Activation: always on, with five-minute attention reviews
 - Requested platform/provider capabilities: typed planning, work management, governed staffing, communication, artifacts and brokered model access (see manifest).
 - Event subscriptions: attention, coordination, workstream, workforce, hiring, work-item, sprint, and management changes
 - Network access: none
+
+`QaReportPlanning` explicitly classifies QA-owned validation reports as Artifact delivery.
+`StaffWorkflowAsync` repairs legacy unstarted report planning through revision-checked platform
+operations before hierarchical staffing, preserving scope, dependencies and provenance. Bound
+delivery, active/historical execution and completed work require normal manager replanning.
+The Producer reviews exact report evidence; implementation still receives independent QA.
 
 ## Develop
 
