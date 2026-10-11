@@ -104,7 +104,7 @@ public sealed partial class SpecialistAgent
     private static async Task<string> RetryStaffingAsync(Guid turnId, AgentRuntimeContext context, CancellationToken token)
     {
         var pending = (await context.Platform.PersonalTodo.ListAsync(token)).Boards.SelectMany(b => b.Items)
-            .Where(t => t.ArchivedAt is null && t.CorrelationId?.StartsWith(WorkflowRecoveryPrefix, StringComparison.Ordinal) == true &&
+            .Where(t => t.ArchivedAt is null && IsStaffingRecoveryCommitment(t.CorrelationId) &&
                 (t.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked ||
                  (t.Status == PersonalTodoStatuses.Running && t.Wait is not null)))
             .ToArray();
@@ -122,7 +122,11 @@ public sealed partial class SpecialistAgent
                 // It changed meanwhile and will be rechecked from its current state.
             }
         }
-        return $"Rechecking delivery staffing now ({pending.Length} board{(pending.Length == 1 ? "" : "s")}). " +
+        return $"Rechecking delivery staffing and sprint readiness now ({pending.Length} commitment{(pending.Length == 1 ? "" : "s")}). " +
             "If access is still missing I'll say so again; nothing else is needed from you.";
     }
+
+    internal static bool IsStaffingRecoveryCommitment(string? correlationId) =>
+        correlationId?.StartsWith(WorkflowRecoveryPrefix, StringComparison.Ordinal) == true ||
+        correlationId?.StartsWith(SprintReadinessCommitmentPrefix, StringComparison.Ordinal) == true;
 }

@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.19.6`
+- Version: `2.19.7`
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
@@ -319,12 +319,14 @@ QA plans/reports are reviewed by the Producer as exact evidence artifacts. One Q
 
 ## Certified release build-readiness
 
-SDK 3.64.0 allows the Producer to assign build-readiness to an updated Technical Director or Developer when no Build Release Engineer is available. The assigned agent must advertise `work.execution.build-readiness.v1` and V2 execution. `DeliveryBuildReadiness.ExecuteAsync` requests the configured certified provider build for every exact release repository candidate, returns durable pending build identities, and verifies successful output provenance. It grants no deployment, publication, or independent product approval authority. Existing project, repository and build grants remain required.
+SDK 3.64.1 allows the Producer to assign build-readiness to an updated Technical Director or Developer when no Build Release Engineer is available. The assigned agent must advertise `work.execution.build-readiness.v1` and V2 execution. `DeliveryBuildReadiness.ExecuteAsync` requests the configured certified provider build for every exact release repository candidate, returns durable pending build identities, and verifies successful output provenance. It grants no deployment, publication, or independent product approval authority. Existing project, repository and build grants remain required.
 
 ## Project compute test delivery
 
 - Prefer a qualified Technical Director's compute test path for game sprint setup, removing the certified-toolchain prerequisite.
 - Keep independent code review and QA gates, and preserve recoverable missing-option waits instead of exhausting task retries.
-- Consume Agent SDK 3.64.0 and WorkManagement.Contracts 3.26.0.
+- Consume Agent SDK 3.64.1 and WorkManagement.Contracts 3.27.0.
 
 Current compute review links are local to the provider machine. Public hosting remains a separate capability. Pending setup and local-link approval preserve durable progress; unknown command outcomes are not automatically repeated.
+
+Producer 2.19.7 uses SDK 3.64.1 and WorkManagement.Contracts 3.27.0 to propose independent manager reviews for QA report artifacts before draft plan creation. Configure, finalize and activate conflicts remain visible staffing waits. The QA proposal policy generation wakes retained recovery commitments after the update; Retry staffing also wakes sprint preflight. Update the platform before this agent; finalized assignments and independent product QA remain required.

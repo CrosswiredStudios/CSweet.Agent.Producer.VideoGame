@@ -11,6 +11,14 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 /// </summary>
 public sealed class DeliveryAccessTests
 {
+    [Theory]
+    [InlineData("producer-workflow-recovery:board:fingerprint", true)]
+    [InlineData("producer-readiness:sprint:revision", true)]
+    [InlineData("producer-role-repair:ticket", false)]
+    [InlineData("unrelated-work", false)]
+    public void StaffingRetryIncludesSprintPreflightButLeavesOtherWorkAlone(string correlation, bool expected) =>
+        Assert.Equal(expected, SpecialistAgent.IsStaffingRecoveryCommitment(correlation));
+
     [Fact]
     public void The_escalation_names_the_refusal_and_follows_the_relay_convention()
     {
