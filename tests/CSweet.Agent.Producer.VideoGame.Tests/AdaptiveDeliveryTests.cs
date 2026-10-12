@@ -140,6 +140,23 @@ public sealed class AdaptiveDeliveryTests
         Assert.Empty(SpecialistAgent.EligibleCandidateScope([reviewOnly, duplicate], [reviewOnly, duplicate]));
     }
 
+    [Fact]
+    public async Task RoutineBindingNeverRevisesFinalizedHierarchyStaffing()
+    {
+        var item = Item(true) with { Delivery = new WorkItemDeliverySpecification(Guid.Empty, ["Movement"], ["Input changes position"])
+            { DeliveryPlanId = Guid.NewGuid() }, ProposalProvenance = new(Guid.NewGuid(), "digest", "task"),
+            ExecutionMode = WorkItemExecutionModes.Executable };
+        var board = Guid.NewGuid();
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read,
+                (_, _) => Task.FromResult(new WorkBoardDetail(new(board, "TEST", "Test", false, false, 1, []), [], [item])))
+            .RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([]));
+        var roster = new AgentTeamContext(Guid.NewGuid().ToString(), "team", "Team", 1, Guid.NewGuid().ToString(), "Producer", [], [], 0, false);
+        // No planning mutation capability is available: a regression would fail here.
+        await SpecialistAgent.BindAvailableWorkAsync(board, roster, "profile", runtime.CreateContext(), default);
+    }
+
     private static WorkItem Item(bool assigned, params Guid[] dependencies)
     {
         var installation = Guid.NewGuid();

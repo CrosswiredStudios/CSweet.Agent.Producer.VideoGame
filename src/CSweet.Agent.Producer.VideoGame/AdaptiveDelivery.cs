@@ -124,13 +124,14 @@ public sealed partial class SpecialistAgent
         await SubmitCoverageAsync(proposal, boardId, context.Platform.ProposeResourceChangeAsync, token);
     }
 
-    private static async Task BindAvailableWorkAsync(Guid boardId, AgentTeamContext roster, string profileDigest,
+    internal static async Task BindAvailableWorkAsync(Guid boardId, AgentTeamContext roster, string profileDigest,
         AgentRuntimeContext context, CancellationToken token)
     {
         var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
         var planned = (await context.Platform.Work.ListSprintsAsync(boardId, token)).Where(x => x.Status == "Planned").Select(x => x.Id).ToHashSet();
         foreach (var item in board.Items.Where(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                     (x.SprintId is null || planned.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null && x.Planning is not null))
+                     (x.SprintId is null || planned.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null && x.Planning is not null &&
+                     x.Delivery?.DeliveryPlanId is null && x.Status is not ("Done" or "Completed" or "Cancelled")))
         {
             var assignments = RefreshAssignments(item, roster, profileDigest);
             if (assignments.SequenceEqual(item.StageAssignments)) continue;
@@ -157,7 +158,9 @@ public sealed partial class SpecialistAgent
         foreach (var recommendation in item.Planning?.DelegationRecommendations ?? [])
             requirementsByStage[recommendation.StageKey] = new WorkAssignmentRequirements(
                 recommendation.RequiredRoleKey, recommendation.RequiredSpecializationKeys,
-                recommendation.PreferredSpecializationKeys, recommendation.RequiredCapabilityKeys);
+                recommendation.PreferredSpecializationKeys, item.Delivery?.DeliveryPlanId is not null
+                    ? recommendation.RequiredCapabilityKeys.Concat([WorkManagementCapabilityNames.ExecutionRunV2]).Distinct().ToArray()
+                    : recommendation.RequiredCapabilityKeys);
         foreach (var recommendation in workflowRequirements ?? [])
         {
             var required = new WorkAssignmentRequirements(recommendation.RequiredRoleKey, recommendation.RequiredSpecializationKeys,

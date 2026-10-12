@@ -6,6 +6,27 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class PlanningDirectionRecoveryTests
 {
+    [Fact]
+    public async Task RetainedExactCompletedProposalIsReusedWithoutStartingAnotherSession()
+    {
+        var target = Guid.NewGuid(); var board = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
+        var cycle = new GameProductionPlanningCycleV1(Guid.NewGuid(), Guid.NewGuid(), 1, board, "profile", Guid.NewGuid(),
+            1, "package", "concept", "vision", new string('a', 64));
+        var member = new AgentTeammate(target.ToString(), "Victor", "Agent", null, null, "Teammate", "Online") { AgentInstallationId = Guid.NewGuid() };
+        var person = new AgentCoordinationParticipant(target, member.AgentInstallationId.Value, "Victor", "Technical Director");
+        var type = "video-game.production.technical-delivery-proposal.v1";
+        var artifact = new AgentCoordinationArtifact(type, "1.0", "plan", 1, true,
+            JsonSerializer.SerializeToElement(new GameTechnicalDeliveryProposalV1(cycle, [], [], [], [], "digest")), "digest");
+        var retained = new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty,
+            person, person, "Planning", "Plan", [], "Completed", 2, 2, null, true, "Complete", now, now,
+            [new(Guid.NewGuid(), 1, target, "complete", "Accepted proposal", now, artifact)]) { BoardSource = new(board) };
+        var runtime = new AgentTestRuntime().RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(
+            CommunicationCapabilities.CoordinationRead, (_, _) => Task.FromResult(retained));
+        var result = await SpecialistAgent.EnsurePlanningSessionAsync(member, board, cycle, "Planning", "Plan", type,
+            [], [], runtime.CreateContext(), default, existingSessionId: retained.Id);
+        Assert.Equal(retained.Id, result.Id);
+    }
+
     [Theory]
     [InlineData(0)]
     [InlineData(8192)]

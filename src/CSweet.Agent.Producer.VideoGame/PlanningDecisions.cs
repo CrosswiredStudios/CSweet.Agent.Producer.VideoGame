@@ -31,7 +31,7 @@ public sealed partial class SpecialistAgent
         decisions.Where(x => x.WorkstreamId == workstreamId &&
                 x.TypeKey == "video-game.management-direction.v1" &&
                 x.AuthorityRuleKey == "work-planning" && x.Status == DecisionStatuses.Decided &&
-                x.SelectedOptionId is not null and not "request-more-evidence" &&
+                x.SelectedOptionId == "provide-direction" &&
                 !string.IsNullOrWhiteSpace(x.Rationale) &&
                 x.Evidence.Any(e => e.TypeKey == "video-game.production-plan.v1" &&
                     e.Digest == acceptedBriefDigest))
@@ -39,13 +39,27 @@ public sealed partial class SpecialistAgent
             .Select(x => $"Decision {x.Id:D}: {x.Summary} => {x.SelectedOptionId}. {x.Rationale}")
             .ToArray();
 
+    // Continuing the accepted brief resolves a question without replacing the specialist's
+    // immutable proposal. Exact question and accepted-source binding prevent unrelated
+    // decisions from approving scope. Material direction still requires specialist revision.
+    internal static IReadOnlyList<string> UnresolvedPlanningQuestions(IReadOnlyList<string> questions,
+        IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
+        questions.Where(question => !decisions.Any(x => x.WorkstreamId == workstreamId &&
+            x.TypeKey == "video-game.management-direction.v1" && x.AuthorityRuleKey == "work-planning" &&
+            x.Status == DecisionStatuses.Decided && x.SelectedOptionId == "continue-current-plan" &&
+            !string.IsNullOrWhiteSpace(x.Rationale) && x.Summary.Trim() == question.Trim() &&
+            x.Evidence.Any(e => e.TypeKey == "video-game.production-plan.v1" &&
+                e.Digest == acceptedBriefDigest && e.Status == "Accepted")))
+            .Distinct(StringComparer.Ordinal).ToArray();
+
     internal static async Task EnsurePlanningDecisionsAsync(Guid workstreamId, Guid boardId,
         string fingerprint, IReadOnlyList<string> questions, ProducerAcceptedHandoff handoff,
         AgentRuntimeContext context, CancellationToken token)
     {
         var existing = await context.Platform.ReadDecisionsAsync(
-            new ReadDecisionRequest(WorkstreamId: workstreamId, PendingOnly: true), token);
-        foreach (var request in PlanningDecisionRequests(workstreamId, boardId, fingerprint, questions, handoff))
+            new ReadDecisionRequest(WorkstreamId: workstreamId), token);
+        foreach (var request in PlanningDecisionRequests(workstreamId, boardId, fingerprint,
+            UnresolvedPlanningQuestions(questions, existing, workstreamId, handoff.RevisionDigest), handoff))
         {
             // Replace earlier owner-routed planning questions with a manager-owned
             // decision. Keep the old record and card as superseded audit history.

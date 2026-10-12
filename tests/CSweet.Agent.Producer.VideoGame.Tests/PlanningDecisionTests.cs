@@ -113,6 +113,25 @@ public sealed class PlanningDecisionTests
         Assert.Contains("Target desktop browsers first", selected[0]);
     }
 
+    [Theory]
+    [InlineData("accepted-sha", "continue-current-plan", "Decided", "Choose browser targets", true)]
+    [InlineData("old-sha", "continue-current-plan", "Decided", "Choose browser targets", false)]
+    [InlineData("accepted-sha", "request-more-evidence", "Decided", "Choose browser targets", false)]
+    [InlineData("accepted-sha", "continue-current-plan", "Pending", "Choose browser targets", false)]
+    [InlineData("accepted-sha", "continue-current-plan", "Decided", "Unrelated question", false)]
+    public void ContinuationClosesOnlyItsExactAcceptedQuestionWithoutReplanning(string digest, string option,
+        string status, string question, bool resolved)
+    {
+        var stream = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
+        var decision = new DecisionRecord(Guid.NewGuid(), stream, "video-game.management-direction.v1", question,
+            "work-planning", [], "provide-direction", option, status, "Use the accepted baseline.",
+            [new EvidenceReference("artifact", Guid.NewGuid(), Guid.NewGuid(), digest, "video-game.production-plan.v1", "Accepted")],
+            null, null, null, 1, now, now);
+        var questions = SpecialistAgent.UnresolvedPlanningQuestions(["Choose browser targets"], [decision], stream, "accepted-sha");
+        Assert.Equal(resolved ? 0 : 1, questions.Count);
+        Assert.Empty(SpecialistAgent.ResolvedPlanningDirections([decision], stream, "accepted-sha"));
+    }
+
     [Fact]
     public void NoQuestionsCreateNoDecision()
     {

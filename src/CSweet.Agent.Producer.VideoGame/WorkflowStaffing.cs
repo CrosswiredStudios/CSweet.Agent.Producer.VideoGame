@@ -128,7 +128,7 @@ public sealed partial class SpecialistAgent
         var roster = await ReadManagerTeamAsync(team, context, token);
         var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new
         {
-            board.Id, profileDigest, rosterRevision = roster?.Revision, qaManagerReviewProposalVersion = 1,
+            board.Id, profileDigest, rosterRevision = roster?.Revision, qaManagerReviewProposalVersion = 2,
             items = detail.Items.OrderBy(t => t.Id).Select(t => new { t.Id, t.Revision })
         }, ManagerJson));
         var prefix = WorkflowRecoveryPrefix + board.Id.ToString("N") + ":";

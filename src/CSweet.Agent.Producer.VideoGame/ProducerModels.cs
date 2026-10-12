@@ -79,6 +79,7 @@ public sealed record ProducerPlanningCycleState(
     string? ReconciledDigest,
     DateTimeOffset UpdatedAt)
 {
+    public string? PlanningDirectionsDigest { get; init; }
     public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
 }
 
