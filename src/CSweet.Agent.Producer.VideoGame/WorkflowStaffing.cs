@@ -129,7 +129,8 @@ public sealed partial class SpecialistAgent
         var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new
         {
             board.Id, profileDigest, rosterRevision = roster?.Revision, qaManagerReviewProposalVersion = 2,
-            items = detail.Items.OrderBy(t => t.Id).Select(t => new { t.Id, t.Revision })
+            // Assignment saves and claim metadata must not create a new recovery generation.
+            items = detail.Items.OrderBy(t => t.Id).Select(t => new { t.Id, t.PlanningRevision, t.ParentItemId, t.SprintId, t.Status })
         }, ManagerJson));
         var prefix = WorkflowRecoveryPrefix + board.Id.ToString("N") + ":";
         var outstanding = (await context.Platform.PersonalTodo.ListAsync(token)).Boards.SelectMany(b => b.Items)

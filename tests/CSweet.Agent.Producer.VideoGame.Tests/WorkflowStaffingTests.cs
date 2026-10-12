@@ -6,6 +6,30 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class WorkflowStaffingTests
 {
+    [Theory]
+    [InlineData("producer-workflow-recovery:board:generation", false)]
+    [InlineData("producer-readiness:board:sprint", false)]
+    [InlineData("producer-workflow-recovery:board:generation", true)]
+    public async Task WakeHintsPreserveFutureWaitEvenWhenSourceFingerprintChanged(string correlation, bool due)
+    {
+        var item = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with
+        {
+            Id = Guid.NewGuid(), Revision = 10, Status = PersonalTodoStatuses.Running, CorrelationId = correlation,
+            Wait = new(DateTimeOffset.UtcNow.AddMinutes(due ? -1 : 20), "GitHost unavailable"),
+            WorkContext = new(SourceFingerprint: "old")
+        };
+        var requeues = 0;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<object, PersonalTodoDirectory>(PersonalTodoCapabilities.Read, (_, _) =>
+                Task.FromResult(new PersonalTodoDirectory([new(Guid.NewGuid(), Guid.NewGuid(), "Producer", null, null, 1, [item])])))
+            .RegisterCapability<RequeuePersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Requeue, (_, _) =>
+            { requeues++; item = item with { Status = PersonalTodoStatuses.Ready, Wait = null }; return Task.FromResult(item); });
+        for (var i = 0; i < 3; i++)
+            await SpecialistAgent.EnsureCommitmentAsync(correlation, "Recover", "Reconcile current state", "Critical",
+                new(SourceFingerprint: "changed"), runtime.CreateContext(), default);
+        Assert.Equal(due ? 1 : 0, requeues);
+    }
+
     [Fact]
     public void Implementation_is_selected_before_review_even_when_legacy_assignments_list_review_first()
     {

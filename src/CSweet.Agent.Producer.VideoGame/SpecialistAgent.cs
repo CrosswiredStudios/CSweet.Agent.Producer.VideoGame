@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.19.8";
+    public override string Version => "2.19.9";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -493,7 +493,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         return legacy.Length <= 160 ? legacy : $"producer-commitment:{ProducerPolicyFingerprint.Digest(correlationId)}";
     }
 
-    private static async Task<PersonalTodoItem> EnsureCommitmentAsync(
+    internal static async Task<PersonalTodoItem> EnsureCommitmentAsync(
         string correlationId,
         string title,
         string description,
@@ -507,6 +507,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             x.ArchivedAt is null && string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal));
         if (existing is not null)
         {
+            // Board notifications are wake hints. They must not erase a recorded
+            // retry deadline, even when recovery itself changed the board revision.
+            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow)
+                return existing;
             // A terminal planning conflict must not be requeued on every attention tick.
             // A later recovery generation may reassess it once with new repair logic.
             if (IsSettledPlanningBlock(existing, correlationId) ||

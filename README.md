@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.19.8`
+- Version: `2.19.9`
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
@@ -319,18 +319,20 @@ QA plans/reports are reviewed by the Producer as exact evidence artifacts. One Q
 
 ## Certified release build-readiness
 
-SDK 3.64.2 allows the Producer to assign build-readiness to an updated Technical Director or Developer when no Build Release Engineer is available. The assigned agent must advertise `work.execution.build-readiness.v1` and V2 execution. `DeliveryBuildReadiness.ExecuteAsync` requests the configured certified provider build for every exact release repository candidate, returns durable pending build identities, and verifies successful output provenance. It grants no deployment, publication, or independent product approval authority. Existing project, repository and build grants remain required.
+SDK 3.64.3 allows the Producer to assign build-readiness to an updated Technical Director or Developer when no Build Release Engineer is available. The assigned agent must advertise `work.execution.build-readiness.v1` and V2 execution. `DeliveryBuildReadiness.ExecuteAsync` requests the configured certified provider build for every exact release repository candidate, returns durable pending build identities, and verifies successful output provenance. It grants no deployment, publication, or independent product approval authority. Existing project, repository and build grants remain required.
 
 ## Project compute test delivery
 
 - Prefer a qualified Technical Director's compute test path for game sprint setup, removing the certified-toolchain prerequisite.
 - Keep independent code review and QA gates, and preserve recoverable missing-option waits instead of exhausting task retries.
-- Consume Agent SDK 3.64.2 and WorkManagement.Contracts 3.27.0.
+- Consume Agent SDK 3.64.3 and WorkManagement.Contracts 3.27.0.
 
 Current compute review links are local to the provider machine. Public hosting remains a separate capability. Pending setup and local-link approval preserve durable progress; unknown command outcomes are not automatically repeated.
 
 Producer 2.19.7 uses SDK 3.64.1 and WorkManagement.Contracts 3.27.0 to propose independent manager reviews for QA report artifacts before draft plan creation. Configure, finalize and activate conflicts remain visible staffing waits. The QA proposal policy generation wakes retained recovery commitments after the update; Retry staffing also wakes sprint preflight. Update the platform before this agent; finalized assignments and independent product QA remain required.
 
-## Planning and delivery recovery (2.19.8)
+## Planning and delivery recovery (2.19.9)
 
-An exact manager decision to continue the accepted brief closes its question without another full specialist proposal. Material direction still creates a revision request. Completed proposals are retained with their exact accepted package; routine backlog reviews preserve finalized hierarchical staffing. SDK 3.64.2 refreshes stale Draft scope pins and only affected deliveries in place. The updated recovery fingerprint wakes retained staffing commitments. After updating the platform and installed Producer, use the authorized `Retry staffing: updated draft reconciliation` command if an existing preflight remains asleep; authoritative preflight still decides whether a sprint may start.
+Board wake hints respect recorded recovery and sprint preflight retry deadlines, including when a source fingerprint changes. Recovery generations use planning and scope changes instead of generic task revisions. SDK 3.64.3 compares stage assignments independently of database return order. The platform must also connect the execution gateway to GitHost to activate delivery branches. Recorded workflow staffing waits are visible to project health and escalate through manager incident reports.
+
+An exact manager decision to continue the accepted brief closes its question without another full specialist proposal. Material direction still creates a revision request. Completed proposals are retained with their exact accepted package; routine backlog reviews preserve finalized hierarchical staffing. SDK 3.64.3 refreshes stale Draft scope pins and only affected deliveries in place. The updated recovery fingerprint wakes retained staffing commitments. After updating the platform and installed Producer, use the authorized `Retry staffing: updated draft reconciliation` command if an existing preflight remains asleep; authoritative preflight still decides whether a sprint may start.
