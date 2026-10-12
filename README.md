@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.19.9`
+- Version: `2.20.0`
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
@@ -91,7 +91,7 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 3.60.0 and `CSweet.WorkManagement.Contracts` 3.25.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 3.65.0 and `CSweet.WorkManagement.Contracts` 3.25.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -133,7 +133,7 @@ Reimport both agents to enable this protocol; legacy unrefined handoffs are bloc
 
 ## Shared collaboration SDK
 
-Uses CSweet.Agent.SDK 3.60.0 typed document references, explicit coordination read sharing,
+Uses CSweet.Agent.SDK 3.65.0 typed document references, explicit coordination read sharing,
 accepted-revision lookup, and handoff readiness checks. Pitch content and staffing judgment
 remain agent-specific. See the SDK's `docs/collaboration.md` for reusable documentation requests,
 clarification, review, and personal-work dependency waits. The matching C-Sweet host is required
@@ -141,7 +141,7 @@ for sharing at every coordination start; package import alone does not update th
 
 ## Provider queue handling
 
-Uses SDK 3.40.0 for acknowledged LLM waiting, conversation activity, and host-authoritative deadline updates. Deploy the matching C-Sweet AgentHost and reimport this package to enable the private polling protocol.
+Uses SDK 3.65.0 for acknowledged LLM waiting, conversation activity, and host-authoritative deadline updates. Deploy the matching C-Sweet AgentHost and reimport this package to enable the private polling protocol.
 
 ## Hiring kickoff
 
@@ -319,20 +319,24 @@ QA plans/reports are reviewed by the Producer as exact evidence artifacts. One Q
 
 ## Certified release build-readiness
 
-SDK 3.64.3 allows the Producer to assign build-readiness to an updated Technical Director or Developer when no Build Release Engineer is available. The assigned agent must advertise `work.execution.build-readiness.v1` and V2 execution. `DeliveryBuildReadiness.ExecuteAsync` requests the configured certified provider build for every exact release repository candidate, returns durable pending build identities, and verifies successful output provenance. It grants no deployment, publication, or independent product approval authority. Existing project, repository and build grants remain required.
+SDK 3.65.0 allows the Producer to assign build-readiness to an updated Technical Director or Developer when no Build Release Engineer is available. The assigned agent must advertise `work.execution.build-readiness.v1` and V2 execution. `DeliveryBuildReadiness.ExecuteAsync` requests the configured certified provider build for every exact release repository candidate, returns durable pending build identities, and verifies successful output provenance. It grants no deployment, publication, or independent product approval authority. Existing project, repository and build grants remain required.
 
 ## Project compute test delivery
 
 - Prefer a qualified Technical Director's compute test path for game sprint setup, removing the certified-toolchain prerequisite.
 - Keep independent code review and QA gates, and preserve recoverable missing-option waits instead of exhausting task retries.
-- Consume Agent SDK 3.64.3 and WorkManagement.Contracts 3.27.0.
+- Consume Agent SDK 3.65.0 and WorkManagement.Contracts 3.27.0.
 
 Current compute review links are local to the provider machine. Public hosting remains a separate capability. Pending setup and local-link approval preserve durable progress; unknown command outcomes are not automatically repeated.
 
-Producer 2.19.7 uses SDK 3.64.1 and WorkManagement.Contracts 3.27.0 to propose independent manager reviews for QA report artifacts before draft plan creation. Configure, finalize and activate conflicts remain visible staffing waits. The QA proposal policy generation wakes retained recovery commitments after the update; Retry staffing also wakes sprint preflight. Update the platform before this agent; finalized assignments and independent product QA remain required.
+Producer 2.19.7 uses SDK 3.65.0 and WorkManagement.Contracts 3.28.0 to propose independent manager reviews for QA report artifacts before draft plan creation. Configure, finalize and activate conflicts remain visible staffing waits. The QA proposal policy generation wakes retained recovery commitments after the update; Retry staffing also wakes sprint preflight. Update the platform before this agent; finalized assignments and independent product QA remain required.
 
-## Planning and delivery recovery (2.19.9)
+## Planning and delivery recovery (2.20.0)
 
-Board wake hints respect recorded recovery and sprint preflight retry deadlines, including when a source fingerprint changes. Recovery generations use planning and scope changes instead of generic task revisions. SDK 3.64.3 compares stage assignments independently of database return order. The platform must also connect the execution gateway to GitHost to activate delivery branches. Recorded workflow staffing waits are visible to project health and escalate through manager incident reports.
+Board wake hints respect recorded recovery and sprint preflight retry deadlines, including when a source fingerprint changes. Recovery generations use planning and scope changes instead of generic task revisions. SDK 3.65.0 compares stage assignments independently of database return order. The platform must also connect the execution gateway to GitHost to activate delivery branches. Recorded workflow staffing waits are visible to project health and escalate through manager incident reports.
 
-An exact manager decision to continue the accepted brief closes its question without another full specialist proposal. Material direction still creates a revision request. Completed proposals are retained with their exact accepted package; routine backlog reviews preserve finalized hierarchical staffing. SDK 3.64.3 refreshes stale Draft scope pins and only affected deliveries in place. The updated recovery fingerprint wakes retained staffing commitments. After updating the platform and installed Producer, use the authorized `Retry staffing: updated draft reconciliation` command if an existing preflight remains asleep; authoritative preflight still decides whether a sprint may start.
+An exact manager decision to continue the accepted brief closes its question without another full specialist proposal. Material direction still creates a revision request. Completed proposals are retained with their exact accepted package; routine backlog reviews preserve finalized hierarchical staffing. SDK 3.65.0 refreshes stale Draft scope pins and only affected deliveries in place. The updated recovery fingerprint wakes retained staffing commitments. After updating the platform and installed Producer, use the authorized `Retry staffing: updated draft reconciliation` command if an existing preflight remains asleep; authoritative preflight still decides whether a sprint may start.
+
+## Delegation and tracking
+
+SDK 3.65.0 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.

@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "2.19.9",
+  "version": "2.20.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -832,6 +832,78 @@
       "name": "platform.project-approval.read.v1",
       "scope": "organization",
       "purpose": "Read current assigned or submitted project proposals, review outcomes and spending authority."
+    },
+    {
+      "name": "work.delegation.create.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.read.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.respond.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.publish.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delegation.cancel.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.follow.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.unfollow.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.read.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.progress.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.pending.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.tracking.processed.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
+    },
+    {
+      "name": "platform.organization.snapshot.read.v1",
+      "scope": "organization",
+      "purpose": "Use shared SDK delegation, authenticated recipient resolution, canonical work and durable reporting within existing resource authority.",
+      "modelVisible": false
     }
   ],
   "events": {
@@ -859,7 +931,9 @@
       "com.csweet.repository.provisioning.changed.v1",
       "com.csweet.project-health.review-due.v1",
       "com.csweet.management.incident.changed.v1",
-      "com.csweet.project-approval.decided.v1"
+      "com.csweet.project-approval.decided.v1",
+      "com.csweet.work.delegation.received.v1",
+      "com.csweet.work.tracking.changed.v1"
     ]
   },
   "configuration": [
