@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.20.0`
+- Version: `2.20.2`
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run.v1`
@@ -338,5 +338,7 @@ Board wake hints respect recorded recovery and sprint preflight retry deadlines,
 An exact manager decision to continue the accepted brief closes its question without another full specialist proposal. Material direction still creates a revision request. Completed proposals are retained with their exact accepted package; routine backlog reviews preserve finalized hierarchical staffing. SDK 3.65.0 refreshes stale Draft scope pins and only affected deliveries in place. The updated recovery fingerprint wakes retained staffing commitments. After updating the platform and installed Producer, use the authorized `Retry staffing: updated draft reconciliation` command if an existing preflight remains asleep; authoritative preflight still decides whether a sprint may start.
 
 ## Delegation and tracking
+
+Producer 2.20.2 re-reads the project roster during staffing-event and attention/reconnect discovery. An eligible Technical Director releases the matching initial hiring wait immediately. Other timed recovery waits, foreign team contexts and different planning fingerprints retain their deadlines. The existing platform requeue endpoint remains authoritative for claims, permissions and revisions.
 
 SDK 3.65.0 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.

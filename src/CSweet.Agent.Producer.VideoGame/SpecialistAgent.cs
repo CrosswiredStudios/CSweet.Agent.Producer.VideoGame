@@ -18,12 +18,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string VisionAcknowledgementArtifactType = "video-game.production.game-vision-acknowledgement.v1";
     public override string AgentId => "com.csweet.video-game-producer";
     private const string PlanningCommitmentPrefix = "producer-planning:";
+    internal const string InitialHiringWait = "The initial Technical Director, engineering, and QA coverage proposal is awaiting hiring. Team-board planning starts after technical leadership is hired.";
     internal const string PlanningRecoveryMarker = "Producer planning recovery generation 2";
     private const string EstimationCommitmentPrefix = "producer-estimation:";
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.20.0";
+    public override string Version => "2.20.2";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -471,20 +472,26 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             BuildManagementReport(cycleId, null, state.Payload), cancellationToken);
     }
 
-    private static Task<PersonalTodoItem> EnsurePlanningCommitmentAsync(
+    internal static async Task<PersonalTodoItem> EnsurePlanningCommitmentAsync(
         WorkstreamDetail workstream, Guid teamId, Guid? boardId, Guid sessionId, string handoffDigest,
         AgentRuntimeContext context, CancellationToken cancellationToken)
     {
         var fingerprint = ProducerPolicyFingerprint.ForPlanning(
             workstream.Id, 0, workstream.ProfileDefinitionDigest ?? string.Empty, handoffDigest);
-        return EnsureCommitmentAsync(
+        // Events are only wake hints. Re-read the authorized roster on event and reconnect
+        // discovery before releasing this specific hiring dependency.
+        var roster = (await context.Platform.ReadTeamRosterAsync(
+            new TeamRosterV2Request(teamId, workstream.Id, 1, 100), cancellationToken)).Team;
+        var leadershipReady = roster is { Revision: > 0 } && Guid.TryParse(roster.TeamId, out var currentTeam) &&
+            currentTeam == teamId && SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector) is not null;
+        return await EnsureCommitmentAsync(
             $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
             "Reconcile scope, technical backlog and delivery staffing",
             "Use the accepted production brief to propose the smallest justified delivery team to the Creative Director, reconcile technical feasibility, and publish provenance-bound planning work.",
             "High", new PersonalTodoWorkContext {
                 WorkstreamId = workstream.Id, TeamId = teamId, BoardId = boardId,
                 CoordinationSessionId = sessionId, SourceFingerprint = fingerprint
-            }, context, cancellationToken);
+            }, context, cancellationToken, leadershipReady);
     }
 
     internal static string CommitmentIdempotencyKey(string correlationId)
@@ -500,7 +507,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         string priority,
         PersonalTodoWorkContext workContext,
         AgentRuntimeContext context,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool hiringDependencyReady = false)
     {
         var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
         var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
@@ -509,7 +517,14 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         {
             // Board notifications are wake hints. They must not erase a recorded
             // retry deadline, even when recovery itself changed the board revision.
-            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow)
+            var hiringCleared = hiringDependencyReady &&
+                correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
+                existing.Status == PersonalTodoStatuses.Running && existing.Wait?.Reason == InitialHiringWait &&
+                existing.WorkContext is { } existingContext &&
+                existingContext.WorkstreamId == workContext.WorkstreamId && workContext.WorkstreamId.HasValue &&
+                existingContext.TeamId == workContext.TeamId && workContext.TeamId.HasValue &&
+                existingContext.SourceFingerprint == workContext.SourceFingerprint;
+            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared)
                 return existing;
             // A terminal planning conflict must not be requeued on every attention tick.
             // A later recovery generation may reassess it once with new repair logic.
@@ -620,7 +635,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             await ProposeCoverageAsync(workstreamId, source.BoardId, roster,
                 InitialDeliveryRequirements(), context, cancellationToken, handoff.RevisionDigest);
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                "The initial Technical Director, engineering, and QA coverage proposal is awaiting hiring. Team-board planning starts after technical leadership is hired.");
+                InitialHiringWait);
         }
 
         var boardId = source.BoardId ?? (await EnsureProductionBoardAsync(workstream, teamId, context, cancellationToken)).Id;

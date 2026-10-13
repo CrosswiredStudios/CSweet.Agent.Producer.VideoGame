@@ -525,10 +525,8 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
         SpecialistDelivery delivery) =>
         new(assignment.StageExecutionId, assignment.AttemptId, WorkExecutionDispositions.Completed,
             "completed", delivery.Summary,
-            JsonSerializer.SerializeToElement(new
-            {
-                delivery.ArtifactId, delivery.RevisionId, delivery.Sha256, delivery.RemainingRisks
-            }),
+            new WorkArtifactDelivery(delivery.ArtifactId, delivery.RevisionId, delivery.Sha256)
+            { RemainingRisks = delivery.RemainingRisks }.ToOutput(),
             [new WorkExecutionEvidence("ArtifactRevision", delivery.ArtifactId.ToString("D"),
                 delivery.RevisionId.ToString("D"), "application/json")], []);
 
