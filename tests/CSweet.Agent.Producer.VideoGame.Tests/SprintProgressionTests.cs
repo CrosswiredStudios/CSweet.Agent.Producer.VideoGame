@@ -19,7 +19,11 @@ public sealed class SprintProgressionTests
             WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([Sprint(board, 1, "Active")]));
         // No roster, estimation, QA or mutation capabilities exist in this runtime.
         var result = await new SpecialistAgent().HandlePersonalTodoAsync(commitment, runtime.CreateContext(), default);
-        Assert.Equal(PersonalTodoResult.WaitingUntil(result.NextReviewAt!.Value,
+        var reviewAt = Assert.IsType<DateTimeOffset>(typeof(PersonalTodoResult)
+            .GetProperty("NextReviewAt", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!
+            .GetValue(result));
+        Assert.True(reviewAt > DateTimeOffset.UtcNow);
+        Assert.Equal(PersonalTodoResult.WaitingUntil(reviewAt,
             "Waiting for the active sprint to finish before preparing its successor."), result);
     }
 
