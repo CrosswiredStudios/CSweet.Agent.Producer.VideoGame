@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.20.2";
+    public override string Version => "2.20.3";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -307,8 +307,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, cancellationToken);
             if (!sprints.Any(x => x.Status.Equals("Active", StringComparison.OrdinalIgnoreCase)))
             {
-                var planned = sprints.Where(x => x.Status.Equals("Planned", StringComparison.OrdinalIgnoreCase))
-                    .OrderBy(x => x.Sequence).ThenBy(x => x.StartsAt).FirstOrDefault();
+                var planned = PlannedSprint(sprints);
                 if (planned is not null && planned.CapacityPoints > 0 && (await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken)).Items.Any(x => x.SprintId == planned.Id))
                 {
                     var planningRevision = (await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken))
@@ -328,18 +327,19 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                         },
                         context, cancellationToken);
                 }
-                if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
+                if (!(planned?.CapacityPoints > 0) &&
+                         accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
                          !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest) && planningCycle.OutstandingAuthorityQuestions.Count == 0)
                 {
                     var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
                     var candidateExists = detail.Items.Any(x =>
-                        x.ExecutionMode == WorkItemExecutionModes.Executable && (x.SprintId is null || sprints.Any(s => s.Id == x.SprintId && s.Status == "Planned")) &&
+                        IsSprintCandidate(x, sprints) &&
                         HasStaffedExecution(x) && x.ProposalProvenance is not null);
                     if (candidateExists)
                     {
-                        var nextSequence = sprints.Select(x => x.Sequence ?? 0).DefaultIfEmpty().Max() + 1;
+                        var nextSequence = PlanningSprintSequence(sprints);
                         _ = await EnsureCommitmentAsync(
-                            $"{EstimationCommitmentPrefix}{board.Id:N}:{planningCycle.ReconciledDigest}:{nextSequence}",
+                            SprintEstimationCorrelation(board.Id, planningCycle.ReconciledDigest, nextSequence),
                             $"Prepare candidate scope for Production Sprint {nextSequence}",
                             "Refresh role-owned estimates and capacity, obtain QA readiness evidence, and pull only a capacity-bounded dependency-consistent scope to Ready.",
                             WorkPriorities.Critical,
@@ -798,8 +798,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 HasStaffedExecution(x) && (questions.Count == 0 ||
                     x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike)))
         {
+            var estimationSprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
             _ = await EnsureCommitmentAsync(
-                $"{EstimationCommitmentPrefix}{boardId:N}:{reconciledDigest}:1",
+                SprintEstimationCorrelation(boardId, reconciledDigest, PlanningSprintSequence(estimationSprints)),
                 "Collect estimates and QA sprint-readiness evidence",
                 questions.Count == 0
                     ? "Collect role-owned estimates and capacity for the reconciled executable scope, obtain QA readiness evidence, pull eligible leaves to Ready, and create the bounded planned sprint."
@@ -823,6 +824,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             source.BoardId is not { } boardId || string.IsNullOrWhiteSpace(source.SourceFingerprint))
             return PersonalTodoResult.Blocked("The estimation commitment is missing authoritative workstream, team, board, or planning-digest context.");
 
+        var planningSprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
+        if (planningSprints.Any(x => x.Status == "Active"))
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "Waiting for the active sprint to finish before preparing its successor.");
+        var sequence = PlanningSprintSequence(planningSprints);
+
         var rosterResponse = await context.Platform.ReadTeamRosterAsync(
             new TeamRosterV2Request(teamId, workstreamId, 1, 100), cancellationToken);
         var roster = rosterResponse.Team;
@@ -836,9 +843,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var discoveryOnly = currentCycle.OutstandingAuthorityQuestions.Count > 0;
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
-        var plannedSprints = (await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken)).Where(x => x.Status == "Planned").Select(x => x.Id).ToHashSet();
-        var candidates = board.Items.Where(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                (x.SprintId is null || plannedSprints.Contains(x.SprintId.Value)) && x.ProposalProvenance is not null &&
+        var candidates = board.Items.Where(x => IsSprintCandidate(x, planningSprints) &&
                 (!discoveryOnly || x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike))
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
         if (candidates.Count == 0)
@@ -862,7 +867,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (teammate is null)
                 return PersonalTodoResult.Blocked($"The selected {group.Key} installation is no longer on the current roster.");
             var requestFingerprint = ProducerPolicyFingerprint.Digest(string.Join("|", boardId, group.Key,
-                planningRevision, planningDigest, string.Join(",", group.Select(x => x.Id).OrderBy(x => x))));
+                sequence, planningRevision, planningDigest, string.Join(",", group.Select(x => x.Id).OrderBy(x => x))));
             var estimationCandidates = group.Select(ToSprintCandidate).OrderBy(x => x.WorkItemId).ToList();
             var estimateRequest = new GameRoleEstimateCapacityRequestV1(boardId, group.Key,
                 planningRevision, planningDigest, estimationCandidates, requestFingerprint);
@@ -926,7 +931,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var qa = SelectRoleMember(roster, VideoGameRoleKeys.QualityAssurance);
         if (qa is null)
             return PersonalTodoResult.Blocked("QA is required before executable work may move to Ready.");
-        var qaFingerprint = ProducerPolicyFingerprint.Digest(string.Join("|", boardId, planningRevision,
+        var qaFingerprint = ProducerPolicyFingerprint.Digest(string.Join("|", boardId, sequence, planningRevision,
             planningDigest, string.Join(",", selectedCandidates.Select(x => x.Id).OrderBy(x => x)),
             string.Join(",", selectedCandidates.Select(x => x.EstimateProvenance?.SourceDigest).OrderBy(x => x))));
         var qaRequest = new GameQaSprintReadinessRequestV1(boardId, planningRevision, planningDigest,
@@ -954,6 +959,19 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var readyColumn = board.Columns.SingleOrDefault(x => string.Equals(x.Name, "Ready", StringComparison.OrdinalIgnoreCase));
         if (readyColumn is null)
             return PersonalTodoResult.Blocked("The pinned profile does not expose a Ready column.");
+
+        var sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
+        if (sprints.Any(x => x.Status == "Active") || PlanningSprintSequence(sprints) != sequence)
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "The sprint sequence changed during readiness review; re-read current scope before committing work.");
+        var sprint = PlannedSprint(sprints);
+        if (sprint is null)
+            sprint = await context.Platform.Work.CreateSprintAsync(new CreateWorkSprintRequest(boardId,
+                $"Production Sprint {sequence}", $"Deliver reconciled planning package {planningDigest}.",
+                DateTimeOffset.UtcNow.Date, DateTimeOffset.UtcNow.Date.AddDays(14),
+                SprintCreationKey(boardId, planningDigest, sequence)) { Sequence = sequence }, cancellationToken);
+        if (sprint.Status != "Planned" || sprint.Sequence is { } returnedSequence && returnedSequence != sequence)
+            return PersonalTodoResult.Blocked("Sprint creation returned a historical or conflicting sprint; no candidate scope was changed.");
         foreach (var candidate in selectedCandidates)
         {
             var current = (await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken)).Items.Single(x => x.Id == candidate.Id);
@@ -970,16 +988,6 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             }, cancellationToken);
         }
 
-        var sprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
-        var sprint = sprints.Where(x => x.Status == "Planned").OrderBy(x => x.Sequence).FirstOrDefault();
-        if (sprint is null)
-        {
-            var sequence = sprints.Select(x => x.Sequence ?? 0).DefaultIfEmpty().Max() + 1;
-            sprint = await context.Platform.Work.CreateSprintAsync(new CreateWorkSprintRequest(boardId,
-                $"Production Sprint {sequence}", $"Deliver reconciled planning package {planningDigest}.",
-                DateTimeOffset.UtcNow.Date, DateTimeOffset.UtcNow.Date.AddDays(14),
-                $"producer-sprint:{boardId:N}:{planningDigest}") { Sequence = sequence }, cancellationToken);
-        }
         // Tentative draft tickets that cannot be committed return to the unscheduled backlog.
         foreach (var deferred in board.Items.Where(x => x.SprintId == sprint.Id && !selectedCandidates.Any(s => s.Id == x.Id)))
             await context.Platform.Work.SetItemSprintAsync(new SetWorkItemSprintRequest(boardId, deferred.Id, null,
