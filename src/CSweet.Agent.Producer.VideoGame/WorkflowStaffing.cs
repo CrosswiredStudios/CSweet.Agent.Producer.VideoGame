@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent
                 "development" => "software-developer",
                 "specialist-execution" => "game-engineer",
                 _ => throw new InvalidOperationException($"The Producer needs an explicit role mapping for workflow stage '{s.Key}'.")
-            }, ["work.execution.run.v1"], null, true, $"Required by the approved workflow: {s.Name}."))
+            }, ["work.execution.run"], null, true, $"Required by the approved workflow: {s.Name}."))
             .ToArray();
     }
 

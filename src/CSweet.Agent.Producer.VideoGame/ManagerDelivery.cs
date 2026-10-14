@@ -77,11 +77,11 @@ public sealed partial class SpecialistAgent
         var roster = await ReadManagerTeamAsync(teamId, context, ct);
         if (roster is null || roster.LeadEmployeeId != context.Identity.EmployeeId) return (false, "Waiting for the approved team roster.");
         var architect = RoleTaxonomy.SelectAssignment(roster.Members,
-            new WorkAssignmentRequirements("game-technical-director", [], [], ["work.execution.run.v1"]))?.Teammate
-            ?? RoleTaxonomy.SelectAssignment(roster.Members, new WorkAssignmentRequirements("software-architect", [], [], ["work.execution.run.v1"]))?.Teammate;
+            new WorkAssignmentRequirements("game-technical-director", [], [], ["work.execution.run"]))?.Teammate
+            ?? RoleTaxonomy.SelectAssignment(roster.Members, new WorkAssignmentRequirements("software-architect", [], [], ["work.execution.run"]))?.Teammate;
         // This policy uses the software delivery execution contract, including source publication and real tests.
         var developer = RoleTaxonomy.SelectAssignment(roster.Members.Where(x => x.DeclaredRoleKeys.Contains("software-developer")).ToArray(),
-            new WorkAssignmentRequirements("software-developer", [], [], ["work.execution.run.v1", "software-development.implement.v1"]))?.Teammate;
+            new WorkAssignmentRequirements("software-developer", [], [], ["work.execution.run", "software-development.implement.v1"]))?.Teammate;
         if (architect is null || developer is null || architect.EmployeeId == developer.EmployeeId)
             return (false, "Waiting for an approved Technical Director or Software Architect and a Software Developer with delivery execution enabled.");
         var participants = roster.Members.Where(x => x.IsAvailable && Guid.TryParse(x.EmployeeId, out _)).Select(x => Guid.Parse(x.EmployeeId)).ToArray();
@@ -194,9 +194,9 @@ public sealed partial class SpecialistAgent
                 {
                     ArchitectureArtifactDigest = artifact.Digest,
                     DependencyItemIds = (proposed.Dependencies ?? []).Select(key => ids[key]).ToArray(),
-                    DelegationRecommendations = [new("development", "software-developer", ["work.execution.run.v1", "software-development.implement.v1"], null, true, "Implement and validate the ticket."),
-                        new("technical-review", technicalRole, ["work.execution.run.v2"], null, true, "Independently review the exact task patch and story target before integration."),
-                        new("quality", "software-qa", ["work.execution.run.v2"], null, true, "Test the exact story commit produced by task integration.")]
+                    DelegationRecommendations = [new("development", "software-developer", ["work.execution.run", "software-development.implement.v1"], null, true, "Implement and validate the ticket."),
+                        new("technical-review", technicalRole, ["work.execution.run"], null, true, "Independently review the exact task patch and story target before integration."),
+                        new("quality", "software-qa", ["work.execution.run"], null, true, "Test the exact story commit produced by task integration.")]
                 };
                 var ticket = await context.Platform.Work.CreateItemAsync(new(setup.BoardId, proposed.Title, proposed.Description, "Task", "High", ready,
                     story.Id, null, prefix + ":ticket:" + proposed.Key) { TypeKey = WorkItemTypeKeys.ProjectTaskV2, Planning = planning,

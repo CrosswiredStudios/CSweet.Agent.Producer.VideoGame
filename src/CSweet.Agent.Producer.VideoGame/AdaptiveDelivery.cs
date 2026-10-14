@@ -27,13 +27,13 @@ public sealed partial class SpecialistAgent
 
     internal static IReadOnlyList<WorkTechnicalDelegationRecommendation> InitialDeliveryRequirements() =>
     [
-        new("technical-direction", VideoGameRoleKeys.TechnicalDirector, ["work.execution.run.v1"], null, true,
+        new("technical-direction", VideoGameRoleKeys.TechnicalDirector, ["work.execution.run"], null, true,
             "Assess the accepted brief, own technical feasibility, and decompose deliverable work.")
         { PreferredSpecializationKeys = [VideoGameSpecializationKeys.Development] },
-        new("specialist-execution", VideoGameRoleKeys.Engineer, ["work.execution.run.v1"], null, true,
+        new("specialist-execution", VideoGameRoleKeys.Engineer, ["work.execution.run"], null, true,
             "Implement the game and its testable increments from the accepted production brief.")
         { PreferredSpecializationKeys = [VideoGameSpecializationKeys.Development] },
-        new("quality", VideoGameRoleKeys.QualityAssurance, ["work.execution.run.v1"], null, true,
+        new("quality", VideoGameRoleKeys.QualityAssurance, ["work.execution.run"], null, true,
             "Verify playable increments against acceptance criteria and protect release quality.")
     ];
 
@@ -88,7 +88,7 @@ public sealed partial class SpecialistAgent
             roles.Add(new ResourceChangeRole(group.Key, "video-game-team", group.Key,
                 $"Cover {group.Count()} scoped planning/delivery requirement(s): {string.Join("; ", group.Select(x => x.Rationale).Distinct()).Truncate(700)}",
                 1, group.Key == VideoGameRoleKeys.TechnicalDirector ? 1 : 3, "Next planned increment",
-                group.SelectMany(x => x.RequiredCapabilityKeys).Append("work.execution.run.v1").Distinct().ToList(),
+                group.SelectMany(x => x.RequiredCapabilityKeys).Append("work.execution.run").Distinct().ToList(),
                 false, producerId, null)
             {
                 TeamId = Guid.Parse(roster.TeamId), RoleCategoryKey = RoleTaxonomy.CoreRoleKey(group.Key),
@@ -159,7 +159,7 @@ public sealed partial class SpecialistAgent
             requirementsByStage[recommendation.StageKey] = new WorkAssignmentRequirements(
                 recommendation.RequiredRoleKey, recommendation.RequiredSpecializationKeys,
                 recommendation.PreferredSpecializationKeys, item.Delivery?.DeliveryPlanId is not null
-                    ? recommendation.RequiredCapabilityKeys.Concat([WorkManagementCapabilityNames.ExecutionRunV2]).Distinct().ToArray()
+                    ? recommendation.RequiredCapabilityKeys.Concat([WorkManagementCapabilityNames.ExecutionRun]).Distinct().ToArray()
                     : recommendation.RequiredCapabilityKeys);
         foreach (var recommendation in workflowRequirements ?? [])
         {

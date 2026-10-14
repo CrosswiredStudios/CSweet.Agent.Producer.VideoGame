@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "2.20.3";
+    public override string Version => "3.0.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -407,9 +407,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
-        if (request.Capability == WorkManagementCapabilityNames.ExecutionRunV1)
+        if (request.Capability == WorkManagementCapabilityNames.ExecutionRun)
         {
-            var assignment = DeserializePayload<WorkExecutionAssignmentV1>(request.Arguments);
+            var assignment = DeserializePayload<WorkExecutionAssignment>(request.Arguments);
             if (assignment is not null && ArtifactDeliveryReview.Supports(assignment))
                 return await ArtifactDeliveryReview.ExecuteAsync(assignment, context,
                     context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure an evidence review provider."), Settings.GetString("llmModel"))), cancellationToken);
@@ -1287,7 +1287,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 {
                     var requirements = new WorkAssignmentRequirements(proposal.AccountableRoleKey,
                         proposal.RequiredSpecializationKeys, proposal.PreferredSpecializationKeys,
-                        proposal.RequiredCapabilityKeys.Append("work.execution.run.v1").Distinct(StringComparer.Ordinal).ToList());
+                        proposal.RequiredCapabilityKeys.Append("work.execution.run").Distinct(StringComparer.Ordinal).ToList());
                     var selected = RoleTaxonomy.SelectAssignment(roster.Members, requirements);
                     if (selected is not null && Guid.TryParse(selected.Teammate.EmployeeId, out var userId))
                     {
@@ -1330,7 +1330,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                         DependencyItemIds = proposal.DependencyProposalKeys.Select(key => byKey[key].Id).ToList(),
                         DelegationRecommendations = executable
                             ? [new WorkTechnicalDelegationRecommendation("specialist-execution", proposal.AccountableRoleKey,
-                                proposal.RequiredCapabilityKeys.Append("work.execution.run.v1").Distinct().ToList(), null, true,
+                                proposal.RequiredCapabilityKeys.Append("work.execution.run").Distinct().ToList(), null, true,
                                 "Reconciled Designer / Technical Director proposal.")
                             {
                                 RequiredSpecializationKeys = proposal.RequiredSpecializationKeys,
@@ -1378,7 +1378,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                     .Where(x => x.StageKey != "specialist-execution").ToList();
                 recommendations.Add(new WorkTechnicalDelegationRecommendation("specialist-execution",
                     proposal.AccountableRoleKey,
-                    proposal.RequiredCapabilityKeys.Append("work.execution.run.v1").Distinct().ToList(),
+                    proposal.RequiredCapabilityKeys.Append("work.execution.run").Distinct().ToList(),
                     null, true, "Corrected Technical Director proposal.")
                 {
                     RequiredSpecializationKeys = proposal.RequiredSpecializationKeys,

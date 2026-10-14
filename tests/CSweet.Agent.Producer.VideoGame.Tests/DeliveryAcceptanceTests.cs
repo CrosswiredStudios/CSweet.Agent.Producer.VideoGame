@@ -33,7 +33,7 @@ public sealed class DeliveryAcceptanceTests
             "WaitingForApproval", "High", null, 0, 1, null)
         { Planning = new WorkItemPlanningSpecification(["Movement"], ["Input changes position"], []),
             StageAssignments = roleRepair ? [new("specialist-execution", "AgentInstallation", Guid.NewGuid(), Guid.NewGuid())
-                { Requirements = new("game-technical-director", [], [], ["work.execution.run.v1"]) }] : [] };
+                { Requirements = new("game-technical-director", [], [], ["work.execution.run"]) }] : [] };
         var itemExecution = new WorkItemExecutionResponse(Guid.NewGuid(), item.Id, "GAME-1", "producer-review", 0,
             "WaitingForApproval", null, stages, DateTimeOffset.UtcNow);
         var execution = new WorkSprintExecutionResponse(Guid.NewGuid(), boardId, Guid.NewGuid(), Guid.NewGuid(),

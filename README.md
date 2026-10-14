@@ -53,10 +53,10 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `2.20.3`
+- Version: `3.0.0`
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
-- Provides: `work.execution.run.v1`
+- Provides: `work.execution.run`
 - Activation: always on, with five-minute attention reviews
 - Requested platform/provider capabilities: typed planning, work management, governed staffing, communication, artifacts and brokered model access (see manifest).
 - Event subscriptions: attention, coordination, workstream, workforce, hiring, work-item, sprint, and management changes
@@ -343,4 +343,8 @@ Producer 2.20.2 re-reads the project roster during staffing-event and attention/
 
 SDK 3.65.0 dispatches authenticated delegation before specialist conversation fallback. The manifest requests delegation, work tracking, directory and conversation reads, personal commitments and model interpretation. These declarations require reviewed grants; existing resource permissions and approval rules still apply. The shared SDK owns coordinator reporting and wake recovery.
 
-Producer 2.20.3 gives each sprint a distinct creation identity and estimate/QA cycle. Completion and reconnect discovery recover successor preparation even when an older commitment was completed with the previous sprint's result. Active sprints and terminal tickets are preserved; current QA readiness and platform preflight remain required.
+Producer 3.0.0 gives each sprint a distinct creation identity and estimate/QA cycle. Completion and reconnect discovery recover successor preparation even when an older commitment was completed with the previous sprint's result. Active sprints and terminal tickets are preserved; current QA readiness and platform preflight remain required.
+
+## Execution contract (3.0.0)
+
+Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.0.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.

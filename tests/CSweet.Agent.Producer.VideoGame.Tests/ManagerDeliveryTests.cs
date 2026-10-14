@@ -98,7 +98,7 @@ public sealed class ManagerDeliveryTests
             Project = new(Guid.NewGuid(), "Breakout", "A playable breakout demo", ["Playable"], "concept", "Approved", _producer, null, null, null,
                 "video-game-manager-brief.v1", 3, null, "profile-digest", 2);
             AgentTeammate Member(Guid person, Guid installation, string role) => new(person.ToString(), role, "Agent", null, null, "Teammate", "Online")
-                { AgentInstallationId = installation, DeclaredRoleKeys = [role], EffectiveCapabilities = role == "software-developer" ? ["work.execution.run.v1", "work.execution.run.v2", "software-development.implement.v1"] : ["work.execution.run.v1", "work.execution.run.v2"], RuntimeEligibility = "Eligible" };
+                { AgentInstallationId = installation, DeclaredRoleKeys = [role], EffectiveCapabilities = role == "software-developer" ? ["work.execution.run", "software-development.implement.v1"] : ["work.execution.run"], RuntimeEligibility = "Eligible" };
             _roster = new(_team.ToString(), "demo", "Demo", 1, _producer.ToString(), "Gabriel",
                 [Member(_producer, _installation, "game-producer"), Member(_architect, _architectInstallation, technicalRole), Member(Developer, _developerInstallation, "software-developer"), Member(_qa, _qaInstallation, "software-qa")], [], 4, false);
             var runtime = new AgentTestRuntime()

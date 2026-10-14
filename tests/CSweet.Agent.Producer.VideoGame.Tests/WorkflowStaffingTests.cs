@@ -39,7 +39,7 @@ public sealed class WorkflowStaffingTests
         var ticket = JsonSerializer.Deserialize<WorkItem>("{}")! with
         {
             StageAssignments = [new("technical-review", "AgentInstallation", Guid.Parse(author.EmployeeId), author.AgentInstallationId)
-                { Requirements = new("game-technical-director", [], [], ["work.execution.run.v1"]) }]
+                { Requirements = new("game-technical-director", [], [], ["work.execution.run"]) }]
         };
         var roster = new AgentTeamContext(Guid.NewGuid().ToString(), "Game", "Game", 1, "", "", [author, reviewer, qa], [], 3, false);
         var assignments = SpecialistAgent.RefreshAssignments(ticket, roster, "profile", SpecialistAgent.WorkflowRequirements(Policy()));
@@ -61,7 +61,7 @@ public sealed class WorkflowStaffingTests
         var policy = Policy();
         var dev = new WorkStageAssignment("specialist-execution", "AgentInstallation", Guid.Parse(developer.EmployeeId), developer.AgentInstallationId)
         {
-            Requirements = new("game-engineer", [], [], ["work.execution.run.v1"]),
+            Requirements = new("game-engineer", [], [], ["work.execution.run"]),
             SelectionEvidence = new(developer.AgentInstallationId!.Value, 1, "profile", [], "original", now)
         };
         var ticket = new WorkItem(Guid.NewGuid(), boardId, null, sprintId, "Task", "Spike", "Approved scope", "Blocked", "High", null, 0, 7, null)
@@ -142,7 +142,7 @@ public sealed class WorkflowStaffingTests
         var story = epic with { Id = Guid.NewGuid(), ParentItemId = epic.Id, Kind = "Story" };
         var task = story with { Id = Guid.NewGuid(), ParentItemId = story.Id, Kind = "Task", Title = "Product spike",
             ExecutionMode = WorkItemExecutionModes.Executable, Planning = new(["Scope"], ["Accepted"]) { DeliveryKind = "Artifact" } };
-        var developer = Member("game-engineer") with { EffectiveCapabilities = [WorkManagementCapabilityNames.ExecutionRunV2], IsAvailable = true };
+        var developer = Member("game-engineer") with { EffectiveCapabilities = [WorkManagementCapabilityNames.ExecutionRun], IsAvailable = true };
         var roster = new AgentTeamContext(Guid.NewGuid().ToString(), "Game", "Game", 1, manager.ToString(), "Producer", [developer], [], 1, false);
         var runtime = new AgentTestRuntime()
             .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
@@ -169,5 +169,5 @@ public sealed class WorkflowStaffingTests
     private static WorkStageExecutionResponse Stage(string key, string status, int attempts) =>
         new(Guid.NewGuid(), key, "AgentExecution", 0, status, "AgentInstallation", null, null, null, attempts, null, null, null, null, DateTimeOffset.UtcNow);
     private static AgentTeammate Member(string role) => new(Guid.NewGuid().ToString(), role, "Agent", role, role, "Peer", "Online")
-    { AgentInstallationId = Guid.NewGuid(), RuntimeEligibility = "Eligible", DeclaredRoleKeys = [role], EffectiveCapabilities = ["work.execution.run.v1"] };
+    { AgentInstallationId = Guid.NewGuid(), RuntimeEligibility = "Eligible", DeclaredRoleKeys = [role], EffectiveCapabilities = ["work.execution.run"] };
 }

@@ -213,13 +213,13 @@ public sealed partial class SpecialistAgent
                 x.Title.Trim()[..Math.Min(x.Title.Trim().Length, 256)],
                 x.Purpose.Trim()[..Math.Min(x.Purpose.Trim().Length, 2048)],
                 1, Math.Clamp(x.Priority, 1, 100), "Next planned increment",
-                RoleTaxonomy.CoreRoleKey(x.RoleKey) == "software-developer" ? ["work.execution.run.v2", "software-development.implement.v1"] : ["work.execution.run.v2"], false, producerId, null)
+                RoleTaxonomy.CoreRoleKey(x.RoleKey) == "software-developer" ? ["work.execution.run", "software-development.implement.v1"] : ["work.execution.run"], false, producerId, null)
             { RoleCategoryKey = RoleTaxonomy.CoreRoleKey(x.RoleKey) }).ToList();
         if (roles.Count == 0)
             throw new PlatformCapabilityException(PlatformCapabilities.ResourceChangePropose,
                 PlatformCapabilityErrorCode.ValidationFailed, "The suggested roles did not match available game roles.");
         if (!roles.Any(x => RoleTaxonomy.CoreRoleKey(x.RoleKey) == "software-qa"))
-            roles.Add(new ResourceChangeRole("software-qa", "game-delivery", "Software QA", "Every task requires independent QA, including artifact delivery and aggregate regression.", 1, 100, "Next planned increment", ["work.execution.run.v2"], false, producerId, null) { RoleCategoryKey = "software-qa" });
+            roles.Add(new ResourceChangeRole("software-qa", "game-delivery", "Software QA", "Every task requires independent QA, including artifact delivery and aggregate regression.", 1, 100, "Next planned increment", ["work.execution.run"], false, producerId, null) { RoleCategoryKey = "software-qa" });
         var teamName = string.IsNullOrWhiteSpace(plan.ProjectName)
             ? "Game delivery team" : plan.ProjectName.Trim() + " team";
         if (teamName.Length > 160) teamName = teamName[..160];

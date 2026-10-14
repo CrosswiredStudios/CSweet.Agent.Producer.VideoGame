@@ -16,7 +16,7 @@ public sealed class AdaptiveDeliveryTests
         Assert.All(requirements, requirement =>
         {
             Assert.True(requirement.SpecialistRequired);
-            Assert.Contains("work.execution.run.v1", requirement.RequiredCapabilityKeys);
+            Assert.Contains("work.execution.run", requirement.RequiredCapabilityKeys);
             Assert.False(string.IsNullOrWhiteSpace(requirement.Rationale));
         });
     }
@@ -120,7 +120,7 @@ public sealed class AdaptiveDeliveryTests
     {
         var item = Item(true);
         var qaPlan = new WorkTechnicalDelegationRecommendation("quality", "game-quality-assurance",
-            ["work.execution.run.v1"], null, true, "Validate the candidate independently");
+            ["work.execution.run"], null, true, "Validate the candidate independently");
         item = item with { Planning = item.Planning! with { DelegationRecommendations = [qaPlan] } };
         Assert.Equal("quality", Assert.Single(SpecialistAgent.MissingDelegations(item)).StageKey);
         Assert.Empty(SpecialistAgent.EligibleCandidateScope([item], [item]));
@@ -166,7 +166,7 @@ public sealed class AdaptiveDeliveryTests
             Planning = new WorkItemPlanningSpecification(["Movement"], ["Input changes position"], []) { DependencyItemIds = dependencies },
             StageAssignments = assigned ? [new WorkStageAssignment("specialist-execution", "AgentInstallation", Guid.NewGuid(), installation)
             {
-                Requirements = new("game-engineer", ["gameplay-programming"], [], ["work.execution.run.v1"]),
+                Requirements = new("game-engineer", ["gameplay-programming"], [], ["work.execution.run"]),
                 SelectionEvidence = new(installation, 1, "profile", ["gameplay-programming"], "selection", DateTimeOffset.UtcNow)
             }] : []
         };

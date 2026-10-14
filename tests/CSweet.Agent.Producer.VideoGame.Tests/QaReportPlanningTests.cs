@@ -81,7 +81,7 @@ public sealed class QaReportPlanningTests
         var manager = Guid.NewGuid(); var boardId = Guid.NewGuid(); var project = Guid.NewGuid();
         AgentTeammate Member(string role, Guid? employee = null) => new((employee ?? Guid.NewGuid()).ToString(), role, "Agent", role, role, "Peer", "Online") {
             AgentInstallationId = Guid.NewGuid(), RuntimeEligibility = "Eligible", IsAvailable = true,
-            DeclaredRoleKeys = [role], EffectiveCapabilities = [WorkManagementCapabilityNames.ExecutionRunV2] };
+            DeclaredRoleKeys = [role], EffectiveCapabilities = [WorkManagementCapabilityNames.ExecutionRun] };
         var producer = Member("manager", manager); var qa = Member("game-quality-assurance"); var td = Member("game-technical-director");
         var roster = new AgentTeamContext(Guid.NewGuid().ToString(), "Game", "Game", 1, manager.ToString(), "Producer", [producer, qa, td], [], 3, false);
         var board = new WorkBoardSummary(boardId, "GAME", "Game", false, false, 1, []) {

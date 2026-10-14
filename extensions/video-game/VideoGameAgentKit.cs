@@ -42,13 +42,13 @@ public static class ProjectStateKeys
 
 public static class SpecialistAssignmentValidator
 {
-    public static WorkExecutionInputV1 Validate(WorkExecutionAssignmentV1 assignment, string expectedRoleKey)
+    public static WorkExecutionInputV1 Validate(WorkExecutionAssignment assignment, string expectedRoleKey)
     {
         ArgumentNullException.ThrowIfNull(assignment);
-        if (assignment.SprintExecutionId == Guid.Empty || assignment.ItemExecutionId == Guid.Empty ||
+        if (assignment.TaskSprintExecutionId == Guid.Empty || assignment.ExecutionId == Guid.Empty ||
             assignment.StageExecutionId == Guid.Empty || assignment.AttemptId == Guid.Empty ||
             assignment.OrganizationId == Guid.Empty || assignment.BoardId == Guid.Empty ||
-            assignment.SprintId == Guid.Empty || assignment.ItemId == Guid.Empty)
+            assignment.TaskSprintId == Guid.Empty || assignment.TaskItemId == Guid.Empty)
             throw new ArgumentException("Execution requires authoritative sprint, item, stage, attempt, organization, and board identity.");
         if (assignment.AssignmentRevision < 1 || assignment.Traversal < 1 || assignment.Attempt < 1)
             throw new ArgumentException("Assignment revision, traversal, and attempt must be positive.");
@@ -71,7 +71,7 @@ public static class SpecialistAssignmentValidator
         if (!string.Equals(requirements.RequiredRoleKey, expectedRoleKey, StringComparison.Ordinal) ||
             selection.AgentInstallationId == Guid.Empty || selection.TeamRosterRevision < 1 ||
             !IsSha256(selection.ProfileDefinitionDigest) || !IsSha256(selection.DecisionFingerprint) ||
-            !(requirements.RequiredCapabilityKeys.Contains("work.execution.run.v1", StringComparer.Ordinal) || requirements.RequiredCapabilityKeys.Contains("work.execution.run.v2", StringComparer.Ordinal)) ||
+            !requirements.RequiredCapabilityKeys.Contains("work.execution.run", StringComparer.Ordinal) ||
             requirements.RequiredSpecializationKeys.Except(selection.MatchedSpecializationKeys, StringComparer.Ordinal).Any())
             throw new UnauthorizedAccessException("The canonical assignment does not prove exact role, skill, and execution eligibility.");
         var package = input.Planning.ArtifactPackageDigest
@@ -132,22 +132,22 @@ public static class SubstantiveOutputValidator
 
 public sealed class SpecialistBoardReporter(PlatformCapabilityClient platform)
 {
-    public Task<WorkItemComment> ProgressAsync(WorkExecutionAssignmentV1 assignment, string summary, CancellationToken token) =>
-        platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.ItemId, summary,
+    public Task<WorkItemComment> ProgressAsync(WorkExecutionAssignment assignment, string summary, CancellationToken token) =>
+        platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.TaskItemId, summary,
             $"stage-progress:{assignment.StageExecutionId:N}:{assignment.AttemptId:N}")
         { Kind = "progress", CausationId = assignment.StageExecutionId.ToString("D") }, token);
 
-    public Task<WorkItemComment> BlockAsync(WorkExecutionAssignmentV1 assignment, string blocker, CancellationToken token) =>
-        platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.ItemId, blocker,
+    public Task<WorkItemComment> BlockAsync(WorkExecutionAssignment assignment, string blocker, CancellationToken token) =>
+        platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.TaskItemId, blocker,
             $"stage-block:{assignment.StageExecutionId:N}:{assignment.AttemptId:N}:{Digest(blocker)}")
         { Kind = "blocker", CausationId = assignment.StageExecutionId.ToString("D") }, token);
 
-    public Task<WorkItemComment> EvidenceAsync(WorkExecutionAssignmentV1 assignment, SpecialistDelivery delivery, CancellationToken token)
+    public Task<WorkItemComment> EvidenceAsync(WorkExecutionAssignment assignment, SpecialistDelivery delivery, CancellationToken token)
     {
         if (delivery.ArtifactId == Guid.Empty || delivery.RevisionId == Guid.Empty || delivery.Evidence.Count == 0 ||
             delivery.Sha256.Length != 64 || delivery.Sha256.Any(character => !Uri.IsHexDigit(character)))
             throw new InvalidOperationException("Completion requires an exact durable artifact revision and attached evidence.");
-        return platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.ItemId, delivery.Summary,
+        return platform.Work.CommentAsync(new CommentOnWorkItemRequest(assignment.BoardId, assignment.TaskItemId, delivery.Summary,
             $"stage-evidence:{assignment.StageExecutionId:N}:{assignment.AttemptId:N}:{delivery.RevisionId:N}")
         { Kind = "evidence", ArtifactDigest = delivery.Sha256, CausationId = assignment.StageExecutionId.ToString("D") }, token);
     }
@@ -195,7 +195,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
     protected abstract string ArtifactTypeKey { get; }
     protected abstract string RolePrompt { get; }
     protected abstract IReadOnlyList<string> RequiredSections { get; }
-    public string PrimaryCapability => WorkManagementCapabilityNames.ExecutionRunV1;
+    public string PrimaryCapability => WorkManagementCapabilityNames.ExecutionRun;
 
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) => builder
         .LlmProvider("llmProviderId", "LLM provider", required: true,
@@ -309,7 +309,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                     [CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.GameDesign,
                      CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.Gameplay],
                     [CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.PrototypeDesign],
-                    [WorkManagementCapabilityNames.ExecutionRunV1], [])
+                    [WorkManagementCapabilityNames.ExecutionRun], [])
                 { ParentProposalKey = "feature-core-player-loop" },
                 new("research-core-player-loop", CrosswiredStudios.VideoGame.Contracts.VideoGameWorkItemTypeKeys.ResearchSpike,
                     "Plan core-loop player validation", "Define a consent-governed playtest that tests comprehension, engagement, failure, and recovery for the approved loop.",
@@ -318,7 +318,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                     [CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.PlaytestPlanning,
                      CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.ConsentGovernance],
                     [CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.ResearchAnalysis],
-                    [WorkManagementCapabilityNames.ExecutionRunV1], ["design-core-player-loop"])
+                    [WorkManagementCapabilityNames.ExecutionRun], ["design-core-player-loop"])
                 { ParentProposalKey = "feature-core-player-loop" }
             };
             var digest = ArtifactPackageDigestCalculator.Calculate(cycle.ApprovedPackageId,
@@ -342,7 +342,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                     [CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.GameplayProgramming,
                      CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.EngineIntegration],
                     [CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.AutomatedTesting],
-                    [WorkManagementCapabilityNames.ExecutionRunV1], ["design-core-player-loop"])
+                    [WorkManagementCapabilityNames.ExecutionRun], ["design-core-player-loop"])
                 { ParentProposalKey = "feature-core-player-loop" },
                 new("qa-core-player-loop", CrosswiredStudios.VideoGame.Contracts.VideoGameWorkItemTypeKeys.Task,
                     "Validate the core-loop prototype", "Validate the runnable prototype against its accepted criteria and produce reproducible defects and regression evidence.",
@@ -352,7 +352,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                      CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.BuildValidation],
                     [CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.RegressionTesting,
                      CrosswiredStudios.VideoGame.Contracts.VideoGameSpecializationKeys.AccessibilityTesting],
-                    [WorkManagementCapabilityNames.ExecutionRunV1], ["implement-core-player-loop"])
+                    [WorkManagementCapabilityNames.ExecutionRun], ["implement-core-player-loop"])
                 { ParentProposalKey = "feature-core-player-loop" }
             };
             var digest = ArtifactPackageDigestCalculator.Calculate(cycle.ApprovedPackageId,
@@ -377,10 +377,10 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
         AgentCapabilityRequest request, AgentRuntimeContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (request.Capability != WorkManagementCapabilityNames.ExecutionRunV1)
+        if (request.Capability != WorkManagementCapabilityNames.ExecutionRun)
             return AgentWorkResult.Failure($"Capability '{request.Capability}' is not supported.");
-        WorkExecutionAssignmentV1? assignment;
-        try { assignment = DeserializePayload<WorkExecutionAssignmentV1>(request.Arguments); }
+        WorkExecutionAssignment? assignment;
+        try { assignment = DeserializePayload<WorkExecutionAssignment>(request.Arguments); }
         catch (JsonException) { return AgentWorkResult.Failure("The standard work execution assignment is invalid."); }
         if (assignment is null) return AgentWorkResult.Failure("The standard work execution assignment is required.");
         WorkExecutionInputV1 canonicalInput;
@@ -390,7 +390,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
 
         var workstreamId = canonicalInput.WorkstreamId!.Value;
         var package = canonicalInput.Planning!.ArtifactPackageDigest!;
-        var stateKey = ProjectStateKeys.WorkItem(RoleKey, workstreamId, assignment.ItemId);
+        var stateKey = ProjectStateKeys.WorkItem(RoleKey, workstreamId, assignment.TaskItemId);
         AgentOperatingState<SpecialistOperatingState>? prior;
         try { prior = await context.Platform.ReadOperatingStateAsync<SpecialistOperatingState>(stateKey, cancellationToken); }
         catch (PlatformCapabilityException exception) when (exception.Code == PlatformCapabilityErrorCode.NotFound)
@@ -406,7 +406,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
             current => new SpecialistOperatingState
             {
                 WorkstreamId = workstreamId,
-                WorkItemId = assignment.ItemId,
+                WorkItemId = assignment.TaskItemId,
                 StageExecutionId = assignment.StageExecutionId,
                 AttemptId = assignment.AttemptId,
                 AssignmentRevision = assignment.AssignmentRevision,
@@ -463,7 +463,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
             var artifact = await context.Platform.Artifacts.CreateAsync(new CreateArtifactDocument(
                 $"{RoleKey}: {itemTypeKey}", markdown, ArtifactTypeKey,
                 $"artifact:{assignment.StageExecutionId:N}:{assignment.AttemptId:N}",
-                OriginWorkItemId: assignment.ItemId)
+                OriginWorkItemId: assignment.TaskItemId)
             { WorkstreamId = workstreamId, TeamId = canonicalInput.TeamId }, cancellationToken);
             var revision = artifact.Revisions.Single(x => x.Id == artifact.LatestRevisionId);
             await context.Platform.Artifacts.SubmitAsync(new SubmitArtifactRevision(artifact.Id, revision.Id,
@@ -479,7 +479,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                 current => (current ?? new SpecialistOperatingState()) with
                 {
                     WorkstreamId = workstreamId,
-                    WorkItemId = assignment.ItemId,
+                    WorkItemId = assignment.TaskItemId,
                     StageExecutionId = assignment.StageExecutionId,
                     AttemptId = assignment.AttemptId,
                     AssignmentRevision = assignment.AssignmentRevision,
@@ -502,7 +502,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                 current => (current ?? new SpecialistOperatingState()) with
                 {
                     WorkstreamId = workstreamId,
-                    WorkItemId = assignment.ItemId,
+                    WorkItemId = assignment.TaskItemId,
                     StageExecutionId = assignment.StageExecutionId,
                     AttemptId = assignment.AttemptId,
                     AssignmentRevision = assignment.AssignmentRevision,
@@ -521,7 +521,7 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
     }
 
     private static WorkExecutionOutcomeV1 CompletedOutcome(
-        WorkExecutionAssignmentV1 assignment,
+        WorkExecutionAssignment assignment,
         SpecialistDelivery delivery) =>
         new(assignment.StageExecutionId, assignment.AttemptId, WorkExecutionDispositions.Completed,
             "completed", delivery.Summary,
@@ -565,10 +565,10 @@ public static class VideoGameSpecialistConformance
         var provided = root.GetProperty("provides").EnumerateArray()
             .Select(x => x.GetProperty("name").GetString()).Where(x => x is not null).Select(x => x!).ToHashSet(StringComparer.Ordinal);
         var executionCapabilities = provided.Where(x =>
-            x == WorkManagementCapabilityNames.ExecutionRunV1 || x == WorkManagementCapabilityNames.ExecutionRunV2 ||
+            x == WorkManagementCapabilityNames.ExecutionRun || x == WorkManagementCapabilityNames.ExecutionRun ||
             x.StartsWith("video-game.", StringComparison.Ordinal) && x.EndsWith(".execute.v1", StringComparison.Ordinal))
             .ToHashSet(StringComparer.Ordinal);
-        if (!executionCapabilities.SetEquals([WorkManagementCapabilityNames.ExecutionRunV1, WorkManagementCapabilityNames.ExecutionRunV2]))
+        if (!executionCapabilities.SetEquals([WorkManagementCapabilityNames.ExecutionRun, WorkManagementCapabilityNames.ExecutionRun]))
             errors.Add("Specialists must preserve V1 and provide V2 task execution; legacy role-specific execution capabilities are rejected.");
         var required = root.GetProperty("requires").EnumerateArray()
             .Select(x => x.GetProperty("name").GetString()).Where(x => x is not null).ToHashSet(StringComparer.Ordinal);

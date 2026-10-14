@@ -20,7 +20,7 @@ public sealed class BacklogRevisionRecoveryTests
         var installationId = Guid.NewGuid();
         var oldAssignment = new WorkStageAssignment("specialist-execution", "AgentInstallation", ownerId, installationId)
         {
-            Requirements = new("game-engineer", ["gameplay-programming"], [], ["work.execution.run.v1"]),
+            Requirements = new("game-engineer", ["gameplay-programming"], [], ["work.execution.run"]),
             SelectionEvidence = new(installationId, 1, new string('p', 64), ["gameplay-programming"], "old", DateTimeOffset.UtcNow)
         };
         var oldItem = new WorkItem(Guid.NewGuid(), boardId, null, null, "Task", "[" + key + "] Content", "Build content",
@@ -76,7 +76,7 @@ public sealed class BacklogRevisionRecoveryTests
         var teammate = new AgentTeammate(ownerId.ToString(), "Engineer", "Agent", "game-engineer", "game-engineer", "Peer", "Online")
         {
             AgentInstallationId = installationId, RuntimeEligibility = "Eligible", DeclaredRoleKeys = ["game-engineer"],
-            EffectiveCapabilities = ["work.execution.run.v1"],
+            EffectiveCapabilities = ["work.execution.run"],
             SpecializationKeys = eligible ? ["gameplay-programming", "engine-integration"] : ["gameplay-programming"]
         };
         var roster = new AgentTeamContext(cycle.TeamId.ToString(), "team", "Team", 1, person.OrganizationUserId.ToString(), "Producer", [teammate], [], 1, false);

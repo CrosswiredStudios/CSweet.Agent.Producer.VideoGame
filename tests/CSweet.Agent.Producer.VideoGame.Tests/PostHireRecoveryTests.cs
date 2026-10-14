@@ -23,7 +23,7 @@ public sealed class PostHireRecoveryTests
         {
             StageAssignments = [new WorkStageAssignment("specialist-execution", "AgentInstallation", null, null)
             {
-                Requirements = new WorkAssignmentRequirements("game-engineer", [], [], ["work.execution.run.v1"])
+                Requirements = new WorkAssignmentRequirements("game-engineer", [], [], ["work.execution.run"])
             }]
         };
         var boardRead = false;
@@ -56,7 +56,7 @@ public sealed class PostHireRecoveryTests
         var developer = Member("software-developer");
         var gameRequirement = Assignment(Member("game-engineer"), "specialist-execution", 3) with
         {
-            Requirements = new("game-engineer", [], ["gameplay-programming"], ["work.execution.run.v1"]),
+            Requirements = new("game-engineer", [], ["gameplay-programming"], ["work.execution.run"]),
             SelectionEvidence = null,
             AgentInstallationId = null,
             OrganizationUserId = null
@@ -66,7 +66,7 @@ public sealed class PostHireRecoveryTests
             Planning = new([], ["Playable behavior passes"], [])
             {
                 DelegationRecommendations = [new("specialist-execution", "game-engineer",
-                    ["work.execution.run.v1"], null, true, "Game implementation")
+                    ["work.execution.run"], null, true, "Game implementation")
                 {
                     PreferredSpecializationKeys = ["gameplay-programming"]
                 }]
@@ -86,7 +86,7 @@ public sealed class PostHireRecoveryTests
         var qa = Member("game-quality-assurance");
         var prior = Assignment(engineer, "specialist-execution", 3);
         var item = Item(prior) with { Planning = new([], ["Pass"], []) {
-            DelegationRecommendations = [new("quality", "game-quality-assurance", ["work.execution.run.v1"], null, true, "QA")]
+            DelegationRecommendations = [new("quality", "game-quality-assurance", ["work.execution.run"], null, true, "QA")]
         }};
         var roster = Roster(12, engineer, qa, Member("game-engineer"));
         var assigned = SpecialistAgent.RefreshAssignments(item, roster, "profile");
@@ -178,13 +178,13 @@ public sealed class PostHireRecoveryTests
 
     private static AgentTeammate Member(string role) => new(Guid.NewGuid().ToString(), role, "Agent", role, role, "Peer", "Online") {
         AgentInstallationId = Guid.NewGuid(), RuntimeEligibility = "Eligible", DeclaredRoleKeys = [role],
-        EffectiveCapabilities = ["work.execution.run.v1"]
+        EffectiveCapabilities = ["work.execution.run"]
     };
     private static AgentTeamContext Roster(long revision, params AgentTeammate[] members) =>
         new(Guid.NewGuid().ToString(), "game", "Game", revision, "", "", members, [], members.Length, false);
     private static WorkStageAssignment Assignment(AgentTeammate member, string stage, long revision) =>
         new(stage, "AgentInstallation", Guid.Parse(member.EmployeeId), member.AgentInstallationId) {
-            Requirements = new(member.DeclaredRoleKeys.Single(), [], [], ["work.execution.run.v1"]),
+            Requirements = new(member.DeclaredRoleKeys.Single(), [], [], ["work.execution.run"]),
             SelectionEvidence = new(member.AgentInstallationId!.Value, revision, "profile", [], "old", DateTimeOffset.UtcNow)
         };
     private static WorkItem Item(WorkStageAssignment assignment) =>

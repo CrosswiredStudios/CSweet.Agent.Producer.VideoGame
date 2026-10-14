@@ -266,7 +266,7 @@
       {
         "defaultRelevantSpecializationKeys": [],
         "requiredCapabilityKeys": [
-          "work.execution.run.v1",
+          "work.execution.run",
           "software-development.implement.v1"
         ],
         "roleKey": "software-developer",
@@ -277,7 +277,7 @@
       {
         "defaultRelevantSpecializationKeys": [],
         "requiredCapabilityKeys": [
-          "work.execution.run.v1"
+          "work.execution.run"
         ],
         "roleKey": "software-architect",
         "eligibleWorkItemTypeKeys": [
@@ -287,7 +287,7 @@
       {
         "defaultRelevantSpecializationKeys": [],
         "requiredCapabilityKeys": [
-          "work.execution.run.v1"
+          "work.execution.run"
         ],
         "roleKey": "game-producer",
         "eligibleWorkItemTypeKeys": [
@@ -300,7 +300,7 @@
         ],
         "defaultRelevantSpecializationKeys": [],
         "requiredCapabilityKeys": [
-          "work.execution.run.v1"
+          "work.execution.run"
         ],
         "roleKey": "game-technical-director"
       }
