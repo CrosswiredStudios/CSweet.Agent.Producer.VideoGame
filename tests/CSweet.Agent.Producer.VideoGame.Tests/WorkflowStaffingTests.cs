@@ -159,6 +159,54 @@ public sealed class WorkflowStaffingTests
         Assert.Contains("game-quality-assurance", gap);
     }
 
+    [Fact]
+    public async Task Hierarchical_author_gap_revisits_coverage_without_granting_an_assignment()
+    {
+        var manager = Guid.NewGuid(); var project = Guid.NewGuid(); var boardId = Guid.NewGuid(); var team = Guid.NewGuid();
+        var board = new WorkBoardSummary(boardId, "GAME", "Game", false, false, 1, [])
+            { TeamId = team, WorkstreamId = project, ManagerOrganizationUserId = manager };
+        var policy = Policy() with { Stages = [.. Policy().Stages,
+            new("task-integration", "Integration", "PlatformAction", null, "", "{}", "{}", 60, 1, new())] };
+        var epic = new WorkItem(Guid.NewGuid(), boardId, null, null, "Epic", "Epic", "", "Ready", "High", null, 0, 1, null)
+            { ExecutionMode = WorkItemExecutionModes.Container, Planning = new(["Scope"], ["Accepted"]) };
+        var story = epic with { Id = Guid.NewGuid(), ParentItemId = epic.Id, Kind = "Story" };
+        var task = story with { Id = Guid.NewGuid(), ParentItemId = story.Id, Kind = "Task", Title = "Asset production",
+            ExecutionMode = WorkItemExecutionModes.Executable, Planning = new(["Original assets"], ["Accepted quality"])
+            {
+                DeliveryKind = "Artifact", DelegationRecommendations =
+                    [new("specialist-execution", "game-artist", ["work.execution.run"], null, true, "Accepted asset work")]
+            } };
+        var roster = new AgentTeamContext(team.ToString(), "Game", "Game", 7, manager.ToString(), "Producer", [], [], 0, false);
+        var proposals = new List<ResourceChangeProposalRequest>();
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
+                (_, _) => Task.FromResult(new ConfigureProfileOrchestrationResponse(project, boardId, 1, policy, [])))
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read,
+                (_, _) => Task.FromResult(new WorkBoardDetail(board, [], [epic, story, task])))
+            .RegisterCapability<TeamRepositoryOptionsRequest, IReadOnlyList<TeamRepositoryOption>>(SourceControlCapabilities.TeamRepositoryOptions,
+                (_, _) => Task.FromResult<IReadOnlyList<TeamRepositoryOption>>([]))
+            .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>([]))
+            .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
+                (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
+            .RegisterCapability<ReadWorkFlowMetricsRequest, WorkFlowMetricsReport>(WorkFlowMetricCapabilities.Read,
+                (_, _) => Task.FromResult(JsonSerializer.Deserialize<WorkFlowMetricsReport>("{}")! with { SourceRevision = "current" }))
+            .RegisterCapability<CreateCommunicationChat, CommunicationAction>(CommunicationCapabilities.ChatCreate,
+                (_, _) => Task.FromResult(JsonSerializer.Deserialize<CommunicationAction>("{}")! with
+                    { Chat = JsonSerializer.Deserialize<CommunicationChat>("{}")! with { Id = Guid.NewGuid() } }))
+            .RegisterCapability<ResourceChangeProposalRequest, ResourceChangeRequestResponse>(PlatformCapabilities.ResourceChangePropose,
+                (request, _) => { proposals.Add(request); return Task.FromResult(JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with { Status = "Pending" }); });
+        var context = runtime.CreateContext(identity: new(manager.ToString(), "Producer", null, "Producer", null, [], null, Guid.NewGuid().ToString(), "Director"));
+        var gap = await SpecialistAgent.StaffWorkflowAsync(board, roster, "profile", context, default);
+        Assert.Contains("game-artist", gap);
+        var proposal = Assert.Single(proposals);
+        Assert.Equal("game-artist", Assert.Single(proposal.Roles).RoleKey);
+        Assert.Equal(project, proposal.WorkstreamId);
+        Assert.Equal(team, proposal.TeamId);
+        Assert.Equal("current", Assert.Single(proposal.Evidence).SourceRevision);
+        Assert.Empty(task.StageAssignments);
+    }
+
     internal static WorkOrchestrationPolicyRevision Policy() => JsonSerializer.Deserialize<WorkOrchestrationPolicyRevision>("{}")! with
     {
         RevisionId = Guid.NewGuid(), InitialStageKey = "specialist-execution",
