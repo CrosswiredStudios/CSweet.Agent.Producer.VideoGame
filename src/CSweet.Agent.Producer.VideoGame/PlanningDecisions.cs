@@ -1,11 +1,79 @@
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 using System.Text.Json;
+using CrosswiredStudios.VideoGame.AgentKit;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
+    internal const string PlanningDecisionBlockMarker = "Planning needs specific decision follow-up.";
+
+    private static IEnumerable<DecisionRecord> CurrentPlanningDecisions(IReadOnlyList<string> questions,
+        IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
+        decisions.Where(x => x.WorkstreamId == workstreamId &&
+            x.TypeKey == "video-game.management-direction.v1" && x.AuthorityRuleKey == "work-planning" &&
+            x.SupersededByDecisionId is null && questions.Any(q => q.Trim() == x.Summary.Trim()) &&
+            x.Evidence.Any(e => e.TypeKey == "video-game.production-plan.v1" &&
+                e.Digest == acceptedBriefDigest && e.Status == "Accepted"));
+
+    internal static string PlanningDecisionFingerprint(IReadOnlyList<string> questions,
+        IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
+        ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+            workstreamId, acceptedBriefDigest,
+            questions = questions.Select(x => x.Trim()).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal),
+            decisions = CurrentPlanningDecisions(questions, decisions, workstreamId, acceptedBriefDigest)
+                .OrderBy(x => x.Id).Select(x => new { x.Id, x.Revision, x.Status, x.SelectedOptionId, x.Rationale })
+        }));
+
+    private static async Task<bool> PlanningDecisionsUnchangedAsync(PersonalTodoItem item,
+        PersonalTodoWorkContext source, AgentRuntimeContext context, CancellationToken token)
+    {
+        if (source.WorkstreamId is not { } workstreamId || item.WorkContext?.WorkstreamId != workstreamId ||
+            item.WorkContext.TeamId != source.TeamId || item.WorkContext.SourceFingerprint != source.SourceFingerprint)
+            return false;
+        var state = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
+            ProjectStateKeys.Portfolio("producer"), token);
+        if (state?.Payload.PlanningCycles.TryGetValue(workstreamId, out var cycle) != true || cycle is null ||
+            cycle.PlanningFingerprint != source.SourceFingerprint || cycle.AuthorityDecisionFingerprint is null ||
+            !state.Payload.AcceptedHandoffs.TryGetValue(workstreamId, out var handoff))
+            return false;
+        var decisions = await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: workstreamId), token);
+        return cycle.AuthorityDecisionFingerprint == PlanningDecisionFingerprint(
+            cycle.OutstandingAuthorityQuestions, decisions, workstreamId, handoff.RevisionDigest);
+    }
+
+    internal static string DescribePlanningBlocker(IReadOnlyList<string> questions,
+        IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest, string producerName)
+    {
+        var current = CurrentPlanningDecisions(questions, decisions, workstreamId, acceptedBriefDigest).ToArray();
+        var lines = new List<string> {
+            PlanningDecisionBlockMarker,
+            "Draft backlog and staffing proposal are recorded; the following questions remain unresolved.",
+            $"Production follow-up: {(string.IsNullOrWhiteSpace(producerName) ? "Producer / project manager" : producerName)}."
+        };
+        foreach (var question in questions.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal))
+        {
+            lines.Add($"\nQuestion: {question}");
+            var matches = current.Where(x => x.Summary.Trim() == question).OrderBy(x => x.Id).ToArray();
+            if (matches.Length == 0)
+                lines.Add("Decision record: unavailable. Re-read the project decisions before requesting direction.");
+            foreach (var decision in matches)
+            {
+                lines.Add($"Decision {decision.Id:D}: {decision.Status}; selected option: {decision.SelectedOptionId ?? "none"}.");
+                if (!string.IsNullOrWhiteSpace(decision.Rationale))
+                    lines.Add($"Recorded direction / missing evidence: {decision.Rationale.Trim()}");
+                lines.Add(decision.SelectedOptionId == "request-more-evidence" && decision.Status == DecisionStatuses.Decided
+                    ? "Next action: collect the evidence named in the recorded direction and return it for a follow-up decision. A request for evidence does not approve the affected scope."
+                    : decision.SelectedOptionId == "provide-direction" && decision.Status == DecisionStatuses.Decided
+                        ? "Next action: reconcile the specialist proposal with the recorded direction; retain any question the revised proposal still leaves open."
+                        : "Next action: obtain an authoritative answer to this question, with a rationale tied to the accepted brief.");
+            }
+        }
+        lines.Add("\nA new accepted brief is needed only if the answer changes accepted scope. This planning gate currently limits sprint preparation to research spikes while any authority question remains; the affected work described above may be narrower. Retry after the evidence or decision changes; unchanged reviews retain this blocker.");
+        return string.Join("\n", lines);
+    }
+
     internal static IReadOnlyList<DecisionRequest> PlanningDecisionRequests(Guid workstreamId, Guid boardId,
         string fingerprint, IReadOnlyList<string> questions, ProducerAcceptedHandoff handoff) =>
         questions.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim())
@@ -52,12 +120,13 @@ public sealed partial class SpecialistAgent
                 e.Digest == acceptedBriefDigest && e.Status == "Accepted")))
             .Distinct(StringComparer.Ordinal).ToArray();
 
-    internal static async Task EnsurePlanningDecisionsAsync(Guid workstreamId, Guid boardId,
+    internal static async Task<IReadOnlyList<DecisionRecord>> EnsurePlanningDecisionsAsync(Guid workstreamId, Guid boardId,
         string fingerprint, IReadOnlyList<string> questions, ProducerAcceptedHandoff handoff,
         AgentRuntimeContext context, CancellationToken token)
     {
         var existing = await context.Platform.ReadDecisionsAsync(
             new ReadDecisionRequest(WorkstreamId: workstreamId), token);
+        var current = existing.ToList();
         foreach (var request in PlanningDecisionRequests(workstreamId, boardId, fingerprint,
             UnresolvedPlanningQuestions(questions, existing, workstreamId, handoff.RevisionDigest), handoff))
         {
@@ -66,9 +135,12 @@ public sealed partial class SpecialistAgent
             var legacy = existing.FirstOrDefault(x => x.TypeKey == request.TypeKey &&
                 x.AuthorityRuleKey == "material-management-direction" &&
                 string.Equals(x.Summary, request.Summary, StringComparison.Ordinal));
-            _ = await context.Platform.RequestDecisionAsync(request with {
+            var recorded = await context.Platform.RequestDecisionAsync(request with {
                 SupersedesDecisionId = legacy?.Id
             }, token);
+            current.RemoveAll(x => x.Id == recorded.Id || x.Id == recorded.SupersedesDecisionId);
+            current.Add(recorded);
         }
+        return current;
     }
 }

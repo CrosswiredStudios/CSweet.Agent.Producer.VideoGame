@@ -81,6 +81,7 @@ public sealed record ProducerPlanningCycleState(
 {
     public string? PlanningDirectionsDigest { get; init; }
     public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
+    public string? AuthorityDecisionFingerprint { get; init; }
 }
 
 public static class ProducerPhaseResolver

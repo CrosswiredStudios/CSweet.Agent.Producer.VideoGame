@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "3.0.0";
+    public override string Version => "3.0.1";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -531,6 +531,11 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (IsSettledPlanningBlock(existing, correlationId) ||
                 (correlationId.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) && existing.Status == PersonalTodoStatuses.Blocked))
                 return existing;
+            if (existing.Status == PersonalTodoStatuses.Blocked &&
+                correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
+                existing.BlockReason?.Contains(PlanningDecisionBlockMarker, StringComparison.Ordinal) == true &&
+                await PlanningDecisionsUnchangedAsync(existing, workContext, context, cancellationToken))
+                return existing;
             var waiting = existing.Status == PersonalTodoStatuses.Running && existing.Wait is not null;
             if (existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || waiting)
             {
@@ -735,7 +740,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var questions = UnresolvedPlanningQuestions(
             designerProposal.OpenCreativeDecisions.Concat(technicalProposal.OpenFeasibilityDecisions).ToArray(),
             planningDecisions, workstreamId, handoff.RevisionDigest);
-        await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
+        var currentPlanningDecisions = await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
             handoff, context, cancellationToken);
         if (roleRepair is not null && !roleRepairPublished)
         {
@@ -770,6 +775,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             TechnicalProposalDigest = technicalArtifact!.Digest,
             ReconciledDigest = reconciledDigest,
             OutstandingAuthorityQuestions = questions,
+            AuthorityDecisionFingerprint = PlanningDecisionFingerprint(questions, currentPlanningDecisions,
+                workstreamId, handoff.RevisionDigest),
             UpdatedAt = DateTimeOffset.UtcNow
         }, cancellationToken);
         await BindAvailableWorkAsync(boardId, roster, cycle.ProfileDigest, context, cancellationToken);
@@ -811,7 +818,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         }
         return questions.Count == 0
             ? PersonalTodoResult.Completed($"Published {published} canonical Backlog items from the accepted brief and technical planning evidence.")
-            : PersonalTodoResult.Blocked("Draft backlog and staffing proposal are recorded. Resolve the escalated authority questions in an updated accepted brief before committing this scope.");
+            : PersonalTodoResult.Blocked(DescribePlanningBlocker(questions, currentPlanningDecisions,
+                workstreamId, handoff.RevisionDigest, roster.LeadDisplayName));
     }
 
     private static async Task<PersonalTodoResult> ReconcileEstimatesAndQaReadinessAsync(

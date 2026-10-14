@@ -1,10 +1,102 @@
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
+using System.Text.Json;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class PlanningDecisionTests
 {
+    [Fact]
+    public void BlockerReportsExactEvidenceRequestAndExcludesResolvedOrForeignQuestions()
+    {
+        var stream = Guid.NewGuid();
+        var playtest = PlanningDecision(stream, "Confirm channel, scheduling window and budget for n>=10 playtesters.");
+        var audio = PlanningDecision(stream, "Confirm audio contractor.") with { SelectedOptionId = "continue-current-plan" };
+        var foreign = playtest with { Id = Guid.NewGuid(), WorkstreamId = Guid.NewGuid(), Rationale = "FOREIGN" };
+        var stale = playtest with { Id = Guid.NewGuid(), Evidence = [] , Rationale = "STALE" };
+        var superseded = playtest with { Id = Guid.NewGuid(), SupersededByDecisionId = playtest.Id, Rationale = "SUPERSEDED" };
+        var decisions = new[] { playtest, audio, foreign, stale, superseded };
+        var questions = SpecialistAgent.UnresolvedPlanningQuestions([playtest.Summary, audio.Summary], decisions, stream, "accepted-sha");
+        var blocker = SpecialistAgent.DescribePlanningBlocker(questions, decisions, stream, "accepted-sha", "Gabriel Reyes");
+        Assert.Contains(playtest.Summary, blocker);
+        Assert.Contains(playtest.Id.ToString("D"), blocker);
+        Assert.Contains("Decided; selected option: request-more-evidence", blocker);
+        Assert.Contains(playtest.Rationale!, blocker);
+        Assert.Contains("Production follow-up: Gabriel Reyes", blocker);
+        Assert.Contains("collect the evidence", blocker);
+        Assert.Contains("only if the answer changes accepted scope", blocker);
+        Assert.DoesNotContain(audio.Summary, blocker);
+        Assert.DoesNotContain("FOREIGN", blocker);
+        Assert.DoesNotContain("STALE", blocker);
+        Assert.DoesNotContain("SUPERSEDED", blocker);
+    }
+
+    [Theory]
+    [InlineData("unchanged", 0)]
+    [InlineData("decision-changed", 1)]
+    [InlineData("missing-decision", 1)]
+    [InlineData("foreign-decision", 0)]
+    [InlineData("changed-scope", 1)]
+    [InlineData("legacy-state", 1)]
+    public async Task ReviewsRetainUnchangedDecisionBlocksAndRecoverOnCurrentEvidence(string scenario, int expectedRequeues)
+    {
+        var stream = Guid.NewGuid(); var team = Guid.NewGuid(); var board = Guid.NewGuid();
+        var decision = PlanningDecision(stream, "Confirm external playtest logistics.");
+        string[] questions = [decision.Summary];
+        var cycle = new ProducerPlanningCycleState(stream, board, team, "scope", Guid.NewGuid(), null, null,
+            null, null, "reconciled", DateTimeOffset.UtcNow) {
+            OutstandingAuthorityQuestions = questions,
+            AuthorityDecisionFingerprint = scenario == "legacy-state" ? null :
+                SpecialistAgent.PlanningDecisionFingerprint(questions, [decision], stream, "accepted-sha")
+        };
+        var state = new ProducerOperatingState {
+            PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> { [stream] = cycle },
+            AcceptedHandoffs = new Dictionary<Guid, ProducerAcceptedHandoff> {
+                [stream] = new(stream, Guid.NewGuid(), Guid.NewGuid(), "accepted-sha", "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow)
+            }
+        };
+        var item = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with {
+            Id = Guid.NewGuid(), Revision = 4, Status = PersonalTodoStatuses.Blocked,
+            CorrelationId = "producer-planning:scope",
+            BlockReason = "Repeated issue: " + SpecialistAgent.DescribePlanningBlocker(questions, [decision], stream, "accepted-sha", "Gabriel"),
+            WorkContext = new(WorkstreamId: stream, TeamId: team, SourceFingerprint: "scope")
+        };
+        IReadOnlyList<DecisionRecord> current = scenario switch {
+            "decision-changed" => [decision with { Revision = 3, SelectedOptionId = "continue-current-plan" }],
+            "missing-decision" => [],
+            "foreign-decision" => [decision, decision with { Id = Guid.NewGuid(), WorkstreamId = Guid.NewGuid() }],
+            _ => [decision]
+        };
+        var requeues = 0;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<object, PersonalTodoDirectory>(PersonalTodoCapabilities.Read, (_, _) =>
+                Task.FromResult(new PersonalTodoDirectory([new(Guid.NewGuid(), Guid.NewGuid(), "Producer", null, null, 1, [item])])))
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead, (_, _) =>
+                Task.FromResult(new AgentOperatingStateReadResponse(new(Guid.NewGuid(), "producer", "producer", 1, "Active", new Dictionary<string, string>(), [], "state", [], Guid.Empty,
+                    JsonSerializer.SerializeToElement(state), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))))
+            .RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead, (request, _) => {
+                Assert.Equal(stream, request.WorkstreamId);
+                return Task.FromResult(current);
+            })
+            .RegisterCapability<RequeuePersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Requeue, (request, _) => {
+                Assert.Equal(item.Revision, request.ExpectedRevision);
+                requeues++;
+                item = item with { Status = PersonalTodoStatuses.Ready, Revision = item.Revision + 1 };
+                return Task.FromResult(item);
+            });
+        for (var i = 0; i < 3; i++)
+            await SpecialistAgent.EnsureCommitmentAsync(item.CorrelationId!, "Plan", "Plan", "High",
+                item.WorkContext! with { SourceFingerprint = scenario == "changed-scope" ? "new-scope" : "scope" }, runtime.CreateContext(), default);
+        Assert.Equal(expectedRequeues, requeues);
+    }
+
+    private static DecisionRecord PlanningDecision(Guid stream, string question) => new(
+        Guid.NewGuid(), stream, "video-game.management-direction.v1", question, "work-planning", [], "provide-direction",
+        "request-more-evidence", DecisionStatuses.Decided,
+        "Producer must confirm recruitment channel, scheduling window and compensation budget. Only external playtesting is gated; prototype, content and QA may proceed.",
+        [new("artifact", Guid.NewGuid(), Guid.NewGuid(), "accepted-sha", "video-game.production-plan.v1", "Accepted")],
+        null, null, null, 2, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+
     [Fact]
     public void DistinctQuestionsGetStableDecisionsWithExactAcceptedEvidence()
     {
@@ -64,10 +156,16 @@ public sealed class PlanningDecisionTests
                         request.RecommendedOptionId, null, DecisionStatuses.Pending, null,
                         request.Evidence, null, null, null, 1, now, now));
                 });
-        await SpecialistAgent.EnsurePlanningDecisionsAsync(workstream, board, "cycle",
+        var recorded = await SpecialistAgent.EnsurePlanningDecisionsAsync(workstream, board, "cycle",
             ["Choose browser targets", "Choose browser targets", "Set QA thresholds"], handoff,
             runtime.CreateContext(), default);
         Assert.Equal(2, requested.Count);
+        Assert.Equal(2, recorded.Count);
+        Assert.All(recorded, x => {
+            var blocker = SpecialistAgent.DescribePlanningBlocker([x.Summary], recorded, workstream, "accepted-sha", "Producer");
+            Assert.Contains(x.Id.ToString("D"), blocker);
+            Assert.Contains("Pending; selected option: none", blocker);
+        });
     }
 
     [Fact]

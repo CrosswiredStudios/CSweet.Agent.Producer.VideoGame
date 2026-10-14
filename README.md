@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `3.0.0`
+- Version: `3.0.1`
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run`
@@ -348,3 +348,18 @@ Producer 3.0.0 gives each sprint a distinct creation identity and estimate/QA cy
 ## Execution contract (3.0.0)
 
 Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.0.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.
+
+## Specific planning blockers (3.0.1)
+
+`SpecialistAgent.DescribePlanningBlocker` reports each unresolved question, its current decision ID,
+status, selected option, recorded rationale and next action, with the production lead responsible
+for follow-up. A request for evidence remains unresolved even when its decision status is Decided;
+an exact continuation decision removes only its matching question. A revised accepted brief is
+required only for an actual scope change.
+
+`ProducerPlanningCycleState.AuthorityDecisionFingerprint` retains the exact unresolved-question
+and decision snapshot. `EnsureCommitmentAsync` re-reads authorized current state on existing
+decision events and bounded attention/reconnect reviews, retaining an unchanged planning blocker
+instead of requeueing it every five minutes. A changed decision, missing record, changed scope or
+legacy state permits reassessment; explicit Retry remains available. This does not approve scope
+or change the current research-spikes-only sprint restriction while questions remain open.
