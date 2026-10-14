@@ -6,6 +6,43 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class StaffingRecoveryTests
 {
     [Theory]
+    [InlineData("fresh", 2)]
+    [InlineData("old", 1)]
+    public async Task Stale_metrics_get_one_correction_with_approved_baseline_and_stable_replay(string revision, int expected)
+    {
+        var rejected = Guid.NewGuid();
+        var proposal = JsonSerializer.Deserialize<ResourceChangeProposalRequest>("{}")! with
+        {
+            IdempotencyKey = "producer-coverage:original", TeamId = Guid.NewGuid(), WorkstreamId = Guid.NewGuid(),
+            SupersedesRequestId = Guid.NewGuid(),
+            Roles = [new("game-artist", "Game", "Artist", "Produce assets", 1, 3, "Next increment", ["work.execution.run"], false, null, null)],
+            Evidence = [new("scope-capability-gap", "old", "Named scope"), new("accepted-input", "unchanged", "Accepted brief")]
+        };
+        var response = JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with
+        {
+            Id = rejected, Status = "RevisionRequested",
+            DecisionComment = "Refresh the proposal with the current trusted flow-metrics source revision."
+        };
+        var calls = new List<ResourceChangeProposalRequest>();
+        Task<ResourceChangeRequestResponse> Submit(ResourceChangeProposalRequest request, CancellationToken token)
+        { calls.Add(request); return Task.FromResult(response); }
+        for (var replay = 0; replay < 2; replay++)
+        {
+            await SpecialistAgent.SubmitCoverageAsync(proposal, Guid.NewGuid(), Submit, default, _ => Task.FromResult(revision));
+            Assert.Equal(expected * (replay + 1), calls.Count);
+        }
+        if (expected == 2)
+        {
+            Assert.Equal(JsonSerializer.Serialize(calls[1]), JsonSerializer.Serialize(calls[3]));
+            Assert.Equal(proposal.SupersedesRequestId, calls[1].SupersedesRequestId);
+            Assert.Equal(proposal.Roles, calls[1].Roles);
+            Assert.Equal("fresh", calls[1].Evidence[0].SourceRevision);
+            Assert.Equal(proposal.Evidence[1], calls[1].Evidence[1]);
+            Assert.InRange(calls[1].IdempotencyKey.Length, 1, 160);
+        }
+    }
+
+    [Theory]
     [InlineData("legacy", true, 2)]
     [InlineData("legacy", false, 1)]
     [InlineData("semantic", true, 1)]

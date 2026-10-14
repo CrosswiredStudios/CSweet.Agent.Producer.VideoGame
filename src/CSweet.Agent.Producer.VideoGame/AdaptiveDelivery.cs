@@ -121,7 +121,10 @@ public sealed partial class SpecialistAgent
             AlternativesConsidered = ["Reuse qualified team installations.", "Sequence work before adding parallel capacity.", "Defer optional specialist work."],
             ExpectedEffect = "Unblock the named planning or backlog responsibilities; continue all independently ready work."
         };
-        await SubmitCoverageAsync(proposal, boardId, context.Platform.ProposeResourceChangeAsync, token);
+        await SubmitCoverageAsync(proposal, boardId, context.Platform.ProposeResourceChangeAsync, token,
+            boardId is { } evidenceBoard ? async ct => (await context.Platform.Work.ReadFlowMetricsAsync(
+                new ReadWorkFlowMetricsRequest(evidenceBoard) { WorkstreamId = workstreamId,
+                    TeamId = Guid.Parse(roster.TeamId) }, ct)).SourceRevision : null);
     }
 
     internal static async Task BindAvailableWorkAsync(Guid boardId, AgentTeamContext roster, string profileDigest,

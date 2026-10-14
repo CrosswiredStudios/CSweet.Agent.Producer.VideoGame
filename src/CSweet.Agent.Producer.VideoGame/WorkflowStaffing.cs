@@ -63,6 +63,13 @@ public sealed partial class SpecialistAgent
             }
             catch (DeliveryStaffingException gap)
             {
+                // Hierarchical staffing used to return before coverage reconciliation,
+                // leaving rejected initial proposals untouched forever.
+                var current = await context.Platform.Work.ReadBoardAsync(board.Id, token);
+                var missing = current.Items.Where(t => t.ExecutionMode == WorkItemExecutionModes.Executable &&
+                    t.Status is not ("Done" or "Completed" or "Cancelled"))
+                    .SelectMany(t => t.Planning?.DelegationRecommendations ?? []).ToArray();
+                await ProposeCoverageAsync(project, board.Id, roster, missing, context, token);
                 return gap.Message;
             }
         }

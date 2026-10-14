@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "3.1.0";
+    public override string Version => "3.1.2";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -683,7 +683,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 
         var planningDecisions = await context.Platform.ReadDecisionsAsync(
             new ReadDecisionRequest(WorkstreamId: workstreamId), cancellationToken);
-        var managerDirections = ResolvedPlanningDirections(planningDecisions, workstreamId, handoff.RevisionDigest);
+        IReadOnlyList<string> managerDirections = ResolvedPlanningDirections(planningDecisions, workstreamId, handoff.RevisionDigest)
+            .Concat(await ReadAssetPlanningDirectionsAsync(planningDecisions, workstreamId, context, cancellationToken)).ToArray();
         var directionsDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(managerDirections));
         var reusePrior = roleRepair is null && priorCycle is not null &&
             (priorCycle.PlanningDirectionsDigest == directionsDigest || priorCycle.PlanningDirectionsDigest is null && managerDirections.Count == 0);
