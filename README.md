@@ -53,7 +53,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `3.1.2`
+- Version: `3.1.3`
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run`
@@ -371,3 +371,5 @@ This release uses SDK 4.1.1 `ManagerIncidentCoordinator` for evidence-based inci
 ## Production prerequisite recovery
 
 The Producer carries current, accepted-vision-bound asset strategies into planning, including procedural generation requirements without dropping accepted deliverables. A coverage proposal rejected only for stale flow metrics receives one evidence refresh with stable replay and the same approved staffing baseline. Hierarchical staffing recovery rereads outstanding task coverage and uses the existing governed resource-change path. Office image compatibility remains a platform prerequisite; adding duplicate employees cannot repair an unavailable environment.
+
+Activation defaults to OnDemand. Durable messages, assignments, scheduled duties and attention reviews wake the agent; idle runtimes release their Office slot. Attention wakes require the platform scheduler that supports sleeping OnDemand installations. Existing installations retain their selected activation mode until their schedule is updated.
