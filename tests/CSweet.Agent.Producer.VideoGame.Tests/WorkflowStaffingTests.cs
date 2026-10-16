@@ -79,6 +79,8 @@ public sealed class WorkflowStaffingTests
         var execution = new WorkSprintExecutionResponse(Guid.NewGuid(), boardId, sprintId, policy.RevisionId, manager, "Active", 1, now, now, null, [itemExecution]);
         var finalizations = new List<FinalizeWorkItemDeliveryRequest>();
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (_, _) => Task.FromResult(new AgentOperatingStateReadResponse(null)))
             .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
                 (_, _) => Task.FromResult(new ConfigureProfileOrchestrationResponse(project, boardId, 1, policy, [])))
             .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read,
@@ -145,6 +147,8 @@ public sealed class WorkflowStaffingTests
         var developer = Member("game-engineer") with { EffectiveCapabilities = [WorkManagementCapabilityNames.ExecutionRun], IsAvailable = true };
         var roster = new AgentTeamContext(Guid.NewGuid().ToString(), "Game", "Game", 1, manager.ToString(), "Producer", [developer], [], 1, false);
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (_, _) => Task.FromResult(new AgentOperatingStateReadResponse(null)))
             .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
                 (_, _) => Task.FromResult(new ConfigureProfileOrchestrationResponse(project, boardId, 1, policy, [])))
             .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read,
@@ -179,6 +183,8 @@ public sealed class WorkflowStaffingTests
         var roster = new AgentTeamContext(team.ToString(), "Game", "Game", 7, manager.ToString(), "Producer", [], [], 0, false);
         var proposals = new List<ResourceChangeProposalRequest>();
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (_, _) => Task.FromResult(new AgentOperatingStateReadResponse(null)))
             .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
                 (_, _) => Task.FromResult(new ConfigureProfileOrchestrationResponse(project, boardId, 1, policy, [])))
             .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read,

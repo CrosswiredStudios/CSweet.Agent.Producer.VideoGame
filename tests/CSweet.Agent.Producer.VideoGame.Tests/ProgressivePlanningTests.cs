@@ -1,0 +1,133 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using CrosswiredStudios.VideoGame.Contracts;
+using CSweet.Agent.SDK;
+using CSweet.WorkManagement.Contracts;
+
+namespace CSweet.Agent.Producer.VideoGame.Tests;
+
+public sealed class ProgressivePlanningTests
+{
+    [Fact]
+    public async Task Publish_outline_then_refine_one_increment_and_wait_for_real_aggregate_acceptance()
+    {
+        var f = new Fixture();
+        var first = await f.Advance(null);
+        Assert.Null(first.Blocker); Assert.NotNull(first.Waiting);
+        Assert.Equal(4, f.Items.Count);
+        Assert.All(f.Items, item => Assert.Equal(WorkItemExecutionModes.Container, item.ExecutionMode));
+        Assert.Equal("playable", Assert.Single(f.Starts).Artifact!.Payload.GetProperty("progressivePlanning").GetProperty("storyKey").GetString());
+        var waiting = await f.Advance(first.Progress);
+        Assert.NotNull(waiting.Waiting); Assert.Single(f.Starts); Assert.Equal(4, f.Items.Count);
+
+        f.CompleteRefinement();
+        var refined = await f.Advance(first.Progress);
+        Assert.NotNull(refined.Session); Assert.Null(refined.Blocker);
+        Assert.Equal(new[] { "playable" }, refined.Progress.DetailedStoryKeys);
+        await SpecialistAgent.PublishCanonicalBacklogAsync(f.Cycle.BoardId, f.Roster, f.Cycle, [], f.Refinement!, f.DetailArtifact!,
+            new(f.Cycle, [], [], [], "accepted"), f.Refinement!, f.DetailArtifact!, f.Detail!, f.Runtime.CreateContext(), default);
+        Assert.Equal(6, f.Items.Count);
+        Assert.Single(SpecialistAgent.DetailedIncrementEpicIds(f.Items));
+        var progress = refined.Progress with { ScheduledArtifactDigest = f.DetailArtifact!.Digest };
+        Assert.NotNull((await f.Advance(progress)).Waiting); Assert.Single(f.Starts);
+        for (var i = 0; i < f.Items.Count; i++)
+            if (f.Items[i].ExecutionMode == WorkItemExecutionModes.Executable) f.Items[i] = f.Items[i] with { Status = "Done" };
+        Assert.NotNull((await f.Advance(progress)).Waiting); Assert.Single(f.Starts); // tasks alone cannot bypass aggregate QA
+        var epic = f.Items.Single(x => x.ProposalProvenance?.ProposalItemKey == "prototype");
+        var now = DateTimeOffset.UtcNow;
+        f.Plans.Add(new(Guid.NewGuid(), f.Cycle.WorkstreamId, "Prototype", f.Person.OrganizationUserId, "Active", 1, 1,
+            [epic.Id], [], [], [], now, now));
+        Assert.NotNull((await f.Advance(progress)).Waiting); Assert.Single(f.Starts);
+        f.Plans[0] = f.Plans[0] with { Status = "Completed" };
+        var next = await f.Advance(progress);
+        Assert.Null(next.Blocker); Assert.Equal("remaining", next.Progress.PendingStoryKey); Assert.Equal(2, f.Starts.Count);
+        Assert.Equal(6, f.Items.Count); // future Story has no executable work yet
+    }
+
+    [Fact]
+    public void Scope_is_frozen_and_future_work_or_weakened_criteria_cannot_be_published()
+    {
+        var f = new Fixture(); f.CompleteRefinement();
+        var current = SpecialistAgent.ReadProgressiveEvidence(f.DetailArtifact!)!;
+        SpecialistAgent.ValidateProgressiveProposal(f.Outline, f.Evidence, f.Detail!, current, [], "playable");
+        foreach (var invalid in new[] {
+            f.Detail! with { DeliveryItems = f.Detail!.DeliveryItems.Select(x => x.ProposalKey == "remaining" ? x with { Title = "Reduced scope" } : x).ToArray() },
+            f.Detail! with { DeliveryItems = f.Detail!.DeliveryItems.Select(x => x.ProposalKey == "implementation" ? x with { ParentProposalKey = "remaining" } : x).ToArray() },
+            f.Detail! with { DeliveryItems = f.Detail!.DeliveryItems.Select(x => !SpecialistAgent.IsScopeContainer(x) ? x with { AcceptanceCriteria = new[] { "Weaker" } } : x).ToArray() },
+            f.Detail! with { Cycle = f.Cycle with { ApprovedPackageDigest = "changed" } }
+        }) Assert.Throws<InvalidOperationException>(() => SpecialistAgent.ValidateProgressiveProposal(f.Outline, f.Evidence, invalid, current, [], "playable"));
+        Assert.Null(SpecialistAgent.NextProgressiveStory(f.Outline.DeliveryItems, new HashSet<string> { "playable" }, new HashSet<string>()));
+        Assert.Equal("remaining", SpecialistAgent.NextProgressiveStory(f.Outline.DeliveryItems, new HashSet<string> { "playable" }, new HashSet<string> { "playable" }));
+    }
+
+    private sealed class Fixture
+    {
+        public readonly GameProductionPlanningCycleV1 Cycle;
+        public readonly GameTechnicalDeliveryProposalV1 Outline;
+        public readonly SpecialistAgent.ProgressiveEvidence Evidence;
+        public readonly AgentCoordinationArtifact Artifact;
+        public readonly AgentCoordinationParticipant Person = new(Guid.NewGuid(), Guid.NewGuid(), "Victor", "Technical Director");
+        public readonly AgentTeammate Member;
+        public readonly AgentTeamContext Roster;
+        public readonly AgentCoordinationSession Session;
+        public AgentCoordinationSession? Refinement;
+        public GameTechnicalDeliveryProposalV1? Detail;
+        public AgentCoordinationArtifact? DetailArtifact;
+        public readonly List<WorkItem> Items = [];
+        public readonly List<WorkDeliveryPlanResponse> Plans = [];
+        public readonly List<StartBoardCoordinationRequest> Starts = [];
+        public readonly AgentTestRuntime Runtime;
+        public Fixture()
+        {
+            Cycle = new(Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(), new string('a',64), Guid.NewGuid(), 1, new string('b',64), "concept", "vision", new string('c',64));
+            Member = new(Person.OrganizationUserId.ToString(), "Victor", "Agent", null, null, "Peer", "Online") { AgentInstallationId = Person.AgentInstallationId };
+            Roster = new(Cycle.TeamId.ToString(), "game", "Game", 1, "", "", [], [], 0, false);
+            GameProposedWorkItemV1 Item(string key, string type, string? parent, string[] dependencies) =>
+                new(key, type, key, "Preserved agreed " + key, [key + " independently verified"], "game-technical-director", [], [], [], dependencies) { ParentProposalKey = parent };
+            Outline = new(Cycle, [Item("prototype", VideoGameWorkItemTypeKeys.Milestone, null, []), Item("playable", VideoGameWorkItemTypeKeys.Feature, "prototype", []),
+                Item("final", VideoGameWorkItemTypeKeys.Milestone, null, ["prototype"]), Item("remaining", VideoGameWorkItemTypeKeys.Content, "final", [])], [], [], [], "outline");
+            SpecialistAgent.ProgressiveCoverage[] coverage = [new("document-0:paragraph-0", ["playable"]), new("document-0:paragraph-1", ["remaining"])];
+            var canonical = new { Plan = new { Outline.DeliveryItems, Outline.FeasibilityFindings, Outline.TechnicalConstraints, Outline.OpenFeasibilityDecisions }, Coverage = coverage };
+            var directions = new string('d',64);
+            Evidence = new("Outline", SpecialistAgent.ProgressiveScopeKey(Cycle, directions), Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(canonical))), directions, [], coverage);
+            Artifact = Wrap(Outline, Evidence, "outline-artifact");
+            var now = DateTimeOffset.UtcNow;
+            Session = new(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty, Person, Person, "Plan", "Plan", [], "Completed", 2, 2, null, true, "Complete", now, now, []) { BoardSource = new(Cycle.BoardId) };
+            Runtime = new AgentTestRuntime()
+                .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (_, _) =>
+                    Task.FromResult(new WorkBoardDetail(new(Cycle.BoardId, "GAME", "Game", false, false, 1, []), [], Items)))
+                .RegisterCapability<CreateWorkItemRequest, WorkItem>(WorkItemCapabilities.Create, (r, _) => {
+                    var item = new WorkItem(Guid.NewGuid(), Cycle.BoardId, r.ParentItemId, null, r.Kind, r.Title, r.Description ?? "", "Backlog", "High", null, 0, 1, null)
+                    { ExecutionMode = r.Kind == "Task" ? WorkItemExecutionModes.Executable : WorkItemExecutionModes.Container,
+                        Planning = r.Planning, ProposalProvenance = r.ProposalProvenance, StageAssignments = r.StageAssignments ?? [] };
+                    Items.Add(item); return Task.FromResult(item);
+                })
+                .RegisterCapability<ReviseWorkItemPlanningRequest, WorkItem>(WorkItemCapabilities.RevisePlanning, (r, _) => {
+                    var i = Items.FindIndex(x => x.Id == r.ItemId); var item = Items[i] with { Planning = r.Planning, Description = r.Description ?? "",
+                        ProposalProvenance = r.ProposalProvenance, StageAssignments = r.StageAssignments ?? [] }; Items[i] = item; return Task.FromResult(item);
+                })
+                .RegisterCapability<StartBoardCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationStartBoard, (r, _) => {
+                    Starts.Add(r); Refinement = Session with { Id = Guid.NewGuid(), Status = "Active", Turns = [] }; return Task.FromResult(Refinement);
+                })
+                .RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (_, _) => Task.FromResult(Refinement!))
+                .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>(Plans));
+        }
+        public Task<SpecialistAgent.ProgressiveAdvance> Advance(ProgressivePlanningProgress? progress) => SpecialistAgent.AdvanceProgressivePlanningAsync(
+            Cycle.BoardId, Roster, Cycle, [], Member, Session, Artifact, Outline, progress, Runtime.CreateContext(), default);
+        public void CompleteRefinement()
+        {
+            var story = Outline.DeliveryItems[1];
+            var leaf = story with { ProposalKey = "implementation", WorkItemTypeKey = VideoGameWorkItemTypeKeys.Task, ParentProposalKey = "playable", AccountableRoleKey = "game-engineer" };
+            Detail = Outline with { DeliveryItems = [.. Outline.DeliveryItems, leaf, leaf with { ProposalKey = "qa", AccountableRoleKey = "game-quality-assurance", DependencyProposalKeys = ["implementation"] }] };
+            DetailArtifact = Wrap(Detail, Evidence with { Phase = "Story", DetailedStoryKeys = ["playable"] }, "detail-artifact");
+            Refinement = (Refinement ?? Session) with { Status = "Completed", Turns = [new(Guid.NewGuid(), 1, Person.OrganizationUserId, "complete", "Complete", DateTimeOffset.UtcNow, DetailArtifact)] };
+        }
+        private static AgentCoordinationArtifact Wrap(GameTechnicalDeliveryProposalV1 plan, SpecialistAgent.ProgressiveEvidence evidence, string digest)
+        {
+            var payload = JsonSerializer.SerializeToNode(plan)!.AsObject();
+            payload["progressivePlanning"] = JsonSerializer.SerializeToNode(evidence, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            return new("video-game.production.technical-delivery-proposal.v1", "1.0", "plan", 1, true, JsonSerializer.SerializeToElement(payload), digest);
+        }
+    }
+}

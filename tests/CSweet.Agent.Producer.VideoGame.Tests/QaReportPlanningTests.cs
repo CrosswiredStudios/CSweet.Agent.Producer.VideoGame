@@ -96,6 +96,8 @@ public sealed class QaReportPlanningTests
         var policy = WorkflowStaffingTests.Policy();
         policy = policy with { Stages = [.. policy.Stages, new("task-integration", "Integrate", "PlatformAction", null, "", "{}", "{}", 60, 1, new())] };
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (_, _) => Task.FromResult(new AgentOperatingStateReadResponse(null)))
             .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
                 (_, _) => Task.FromResult(new ConfigureProfileOrchestrationResponse(project, boardId, 1, policy, [])))
             .RegisterCapability<JsonElement, object>(WorkItemCapabilities.Read, (request, ct) => Task.FromResult<object>(

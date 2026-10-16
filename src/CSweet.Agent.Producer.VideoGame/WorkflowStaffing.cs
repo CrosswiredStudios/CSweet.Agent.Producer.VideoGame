@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrosswiredStudios.VideoGame.AgentKit;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 
@@ -57,8 +58,19 @@ public sealed partial class SpecialistAgent
             try
             {
                 await RepairQaReportPlanningAsync(board, context, token);
-                await HierarchicalProjectDelivery.PrepareAsync(project, board.Id, manager, roster,
-                    repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, context, token);
+                var portfolio = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), token);
+                if (portfolio?.Payload.PlanningCycles.TryGetValue(project, out var cycle) == true && cycle.Progressive is not null)
+                {
+                    var accepted = (await context.Platform.Work.ReadDeliveryPlansAsync(new(project), token))
+                        .Where(plan => plan.Status == "Completed").SelectMany(plan => plan.EpicItemIds).ToHashSet();
+                    var increments = DetailedIncrementEpicIds(detail.Items).Where(id => !accepted.Contains(id)).ToArray();
+                    if (increments.Length == 0) return "The scope outline is published; the current increment's executable briefs are pending.";
+                    await HierarchicalProjectDelivery.PrepareIncrementAsync(project, board.Id, manager, roster,
+                        repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, increments, context, token);
+                }
+                else
+                    await HierarchicalProjectDelivery.PrepareAsync(project, board.Id, manager, roster,
+                        repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, context, token);
                 return null;
             }
             catch (DeliveryStaffingException gap)
