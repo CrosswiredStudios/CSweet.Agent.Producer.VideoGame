@@ -42,6 +42,12 @@ public sealed partial class SpecialistAgent
         var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
         if (amend) return await QueueScopeAmendmentAsync(current, item, stage, reason, turnId, context, token);
         if (replan) return await QueueSprintRecoveryAsync(current, item, stage, reason, context, token);
+        if (stage?.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) == true)
+        {
+            var comments = await TicketConversations.Discussion.ReadAsync(current.BoardId, item.WorkItemId, context, token);
+            if (ReplacementDiscussionEscalation(current.BoardId, item, stage, comments) is not null)
+                return $"{item.ItemIdentifier} needs replacement tickets. A plain retry cannot resume the obsolete scope; apply the replacement plan first.";
+        }
         if (stage is null || item.Status is not ("Blocked" or "Failed") ||
             stage.Status is not ("Blocked" or "Failed") || stage.PrincipalKind != "AgentInstallation" ||
             stage.AgentInstallationId is null || stage.AssignmentRevision < 1 || stage.AttemptCount < 1 ||

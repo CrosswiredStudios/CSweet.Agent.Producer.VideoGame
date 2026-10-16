@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "3.1.3";
+    public override string Version => "3.1.4";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -690,7 +690,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             (priorCycle.PlanningDirectionsDigest == directionsDigest || priorCycle.PlanningDirectionsDigest is null && managerDirections.Count == 0);
         var technicalSession = await EnsurePlanningSessionAsync(technicalDirector, boardId, cycle,
             "Technical delivery and decomposition proposal",
-            "Decompose the accepted brief into a lean complete backlog, including containers, technical discovery, implementation, QA and packaging. Justify specialist roles with actual work; do not require a full studio roster. " +
+            TaskSizingDirection + "Decompose the accepted brief into a complete backlog, including containers, technical discovery, implementation, QA and packaging. Justify specialist roles with actual work; do not require a full studio roster. " +
                 (roleRepair is null ? RoleBoundary : RoleRepairObjective(roleRepair)),
             "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken,
             roleRepair is null ? null : RoleRepairContext(roleRepair), reusePrior ? priorCycle?.TechnicalDirectorSessionId : null);
@@ -1119,7 +1119,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 start with {
                     IdempotencyKey = start.IdempotencyKey + ":compact-v1",
                     InitialMessage = message + " The prior technical proposal had malformed JSON in a large deliveryItems array. " +
-                        "Regenerate a complete, compact Epic > Story > Task proposal with no more than 20 items. " +
+                        "Regenerate a complete Epic > Story > Task proposal with concise text; never combine independently deliverable tasks to reduce the count. " +
                         "Preserve every accepted deliverable, including independently testable engineering and QA work; " +
                         "use concise descriptions and return the typed artifact only after validation."
                 });

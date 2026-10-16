@@ -42,10 +42,18 @@ public sealed partial class SpecialistAgent
             !comments.Any(c => c.Id == wait.CommentId && c.Revision == wait.CommentRevision && c.Kind == "discussion.request" &&
                 c.AuthorKind == "AgentInstallation" && c.AuthorSubjectId == stage.AgentInstallationId)) return null;
         var correlation = TicketConversations.Discussion.Correlation(wait.CommentId, wait.CommentRevision);
-        if (!comments.Any(c => c.Kind == "discussion.reply" && c.CausationId == correlation &&
-            c.AuthorKind == "AgentInstallation" && c.AuthorSubjectId == wait.RespondingInstallationId)) return null;
+        var replies = comments.Where(c => c.Kind == "discussion.reply" && c.CausationId == correlation &&
+            c.AuthorKind == "AgentInstallation" && c.AuthorSubjectId == wait.RespondingInstallationId).ToArray();
+        if (replies.Length != 1) return null;
+        var reply = replies[0];
+        // A replacement recommendation or clarification question never releases stale work.
+        var question = comments.Single(c => c.Id == wait.CommentId);
+        var revision = wait.RequiresRevision || question.Body.Contains(TicketConversations.TaskRevisionComments.RequestMarker, StringComparison.Ordinal);
+        if (revision && !TicketConversations.TaskRevisionComments.HasDecision(reply.Body, TicketConversations.TaskRevisionComments.ContinueMarker)) return null;
         return new(boardId, executionId, stage.Id, $"producer-discussion-resume:{stage.Id:N}:{correlation}",
-            "The requested teammate replied on the ticket. Read the discussion and continue the existing assignment; all review and validation requirements remain in force.")
+            revision
+                ? $"Read correction comment {reply.Id:D}, revision {reply.Revision}. It supersedes only the identified implementation guidance. Recheck its assumptions against the current workspace; accepted scope, criteria and independent review remain required."
+                : "The requested teammate replied on the ticket. Read the discussion and continue the existing assignment; all review and validation requirements remain in force.")
             { ExpectedAssignmentRevision = stage.AssignmentRevision };
     }
     /// <summary>Cross-agent convention: a Blocked outcome carrying this diagnostic needs a management decision.</summary>
@@ -68,7 +76,11 @@ public sealed partial class SpecialistAgent
             foreach (var item in execution.Items.Where(x => x.Status is "Blocked" or "Failed"))
             {
                 var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
-                if ((DecisionEscalation(item, stage) ?? DispatchBlockerEscalation(item, stage) ??
+                (string Key, string Content)? revisionEscalation = null;
+                if (stage?.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) == true)
+                    revisionEscalation = ReplacementDiscussionEscalation(board.Id, item, stage,
+                        await TicketConversations.Discussion.ReadAsync(board.Id, item.WorkItemId, context, token));
+                if ((revisionEscalation ?? DecisionEscalation(item, stage) ?? DispatchBlockerEscalation(item, stage) ??
                         UnhandledBlockerEscalation(board.Id, execution.Id, item, stage, DateTimeOffset.UtcNow)) is not { } escalation) continue;
                 try
                 {
@@ -85,6 +97,29 @@ public sealed partial class SpecialistAgent
                 }
             }
         }
+    }
+
+    internal static (string Key, string Content)? ReplacementDiscussionEscalation(Guid boardId,
+        WorkItemExecutionResponse item, WorkStageExecutionResponse stage, IReadOnlyList<WorkItemComment> comments)
+    {
+        if (item.Status != "Blocked" || stage.Status != "Blocked" ||
+            stage.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) != true) return null;
+        TicketConversations.Discussion.ResponseWait? wait;
+        try { wait = stage.LatestOutcome.Output.Deserialize<TicketConversations.Discussion.ResponseWait>(new JsonSerializerOptions(JsonSerializerDefaults.Web)); }
+        catch (JsonException) { return null; }
+        if (wait is null || wait.BoardId != boardId || wait.ItemId != item.WorkItemId ||
+            !comments.Any(c => c.Id == wait.CommentId && c.Revision == wait.CommentRevision &&
+                c.Kind == "discussion.request" && c.AuthorKind == "AgentInstallation" && c.AuthorSubjectId == stage.AgentInstallationId &&
+                c.Body.Contains(TicketConversations.TaskRevisionComments.RequestMarker, StringComparison.Ordinal))) return null;
+        var reply = comments.SingleOrDefault(c => c.Kind == "discussion.reply" && c.AuthorKind == "AgentInstallation" &&
+            c.AuthorSubjectId == wait.RespondingInstallationId && c.CausationId == TicketConversations.Discussion.Correlation(wait.CommentId, wait.CommentRevision));
+        if (reply is null || !TicketConversations.TaskRevisionComments.HasDecision(reply.Body, TicketConversations.TaskRevisionComments.ReplaceMarker)) return null;
+        return ($"producer-replacement:{stage.Id:N}:{reply.Id:N}:{reply.Revision}",
+            $"{item.ItemIdentifier} needs replacement planning. The developer paused because the original assumptions no longer fit; " +
+            $"the technical response is recorded in comment {reply.Id:D}, revision {reply.Revision}.\n\n{reply.Body}\n\n" +
+            "Keep the original blocked until the replacement plan is ready. Close it as superseded/cancelled, never completed, " +
+            "link small replacement tickets in both directions, preserve valid work, redirect dependencies, and refresh sprint readiness. " +
+            "A scope or acceptance-criteria change needs the existing authorized amendment flow; a plain retry cannot apply a replacement plan.");
     }
 
     internal static (string Key, string Content)? DecisionEscalation(WorkItemExecutionResponse item, WorkStageExecutionResponse? stage)
