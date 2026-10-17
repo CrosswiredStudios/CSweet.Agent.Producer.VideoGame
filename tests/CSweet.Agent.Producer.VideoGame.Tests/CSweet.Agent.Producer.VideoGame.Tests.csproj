@@ -12,5 +12,6 @@
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
+    <None Update="Fixtures/technical-director-4.2.1-outline.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

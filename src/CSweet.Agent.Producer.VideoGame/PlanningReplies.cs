@@ -34,7 +34,17 @@ public sealed partial class SpecialistAgent
         session.SourceKind == "Board" && session.Status == "Blocked" &&
         session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId &&
             x.Disposition == "Blocked" && x.Content.StartsWith(
-                "Technical planning could not produce a valid proposal after ", StringComparison.Ordinal));
+                "Technical planning could not produce a valid proposal after ", StringComparison.Ordinal) ||
+            x.SpeakerOrganizationUserId == session.Target.OrganizationUserId && x.Disposition == "Blocked" &&
+            (x.Content.StartsWith("[csweet.planning.generator]", StringComparison.Ordinal) ||
+             x.Content.StartsWith("Progressive planning is blocked;", StringComparison.Ordinal) ||
+             x.Content.StartsWith("Page failed after three attempts:", StringComparison.Ordinal)));
+
+    internal static string TechnicalPlanningBlockDescription(AgentCoordinationSession session) =>
+        $"{PlanningRecoveryMarker}: [csweet.planning.generator] C-Sweet technical issue: Technical Director planning generation or validation failed. " +
+        "Escalate through the reporting manager to the CEO for a C-Sweet code correction. A creative decision cannot repair the generator. " +
+        "No retry is confirmed. Specialist diagnostic: " + session.Turns.Last(x =>
+            x.SpeakerOrganizationUserId == session.Target.OrganizationUserId && x.Disposition == "Blocked").Content;
     internal static bool NeedsCompactPlanningRecovery(AgentCoordinationSession session) =>
         IsTechnicalPlanningGenerationBlock(session) &&
         session.Turns.Any(x => x.SpeakerOrganizationUserId == session.Target.OrganizationUserId &&

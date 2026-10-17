@@ -55,7 +55,11 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `3.2.1`
+- Version: `3.2.3`
+
+Progressive outline verification includes the Technical Director's empty `DependencyPins` ledger in the frozen scope digest. The exact saved outline can advance without regeneration; altered scope still fails validation. Terminal progressive validation/refinement failures retain the recovery marker, so attention wakes do not repeatedly requeue unchanged work. Retry remains explicit after the cause is corrected. The matching platform classifies historical digest failures as technical issues and uses the normalized report's owner-input policy.
+
+Planning generation and validation failures retain the specialist diagnostic and are reported as C-Sweet technical issues. Gabriel forwards these through the reporting manager to the CEO for code correction; a failed output-size/schema check is not a creative disagreement or an authorization to drop scope. The matching platform preserves this diagnosis, publishes durable manager handoffs, and delivers an informational CEO report without inventing a creative decision or claiming that a retry ran.
 
 - Project planning questions go to the Creative Director through delegated `work-planning` decisions. Recorded manager direction wakes a new specialist planning pass; only a material escalation reaches the CEO.
 - Provides: `work.execution.run`

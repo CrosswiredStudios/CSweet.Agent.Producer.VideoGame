@@ -84,6 +84,8 @@ public sealed class PlanningReplyTests
     [InlineData("format", false)]
     [InlineData("compact", false)]
     [InlineData("compact3", false)]
+    [InlineData("progressive", false)]
+    [InlineData("coded", false)]
     public void ContextRecoveryOnlyReplacesTheKnownLegacyFailure(string scenario, bool expected)
     {
         var self = new AgentCoordinationParticipant(Guid.NewGuid(), Guid.NewGuid(), "Producer", "Producer");
@@ -91,7 +93,9 @@ public sealed class PlanningReplyTests
         var session = new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty,
             self, target, "Planning", "Delivery", [], scenario == "active" ? "Active" : "Blocked", 3, 3, null, false, null,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-            [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Blocked", scenario == "compact" ? "Technical planning could not produce a valid proposal after two attempts. JSON does not match the requested contract at $.deliveryItems[32]." :
+            [new(Guid.NewGuid(), 1, target.OrganizationUserId, "Blocked", scenario == "progressive" ? "Progressive planning is blocked; approved scope and validated pages are retained. Page failed after three attempts: full-scope outline (finish=stop, characters=55644): The page exceeds 40000 characters; omit repetition, never scope." :
+                scenario == "coded" ? "[csweet.planning.generator] C-Sweet technical issue: page validation failed." :
+                scenario == "compact" ? "Technical planning could not produce a valid proposal after two attempts. JSON does not match the requested contract at $.deliveryItems[32]." :
                 scenario == "compact3" ? "Technical planning could not produce a valid proposal after three attempts. JSON does not match the requested contract." :
                 scenario == "format" ? "Technical planning returned invalid JSON; revise the proposal." : scenario == "semantic" ? "Need an engine decision" :
                 "Planning requires the exact workstream and planning fingerprint.", DateTimeOffset.UtcNow)])
@@ -100,7 +104,14 @@ public sealed class PlanningReplyTests
         Assert.Equal(expected, SpecialistAgent.NeedsPlanningContextRecovery(session));
         Assert.Equal(scenario == "format", SpecialistAgent.NeedsPlanningFormatRecovery(session));
         Assert.Equal(scenario == "compact", SpecialistAgent.NeedsCompactPlanningRecovery(session));
-        Assert.Equal(scenario is "compact" or "compact3", SpecialistAgent.IsTechnicalPlanningGenerationBlock(session));
+        Assert.Equal(scenario is "compact" or "compact3" or "progressive" or "coded", SpecialistAgent.IsTechnicalPlanningGenerationBlock(session));
+        if (SpecialistAgent.IsTechnicalPlanningGenerationBlock(session))
+        {
+            var description = SpecialistAgent.TechnicalPlanningBlockDescription(session);
+            Assert.Contains("C-Sweet technical issue", description); Assert.Contains("CEO", description);
+            Assert.Contains(session.Turns[0].Content, description);
+            Assert.DoesNotContain("terminal conflict", description);
+        }
     }
 
     [Fact]

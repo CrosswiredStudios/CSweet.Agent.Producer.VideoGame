@@ -15,7 +15,12 @@ public sealed partial class SpecialistAgent
     internal sealed record ProgressiveEvidence(string Phase, string ScopeKey, string OutlineDigest, string DirectionsDigest,
         IReadOnlyList<string> DetailedStoryKeys, IReadOnlyList<ProgressiveCoverage> ScopeCoverage);
     private sealed record ProgressiveScopePlan(IReadOnlyList<GameProposedWorkItemV1> DeliveryItems,
-        IReadOnlyList<string> FeasibilityFindings, IReadOnlyList<string> TechnicalConstraints, IReadOnlyList<string> OpenFeasibilityDecisions);
+        IReadOnlyList<string> FeasibilityFindings, IReadOnlyList<string> TechnicalConstraints, IReadOnlyList<string> OpenFeasibilityDecisions)
+    {
+        // Match the Technical Director's frozen PlanningOutput, including its empty
+        // progressive-outline pin ledger. Omitting this field changes an unchanged scope's hash.
+        public IReadOnlyList<object> DependencyPins { get; init; } = [];
+    }
     internal sealed record ProgressiveAdvance(ProgressivePlanningProgress Progress, AgentCoordinationSession? Session = null,
         string? Waiting = null, string? Blocker = null, bool Complete = false);
     private static readonly JsonSerializerOptions ProgressiveJson = new(JsonSerializerDefaults.Web);
@@ -122,7 +127,7 @@ public sealed partial class SpecialistAgent
                     currentSession.Initiator.OrganizationUserId != outlineSession.Initiator.OrganizationUserId || currentSession.BoardSource?.BoardId != boardId)
                     throw new InvalidOperationException("The refinement session no longer belongs to this board and planning authority.");
                 if (currentSession.Status is "Failed" or "Blocked" or "Cancelled")
-                    return new(progress, Blocker: "The current increment's refinement is blocked. Preserve the published outline and address the specialist diagnostic before retrying: " + currentSession.FinalSummary);
+                    return new(progress, Blocker: PlanningRecoveryMarker + ": The current increment's refinement is blocked. Preserve the published outline and address the specialist diagnostic before retrying: " + currentSession.FinalSummary);
                 if (currentSession.Status != "Completed") return new(progress, Waiting: "The complete scope outline is published. The Technical Director is refining only the next increment.");
                 currentArtifact = currentSession.Turns.LastOrDefault(x => x.SpeakerOrganizationUserId == currentSession.Target.OrganizationUserId &&
                     x.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1")?.Artifact
@@ -166,7 +171,9 @@ public sealed partial class SpecialistAgent
         }
         catch (Exception error) when (error is InvalidOperationException or JsonException)
         {
-            return new(progress, Blocker: "Progressive planning retained the existing scope but could not advance: " + error.Message);
+            return new(progress, Blocker: PlanningRecoveryMarker + ": [csweet.planning.generator] C-Sweet technical issue: " +
+                "Progressive planning retained the existing scope but could not advance: " + error.Message +
+                " Escalate through the reporting manager for a code correction. Retry only after its cause changes; accepted scope and saved specialist output are retained.");
         }
     }
 }

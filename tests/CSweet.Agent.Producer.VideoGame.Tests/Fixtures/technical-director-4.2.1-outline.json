@@ -1,0 +1,72 @@
+{
+  "Cycle": {
+    "WorkstreamId": "20000000-0000-0000-0000-000000000001",
+    "TeamId": "20000000-0000-0000-0000-000000000002",
+    "TeamRevision": 1,
+    "BoardId": "20000000-0000-0000-0000-000000000003",
+    "ProfileDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "ApprovedPackageId": "20000000-0000-0000-0000-000000000004",
+    "ApprovedPackageVersion": 1,
+    "ApprovedPackageDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "LifecyclePhase": "concept",
+    "TargetMilestoneKey": "prototype",
+    "PlanningFingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  },
+  "DeliveryItems": [
+    {
+      "ProposalKey": "example-epic",
+      "WorkItemTypeKey": "video-game.milestone.v1",
+      "Title": "Playable prototype",
+      "Description": "Deliver the example playable increment with independent validation.",
+      "AcceptanceCriteria": [
+        "The movement story has implementation and independent QA evidence."
+      ],
+      "AccountableRoleKey": "game-technical-director",
+      "RequiredSpecializationKeys": [],
+      "PreferredSpecializationKeys": [],
+      "RequiredCapabilityKeys": [
+        "work.execution.run"
+      ],
+      "DependencyProposalKeys": [],
+      "ParentProposalKey": null
+    },
+    {
+      "ProposalKey": "example-story",
+      "WorkItemTypeKey": "video-game.feature.v1",
+      "Title": "Player movement",
+      "Description": "Provide a testable player movement increment.",
+      "AcceptanceCriteria": [
+        "Left and right input move the player within the playfield, verified independently."
+      ],
+      "AccountableRoleKey": "game-engineer",
+      "RequiredSpecializationKeys": [],
+      "PreferredSpecializationKeys": [
+        "gameplay-programming"
+      ],
+      "RequiredCapabilityKeys": [
+        "work.execution.run"
+      ],
+      "DependencyProposalKeys": [],
+      "ParentProposalKey": "example-epic"
+    }
+  ],
+  "FeasibilityFindings": [],
+  "TechnicalConstraints": [],
+  "OpenFeasibilityDecisions": [],
+  "ProposalDigest": "a028100e5424a1aba41f457a74de26cc55265d2f30649760c5f4715b1afd8c08",
+  "progressivePlanning": {
+    "phase": "Outline",
+    "scopeKey": "technical-progressive:736c0b7b96078ea555560dcbbf385a159ad60331d4ff816483f4b608e3da59ff",
+    "outlineDigest": "7c8d59dc393865d5016229a370f31d7285a7cda5a8bf19dfc2e774e509c95d15",
+    "directionsDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "detailedStoryKeys": [],
+    "scopeCoverage": [
+      {
+        "sourceKey": "document-0:paragraph-0",
+        "proposalKeys": [
+          "example-story"
+        ]
+      }
+    ]
+  }
+}

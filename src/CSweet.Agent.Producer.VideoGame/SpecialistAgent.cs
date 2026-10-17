@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "3.2.1";
+    public override string Version => "3.2.3";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -716,7 +716,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (designerSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled ||
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
             return PersonalTodoResult.Blocked(IsTechnicalPlanningGenerationBlock(technicalSession)
-                ? $"{PlanningRecoveryMarker}: Technical Director planning output was invalid after bounded model correction. Review the specialist diagnostic and repair the generator before retrying."
+                ? TechnicalPlanningBlockDescription(technicalSession)
                 : $"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Creative Director authority.");
         if (designerSession.Status != AgentCoordinationStatuses.Completed ||
             technicalSession.Status != AgentCoordinationStatuses.Completed)
