@@ -2,8 +2,10 @@
 
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
-`AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 4.6.3 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
+`AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 5.0.2 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
 
+
+`ProgressivePublishedItems` ignores unrelated human follow-up title prefixes and rejects duplicate authoritative proposal identities. Staffing preserves the active increment's exact Epic set. `ReadProgressiveContinuationAsync` wakes accepted increments through current-state reads, with durable revision-bound recovery receipts that prevent duplicate events from resetting failed retries. Deferred release QA stays on the board. `ProgressiveSprintHandoffTests` covers the successor path through estimates, readiness and preflight to a single sprint start.
 
 ## Coordination flow (2.18.0)
 
@@ -55,7 +57,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `3.2.4`
+- Version: `4.0.0`
 
 Progressive outline verification includes the Technical Director's empty `DependencyPins` ledger in the frozen scope digest. The exact saved outline can advance without regeneration; altered scope still fails validation. Terminal progressive validation/refinement failures retain the recovery marker, so attention wakes do not repeatedly requeue unchanged work. Retry remains explicit after the cause is corrected. The matching platform classifies historical digest failures as technical issues and uses the normalized report's owner-input policy.
 
@@ -353,7 +355,7 @@ Producer 3.0.0 gives each sprint a distinct creation identity and estimate/QA cy
 
 ## Execution contract (3.0.0)
 
-Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 4.0.0. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.
+Execution uses one `work.execution.run` capability and `WorkExecutionAssignment` from SDK/WorkManagement.Contracts 5.0.1. Task and aggregate scopes retain their distinct authority checks within that envelope. Upgrade the platform and executing agents together; no legacy execution adapter remains.
 
 ## Specific planning blockers (3.0.1)
 

@@ -7,7 +7,7 @@ using CSweet.WorkManagement.Contracts;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
 
-public sealed class ProgressivePlanningTests
+public sealed partial class ProgressivePlanningTests
 {
     [Fact]
     public void Real_Technical_Director_outline_digest_is_accepted_and_still_rejects_scope_changes()
@@ -78,6 +78,10 @@ public sealed class ProgressivePlanningTests
         Assert.Equal(6, f.Items.Count);
         Assert.Single(SpecialistAgent.DetailedIncrementEpicIds(f.Items));
         var progress = refined.Progress with { ScheduledArtifactDigest = f.DetailArtifact!.Digest };
+        // Live incident: unrelated human release-QA Epic/Story/Task all had this
+        // same title prefix and no proposal provenance. Preserve all three.
+        for (var extra = 0; extra < 3; extra++) f.Items.Add(f.Items[0] with {
+            Id = Guid.NewGuid(), Title = "[release-qa-follow-up] Deferred device checks", ProposalProvenance = null });
         Assert.NotNull((await f.Advance(progress)).Waiting); Assert.Single(f.Starts);
         for (var i = 0; i < f.Items.Count; i++)
             if (f.Items[i].ExecutionMode == WorkItemExecutionModes.Executable) f.Items[i] = f.Items[i] with { Status = "Done" };
@@ -90,7 +94,17 @@ public sealed class ProgressivePlanningTests
         f.Plans[0] = f.Plans[0] with { Status = "Completed" };
         var next = await f.Advance(progress);
         Assert.Null(next.Blocker); Assert.Equal("remaining", next.Progress.PendingStoryKey); Assert.Equal(2, f.Starts.Count);
-        Assert.Equal(6, f.Items.Count); // future Story has no executable work yet
+        Assert.Equal(9, f.Items.Count); // future Story has no executable work yet; follow-ups survive
+    }
+
+    [Fact]
+    public void Duplicate_authoritative_proposal_keys_fail_with_an_actionable_diagnostic()
+    {
+        var original = JsonSerializer.Deserialize<WorkItem>("{}")! with { Id = Guid.NewGuid(), Status = "Ready",
+            ProposalProvenance = new(Guid.NewGuid(), "accepted", "implementation") };
+        var error = Assert.Throws<InvalidOperationException>(() => SpecialistAgent.ProgressivePublishedItems(
+            [original, original with { Id = Guid.NewGuid() }], new HashSet<string> { "implementation" }));
+        Assert.Contains("duplicate published proposal identities", error.Message);
     }
 
     [Fact]
@@ -148,7 +162,9 @@ public sealed class ProgressivePlanningTests
                 .RegisterCapability<CreateWorkItemRequest, WorkItem>(WorkItemCapabilities.Create, (r, _) => {
                     var item = new WorkItem(Guid.NewGuid(), Cycle.BoardId, r.ParentItemId, null, r.Kind, r.Title, r.Description ?? "", "Backlog", "High", null, 0, 1, null)
                     { ExecutionMode = r.Kind == "Task" ? WorkItemExecutionModes.Executable : WorkItemExecutionModes.Container,
-                        Planning = r.Planning, ProposalProvenance = r.ProposalProvenance, StageAssignments = r.StageAssignments ?? [] };
+                        Planning = r.Planning, PlanningRevision = 1, TypeKey = r.TypeKey,
+                        AccountableOrganizationUserId = r.AccountableOrganizationUserId,
+                        ProposalProvenance = r.ProposalProvenance, StageAssignments = r.StageAssignments ?? [] };
                     Items.Add(item); return Task.FromResult(item);
                 })
                 .RegisterCapability<ReviseWorkItemPlanningRequest, WorkItem>(WorkItemCapabilities.RevisePlanning, (r, _) => {

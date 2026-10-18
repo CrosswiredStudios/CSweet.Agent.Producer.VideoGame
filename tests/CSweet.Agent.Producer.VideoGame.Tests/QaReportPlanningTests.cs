@@ -96,6 +96,11 @@ public sealed class QaReportPlanningTests
         var policy = WorkflowStaffingTests.Policy();
         policy = policy with { Stages = [.. policy.Stages, new("task-integration", "Integrate", "PlatformAction", null, "", "{}", "{}", 60, 1, new())] };
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<CreateWorkItemRequest,WorkItem>(WorkItemCapabilities.Create,(r,_)=> {
+                var item=JsonSerializer.Deserialize<WorkItem>("{}")! with {Id=Guid.NewGuid(),Title=r.Title,Kind=r.Kind,TypeKey=r.TypeKey,
+                    Planning=r.Planning,PlanningRevision=1,ExecutionMode=WorkItemExecutionModes.Container,StageAssignments=[]};
+                items[item.Id]=item;return Task.FromResult(item);
+            })
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (_, _) => Task.FromResult(new AgentOperatingStateReadResponse(null)))
             .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
@@ -132,7 +137,7 @@ public sealed class QaReportPlanningTests
         Assert.Equal("Artifact", delivered.Delivery.DeliveryKind);
         Assert.Equal(qa.AgentInstallationId, delivered.StageAssignments.Single(x => x.StageKey == "specialist-execution").AgentInstallationId);
         Assert.Equal(producer.AgentInstallationId, delivered.StageAssignments.Single(x => x.StageKey == "quality").AgentInstallationId);
-        Assert.All(configuration!.Assignments.Where(x => x.Scope is "Story" or "Release"), scope =>
+        Assert.All(configuration!.Assignments.Where(x => x.Scope == "Release"), scope =>
             Assert.Equal(qa.AgentInstallationId, scope.Stages.Single(x => x.StageKey == "quality").AgentInstallationId));
         Assert.Equal("Active", plan!.Status);
         Assert.Null(await SpecialistAgent.StaffWorkflowAsync(board, roster, new string('a', 64), context, default));

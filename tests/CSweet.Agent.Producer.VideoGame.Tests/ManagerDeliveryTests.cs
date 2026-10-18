@@ -18,17 +18,18 @@ public sealed class ManagerDeliveryTests
         fixture.ReturnPlan = true;
         var started = await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
         Assert.Contains("active", started.Message);
-        Assert.Equal(4, fixture.Items.Count); // A technical ticket named "epic" must not collide with the grouping Epic.
+        Assert.Equal(4, fixture.Items.Values.Count(x=>x.TypeKey!=WorkItemTypeKeys.WorkflowTicketV1)); // Source work and visible workflow tickets are distinct.
+        Assert.Equal(3,fixture.Items.Values.Count(x=>x.TypeKey==WorkItemTypeKeys.WorkflowTicketV1));
         Assert.Equal(2, fixture.Sprints.Count);
         Assert.Single(fixture.Started);
-        Assert.All(fixture.Items.Values.Where(x => x.Kind == "Task"), x => {
+        Assert.All(fixture.Items.Values.Where(x => x.ExecutionMode == WorkItemExecutionModes.Executable), x => {
             Assert.Equal(4, x.StageAssignments.Count); Assert.NotNull(x.Delivery);
             Assert.Equal("csweet/story/" + x.ParentItemId!.Value.ToString("N"), x.Delivery!.BaseBranch);
             Assert.NotNull(x.Delivery.DeliveryPlanId);
             Assert.Equal(fixture.Developer, x.AccountableOrganizationUserId);
         });
         await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
-        Assert.Single(fixture.Started); Assert.Equal(4, fixture.Items.Count); Assert.Equal(1, fixture.CoordinationStarts);
+        Assert.Single(fixture.Started); Assert.Equal(4, fixture.Items.Values.Count(x=>x.TypeKey!=WorkItemTypeKeys.WorkflowTicketV1)); Assert.Equal(1, fixture.CoordinationStarts);
         fixture.CompleteSprint(1);
         fixture.PreflightValid = false;
         var blocked = await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
@@ -44,7 +45,7 @@ public sealed class ManagerDeliveryTests
         for (var stage = 0; stage < 3; stage++) await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
         Assert.Equal("Completed", fixture.Project.Status);
         var final = await new SpecialistAgent().AdvanceManagerDeliveryAsync(fixture.Project.Id, fixture.Context, default);
-        Assert.True(final.Complete); Assert.Equal(4, fixture.Items.Count);
+        Assert.True(final.Complete); Assert.Equal(4, fixture.Items.Values.Count(x=>x.TypeKey!=WorkItemTypeKeys.WorkflowTicketV1));
     }
 
     [Fact]
@@ -146,7 +147,7 @@ public sealed class ManagerDeliveryTests
                 .RegisterCapability<CreateWorkItemRequest, WorkItem>(WorkItemCapabilities.Create, (r, _) => {
                     if (_receipts.TryGetValue(r.IdempotencyKey, out var prior)) return Task.FromResult(prior);
                     var item = new WorkItem(Guid.NewGuid(), r.ColumnId ?? _ready, r.ParentItemId, null, r.Kind, r.Title, r.Description ?? "", "Ready", r.Priority, null, 1, 1, null)
-                        { Planning = r.Planning, PlanningRevision = 1, ProposalProvenance = r.ProposalProvenance, TypeKey = r.TypeKey, ExecutionMode = r.Kind == "Task" ? "Executable" : "Container" };
+                        { Planning = r.Planning, PlanningRevision = 1, ProposalProvenance = r.ProposalProvenance, TypeKey = r.TypeKey, ExecutionMode = r.Kind == "Task" && r.TypeKey!=WorkItemTypeKeys.WorkflowTicketV1 ? "Executable" : "Container" };
                     Items[item.Id] = item; _receipts[r.IdempotencyKey] = item; return Task.FromResult(item);
                 })
                 .RegisterCapability<CreateWorkSprintRequest, WorkSprint>(WorkSprintCapabilities.Create, (r, _) => {

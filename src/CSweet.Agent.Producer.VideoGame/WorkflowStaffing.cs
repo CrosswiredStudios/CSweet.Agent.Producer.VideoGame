@@ -61,9 +61,15 @@ public sealed partial class SpecialistAgent
                 var portfolio = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), token);
                 if (portfolio?.Payload.PlanningCycles.TryGetValue(project, out var cycle) == true && cycle.Progressive is not null)
                 {
-                    var accepted = (await context.Platform.Work.ReadDeliveryPlansAsync(new(project), token))
-                        .Where(plan => plan.Status == "Completed").SelectMany(plan => plan.EpicItemIds).ToHashSet();
-                    var increments = DetailedIncrementEpicIds(detail.Items).Where(id => !accepted.Contains(id)).ToArray();
+                    var plans = await context.Platform.Work.ReadDeliveryPlansAsync(new(project), token);
+                    var accepted = plans.Where(plan => plan.Status == "Completed").SelectMany(plan => plan.EpicItemIds).ToHashSet();
+                    // Reconcile the pinned active increment, including while aggregate acceptance
+                    // runs after sprint completion. Deferred release work is a separate scope.
+                    var active = plans.Where(plan => plan.Status is "Active" or "Paused").ToArray();
+                    if (active.Length > 1) return "Multiple active delivery plans require explicit manager reconciliation.";
+                    var increments = active.SingleOrDefault()?.EpicItemIds.ToArray() ??
+                        DetailedIncrementEpicIds(detail.Items.Where(item => item.ProposalProvenance is not null).ToArray())
+                            .Where(id => !accepted.Contains(id)).ToArray();
                     if (increments.Length == 0) return "The scope outline is published; the current increment's executable briefs are pending.";
                     await HierarchicalProjectDelivery.PrepareIncrementAsync(project, board.Id, manager, roster,
                         repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, increments, context, token);

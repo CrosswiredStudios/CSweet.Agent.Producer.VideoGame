@@ -24,7 +24,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "3.2.4";
+    public override string Version => "4.0.0";
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,
@@ -484,6 +484,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             new TeamRosterV2Request(teamId, workstream.Id, 1, 100), cancellationToken)).Team;
         var leadershipReady = roster is { Revision: > 0 } && Guid.TryParse(roster.TeamId, out var currentTeam) &&
             currentTeam == teamId && SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector) is not null;
+        var continuation = leadershipReady && boardId is { } continuationBoard
+            ? await ReadProgressiveContinuationAsync(workstream.Id, continuationBoard, fingerprint, context, cancellationToken) : null;
         return await EnsureCommitmentAsync(
             $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
             "Reconcile scope, technical backlog and delivery staffing",
@@ -491,7 +493,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             "High", new PersonalTodoWorkContext {
                 WorkstreamId = workstream.Id, TeamId = teamId, BoardId = boardId,
                 CoordinationSessionId = sessionId, SourceFingerprint = fingerprint
-            }, context, cancellationToken, leadershipReady);
+            }, context, cancellationToken, leadershipReady, continuation);
     }
 
     internal static string CommitmentIdempotencyKey(string correlationId)
@@ -508,13 +510,25 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         PersonalTodoWorkContext workContext,
         AgentRuntimeContext context,
         CancellationToken cancellationToken,
-        bool hiringDependencyReady = false)
+        bool hiringDependencyReady = false,
+        ProgressiveContinuation? progressiveContinuation = null)
     {
         var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
         var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
             x.ArchivedAt is null && string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal));
         if (existing is not null)
         {
+            var acceptanceCleared = progressiveContinuation?.Fingerprint is not null &&
+                existing.Status == PersonalTodoStatuses.Running && existing.Wait is { } acceptanceWait &&
+                (acceptanceWait.Reason.StartsWith("The current increment", StringComparison.Ordinal) ||
+                 acceptanceWait.Reason.StartsWith("The detailed increment", StringComparison.Ordinal));
+            if (progressiveContinuation is not null && existing.Status == PersonalTodoStatuses.Blocked &&
+                existing.BlockReason?.StartsWith("Repeated issue:", StringComparison.Ordinal) == true &&
+                existing.BlockReason.Contains("execution stopped unexpectedly", StringComparison.Ordinal))
+            {
+                if (progressiveContinuation.Fingerprint is not { } acceptedFingerprint ||
+                    !await AuthorizeContinuationRecoveryAsync(existing, acceptedFingerprint, context, cancellationToken)) return existing;
+            }
             // Board notifications are wake hints. They must not erase a recorded
             // retry deadline, even when recovery itself changed the board revision.
             var hiringCleared = hiringDependencyReady &&
@@ -524,7 +538,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existingContext.WorkstreamId == workContext.WorkstreamId && workContext.WorkstreamId.HasValue &&
                 existingContext.TeamId == workContext.TeamId && workContext.TeamId.HasValue &&
                 existingContext.SourceFingerprint == workContext.SourceFingerprint;
-            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared)
+            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared && !acceptanceCleared)
                 return existing;
             // A terminal planning conflict must not be requeued on every attention tick.
             // A later recovery generation may reassess it once with new repair logic.

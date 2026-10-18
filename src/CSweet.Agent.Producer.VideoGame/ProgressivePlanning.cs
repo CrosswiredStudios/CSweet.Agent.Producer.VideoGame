@@ -101,8 +101,9 @@ public sealed partial class SpecialistAgent
         IReadOnlyList<string> detailed, IReadOnlyList<WorkItem> items, IReadOnlyList<WorkDeliveryPlanResponse> plans)
     {
         var accepted = plans.Where(plan => plan.Status == "Completed").SelectMany(plan => plan.EpicItemIds).ToHashSet();
+        var publishedItems = ProgressivePublishedItems(items, outline.Select(item => item.ProposalKey).ToHashSet(StringComparer.Ordinal));
         return detailed.All(key => outline.SingleOrDefault(story => story.ProposalKey == key)?.ParentProposalKey is { } epic &&
-            items.SingleOrDefault(item => ProposalKey(item) == epic) is { } published && accepted.Contains(published.Id));
+            publishedItems.TryGetValue(epic, out var published) && accepted.Contains(published.Id));
     }
 
     internal static async Task<ProgressiveAdvance> AdvanceProgressivePlanningAsync(Guid boardId, AgentTeamContext roster,
@@ -145,7 +146,7 @@ public sealed partial class SpecialistAgent
                     designer, outlineSession, outlineArtifact, outline, context, token);
             }
             var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
-            var published = board.Items.Where(x => ProposalKey(x) is not null).ToDictionary(x => ProposalKey(x)!);
+            var published = ProgressivePublishedItems(board.Items, current.DeliveryItems.Select(x => x.ProposalKey).ToHashSet(StringComparer.Ordinal));
             var leaves = current.DeliveryItems.Where(x => !IsScopeContainer(x)).ToArray();
             if (leaves.Any(x => !published.TryGetValue(x.ProposalKey, out var item) || item.Status is not ("Done" or "Completed")))
                 return new(progress, Waiting: "The current increment is published; estimates, QA readiness and execution remain authoritative. Later Stories retain their approved scope without premature detail.");
@@ -175,5 +176,18 @@ public sealed partial class SpecialistAgent
                 "Progressive planning retained the existing scope but could not advance: " + error.Message +
                 " Escalate through the reporting manager for a code correction. Retry only after its cause changes; accepted scope and saved specialist output are retained.");
         }
+    }
+
+    internal static IReadOnlyDictionary<string, WorkItem> ProgressivePublishedItems(IReadOnlyList<WorkItem> items,
+        IReadOnlySet<string> proposalKeys)
+    {
+        // Human follow-ups can share title prefixes; only provenance-bound proposal
+        // identities participate in this accepted planning cycle.
+        var groups = items.Where(item => item.Status != "Cancelled" && item.ProposalProvenance is { } provenance &&
+                proposalKeys.Contains(provenance.ProposalItemKey))
+            .GroupBy(item => item.ProposalProvenance!.ProposalItemKey, StringComparer.Ordinal).ToArray();
+        if (groups.Any(group => group.Count() != 1))
+            throw new InvalidOperationException("The accepted planning scope contains duplicate published proposal identities; reconcile the conflicting items before continuing.");
+        return groups.ToDictionary(group => group.Key, group => group.Single(), StringComparer.Ordinal);
     }
 }

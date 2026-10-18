@@ -7,6 +7,43 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class WorkflowStaffingTests
 {
     [Theory]
+    [InlineData("Active")]
+    [InlineData("Paused")]
+    public async Task Progressive_staffing_reuses_pinned_increment_when_deferred_release_work_is_also_detailed(string status)
+    {
+        var manager = Guid.NewGuid(); var project = Guid.NewGuid(); var boardId = Guid.NewGuid();
+        var board = new WorkBoardSummary(boardId, "GAME", "Game", false, false, 1, []) {
+            TeamId = Guid.NewGuid(), WorkstreamId = project, ManagerOrganizationUserId = manager };
+        var epic = JsonSerializer.Deserialize<WorkItem>("{}")! with { Id = Guid.NewGuid(), Kind = "Epic", Status = "Ready",
+            ExecutionMode = WorkItemExecutionModes.Container, ProposalProvenance = new(Guid.NewGuid(), "accepted", "scaffold") };
+        var story = epic with { Id = Guid.NewGuid(), Kind = "Story", ParentItemId = epic.Id };
+        var task = story with { Id = Guid.NewGuid(), Kind = "Task", ParentItemId = story.Id, Status = "Completed", ExecutionMode = WorkItemExecutionModes.Executable };
+        var deferredEpic = epic with { Id = Guid.NewGuid(), ProposalProvenance = null };
+        var deferredStory = story with { Id = Guid.NewGuid(), ParentItemId = deferredEpic.Id, ProposalProvenance = null };
+        var deferredTask = task with { Id = Guid.NewGuid(), ParentItemId = deferredStory.Id, Status = "Ready", ProposalProvenance = null };
+        var plan = JsonSerializer.Deserialize<WorkDeliveryPlanResponse>("{}")! with { Id = Guid.NewGuid(), Status = status, EpicItemIds = [epic.Id] };
+        var cycle = new ProducerPlanningCycleState(project, boardId, board.TeamId.Value, "planning", null, null, null, null, null, null, DateTimeOffset.UtcNow) {
+            Progressive = new("scope", "outline", "directions", ["scaffold"]) };
+        var policy = Policy() with { Stages = [.. Policy().Stages, new("task-integration", "Integration", "PlatformAction", null, "", "{}", "{}", 60, 1, new())] };
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<ConfigureProfileOrchestrationRequest, ConfigureProfileOrchestrationResponse>(WorkOrchestrationCapabilities.ConfigureProfile,
+                (_, _) => Task.FromResult(new ConfigureProfileOrchestrationResponse(project, boardId, 1, policy, [])))
+            .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read,
+                (_, _) => Task.FromResult(new WorkBoardDetail(board, [], [epic, story, task, deferredEpic, deferredStory, deferredTask])))
+            .RegisterCapability<TeamRepositoryOptionsRequest, IReadOnlyList<TeamRepositoryOption>>(SourceControlCapabilities.TeamRepositoryOptions,
+                (_, _) => Task.FromResult<IReadOnlyList<TeamRepositoryOption>>([]))
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(new(Guid.NewGuid(), r.StateKey, "test", 1, "Active", new Dictionary<string,string>(), [], "", [], Guid.Empty,
+                    JsonSerializer.SerializeToElement(new ProducerOperatingState { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> { [project] = cycle } }), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))))
+            .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read,
+                (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>([plan]));
+        var roster = new AgentTeamContext(board.TeamId.Value.ToString(), "Game", "Game", 1, manager.ToString(), "Producer", [], [], 0, false);
+        var context = runtime.CreateContext(identity: new(manager.ToString(), "Producer", null, "Producer", null, [], null, Guid.NewGuid().ToString(), "Director"));
+        Assert.Null(await SpecialistAgent.StaffWorkflowAsync(board, roster, new string('a', 64), context, default));
+        // No configure/control grants exist here: acceptance cannot be fabricated or the active plan replaced.
+    }
+
+    [Theory]
     [InlineData("producer-workflow-recovery:board:generation", false)]
     [InlineData("producer-readiness:board:sprint", false)]
     [InlineData("producer-workflow-recovery:board:generation", true)]
