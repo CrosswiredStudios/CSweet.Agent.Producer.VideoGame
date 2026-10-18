@@ -23,7 +23,7 @@ public sealed class ManagerDeliveryTests
         Assert.Single(fixture.Started);
         Assert.All(fixture.Items.Values.Where(x => x.Kind == "Task"), x => {
             Assert.Equal(4, x.StageAssignments.Count); Assert.NotNull(x.Delivery);
-            Assert.Equal("codex/story/" + x.ParentItemId!.Value.ToString("N"), x.Delivery!.BaseBranch);
+            Assert.Equal("csweet/story/" + x.ParentItemId!.Value.ToString("N"), x.Delivery!.BaseBranch);
             Assert.NotNull(x.Delivery.DeliveryPlanId);
             Assert.Equal(fixture.Developer, x.AccountableOrganizationUserId);
         });
@@ -111,7 +111,7 @@ public sealed class ManagerDeliveryTests
                 .RegisterCapability<ReviseWorkItemPlanningRequest, WorkItem>(WorkItemCapabilities.RevisePlanning, (r, _) => Task.FromResult(Items[r.ItemId] = Items[r.ItemId] with { Planning = r.Planning, PlanningRevision = r.ExpectedPlanningRevision + 1, Revision = r.ExpectedRevision + 1 }))
                 .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>(_delivery is null ? [] : [_delivery]))
                 .RegisterCapability<ConfigureWorkDeliveryPlanRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Configure, (r, _) => {
-                    Assert.All(r.Branches.Where(x => x.Scope == "Story"), b => Assert.StartsWith("codex/release/", b.TargetBranch));
+                    Assert.All(r.Branches.Where(x => x.Scope == "Story"), b => Assert.StartsWith("csweet/release/", b.TargetBranch));
                     _delivery ??= new(Guid.NewGuid(), Project.Id, r.Name, _producer, "Draft", 1, 1, r.EpicItemIds, r.Branches,
                         r.Assignments.Select(a => new WorkDeliveryScopeSnapshot(a.Scope, a.ItemId, a.BoardId, 1,
                             a.ItemId.HasValue ? Items.Values.Where(x => x.ParentItemId == a.ItemId).Select(x => x.Id).ToArray() : r.EpicItemIds,

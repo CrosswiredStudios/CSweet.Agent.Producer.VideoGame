@@ -2,7 +2,7 @@
 
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
-`AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 4.5.0 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
+`AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 4.6.3 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
 
 
 ## Coordination flow (2.18.0)
@@ -55,7 +55,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `3.2.3`
+- Version: `3.2.4`
 
 Progressive outline verification includes the Technical Director's empty `DependencyPins` ledger in the frozen scope digest. The exact saved outline can advance without regeneration; altered scope still fails validation. Terminal progressive validation/refinement failures retain the recovery marker, so attention wakes do not repeatedly requeue unchanged work. Retry remains explicit after the cause is corrected. The matching platform classifies historical digest failures as technical issues and uses the normalized report's owner-input policy.
 
