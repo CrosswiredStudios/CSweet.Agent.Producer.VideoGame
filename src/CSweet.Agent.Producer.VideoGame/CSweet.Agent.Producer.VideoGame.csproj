@@ -1,9 +1,18 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>4.0.4</Version>
+    <Version>4.0.5</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="CSweetAgentVersion" Value="$(Version)" />
+  </ItemGroup>
+  <Target Name="ValidateAgentManifestVersion" BeforeTargets="PrepareForBuild;GenerateNuspec;Publish">
+    <PropertyGroup>
+      <AgentManifestVersion>$([System.Text.RegularExpressions.Regex]::Match($([System.IO.File]::ReadAllText('$(MSBuildProjectDirectory)/../../csweet-plugin.json')), '&quot;version&quot;\s*:\s*&quot;([^&quot;]+)&quot;').Groups[1].Value)</AgentManifestVersion>
+    </PropertyGroup>
+    <Error Condition="'$(AgentManifestVersion)' != '$(Version)'" Text="Agent manifest version $(AgentManifestVersion) does not match build version $(Version). Synchronize csweet-plugin.json and the project version before building, publishing, or packing." />
+  </Target>
   <ItemGroup>
     <PackageReference Include="CSweet.WorkManagement.Contracts" Version="5.1.0" Condition="'$(UseLocalCSweetWorkManagementContracts)' != 'true'" />
     <ProjectReference Include="$(CSweetWorkManagementContractsRepositoryRoot)\src\CSweet.WorkManagement.Contracts\CSweet.WorkManagement.Contracts.csproj" Condition="'$(UseLocalCSweetWorkManagementContracts)' == 'true'" />
@@ -13,7 +22,7 @@
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
     <Content Include="../../profiles/*.json" Link="profiles/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="content/profiles/" />
-    <Content Include="..\..\csweet-plugin.json" Link="csweet-plugin.json" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="content\" />
+    <Content Include="..\..\csweet-plugin.json" Link="csweet-plugin.json" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" Pack="true" PackagePath="content\" />
   </ItemGroup>
   <ItemGroup>
     <Compile Include="../../extensions/video-game/*.cs" Link="Extension/%(Filename)%(Extension)" />

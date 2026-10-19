@@ -33,6 +33,9 @@ manifest update, a README explanation, and tests.
 
 ## Release-note ordering
 
+- Deploy agent changes through the published GitHub release and the Installed Agents update flow. Do not patch installed package records, approved manifests, artifact digests, or runtime payloads with local build output. Local builds and self-tests are verification only unless the user explicitly requests a development deployment.
+- Runtime `SpecialistAgent.Version` comes from the project's `CSweetAgentVersion` assembly metadata. Keep the manifest and project version synchronized; the build rejects a mismatch. Run the published output's `--self-test` before packing a release.
+
 - Bump the agent version FIRST, synchronizing the root `csweet-plugin.json`, implementation identity, project/package version, and version assertions as required by this repository.
 - Only AFTER the version bump, read the final `version` back from `csweet-plugin.json` and write `releases/<version>.md` for that exact version (no `v` prefix). Never write the new release's notes under the previous version.
 - If the version changes again during the task, retarget the unpublished notes to the final version. Preserve already published historical notes.

@@ -60,13 +60,15 @@ jobs:
           $projectVersion = [string]($project.Project.PropertyGroup | Where-Object Version | Select-Object -First 1).Version
           if ($projectVersion -ne $version) { throw "csproj version $projectVersion does not match manifest version $version." }
           if (-not (Test-Path "releases/$version.md")) { throw "Missing releases/$version.md for version $version." }
-      - run: dotnet test CSweet.Agent.Producer.VideoGame.slnx -c Release
+          if ((Get-Content "releases/$version.md" -TotalCount 1) -ne "# $version") { throw 'Release-note heading must match the manifest version.' }
+      - run: dotnet test CSweet.Agent.Producer.VideoGame.slnx -c Release -p:UseLocalCSweetAgentSdk=false -p:UseLocalCSweetWorkManagementContracts=false
       - name: Publish linux-x64 agent
-        run: dotnet publish src/CSweet.Agent.Producer.VideoGame/CSweet.Agent.Producer.VideoGame.csproj -c Release --framework net10.0 --runtime linux-x64 --self-contained false -o publish/linux-x64
-      - name: Stage manifest and pack bundle
+        run: dotnet publish src/CSweet.Agent.Producer.VideoGame/CSweet.Agent.Producer.VideoGame.csproj -c Release --framework net10.0 --runtime linux-x64 --self-contained false -p:UseLocalCSweetAgentSdk=false -p:UseLocalCSweetWorkManagementContracts=false -o publish/linux-x64
+      - name: Self-test published agent and pack bundle
         shell: pwsh
         run: |
-          Copy-Item csweet-plugin.json publish/linux-x64/csweet-plugin.json
+          dotnet publish/linux-x64/CSweet.Agent.Producer.VideoGame.dll --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Published agent identity/manifest self-test failed; refusing to release the bundle.' }
           $version = '${{ steps.version.outputs.version }}'
           $bundle = "CSweet.Agent.Producer.VideoGame-$version-linux-x64.csab"
           python3 scripts/pack-csab.py pack --manifest csweet-plugin.json --publish-dir publish/linux-x64 --os linux --arch x64 --out $bundle

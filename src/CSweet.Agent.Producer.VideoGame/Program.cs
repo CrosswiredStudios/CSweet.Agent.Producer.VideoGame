@@ -15,7 +15,8 @@ if (args.Contains("--self-test", StringComparer.Ordinal))
     var errors = CrosswiredStudios.VideoGame.AgentKit.VideoGameSpecialistConformance.ValidateManifest(
         path, agent.AgentId, agent.DeclaredRoleKey, agent.PrimaryCapability);
     var passed = !result.Succeeded && manifest.Id == agent.AgentId && manifest.Version == agent.Version && errors.Count == 0;
-    Console.WriteLine(passed ? $"{agent.AgentId} {agent.Version} self-test passed." : "Agent self-test failed.");
+    Console.WriteLine(passed ? $"{agent.AgentId} {agent.Version} self-test passed."
+        : $"Agent self-test failed. Executable: {agent.AgentId} {agent.Version}; manifest: {manifest.Id} {manifest.Version}. Rebuild and publish a matching package, then update through Installed Agents.");
     Environment.ExitCode = passed ? 0 : 1;
     return;
 }

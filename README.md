@@ -57,7 +57,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.4`
+- Version: `4.0.5`
 
 Pitch refinement stops after four Producer reviews or a repeated unchanged objection, retaining the
 existing brief and unresolved questions for manager resolution. A new recorded owner decision permits
@@ -106,7 +106,14 @@ Keep `csweet-plugin.json` at the repository root. Import a reviewed GitHub commi
 clone this repository as an immediate child of C-Sweet's configured local agent catalog. Review
 the exact manifest, grants, activation mode, and source before approving installation.
 
-Built with `CSweet.Agent.SDK` 4.1.1 and `CSweet.WorkManagement.Contracts` 3.25.0, plus the bundled video-game extension source.
+For normal upgrades, publish the committed release and use **Installed Agents** to review and
+install it. Local test/publish outputs are verification artifacts; copying them into an installed
+package can separate the approved manifest from the running executable. The build checks the
+project/manifest version, runtime identity comes from build metadata, and release CI self-tests
+the published executable before packing. If a hire reports a different approved version, update
+through Installed Agents and open a fresh hiring review; an old retry retains its reviewed package.
+
+Built with `CSweet.Agent.SDK` 5.0.4 and `CSweet.WorkManagement.Contracts` 5.1.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds

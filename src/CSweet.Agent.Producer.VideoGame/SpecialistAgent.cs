@@ -4,6 +4,7 @@ using CSweet.WorkManagement.Contracts;
 using CrosswiredStudios.VideoGame.Contracts;
 using Microsoft.Extensions.AI;
 using System.Text.Json;
+using System.Reflection;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
@@ -24,7 +25,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
-    public override string Version => "4.0.4";
+    // Bind runtime identity to the build, never to a separately maintained literal or a mutable manifest.
+    public override string Version => BuildVersion;
+    private static readonly string BuildVersion = typeof(SpecialistAgent).Assembly
+        .GetCustomAttributes<System.Reflection.AssemblyMetadataAttribute>()
+        .Single(attribute => attribute.Key == "CSweetAgentVersion").Value
+        ?? throw new InvalidOperationException("The agent build version is missing.");
     protected override AgentConfigurationBuilder Configure(AgentConfigurationBuilder builder) =>
         base.Configure(builder)
             .Number("maxContextWindowTokens", "Maximum context-window tokens", required: true,

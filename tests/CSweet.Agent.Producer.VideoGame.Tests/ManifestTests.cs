@@ -8,6 +8,21 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class ManifestTests
 {
     [Fact]
+    public async Task OutputManifestAndReleaseNotes_MatchCompiledVersion()
+    {
+        var agent = new SpecialistAgent();
+        var outputManifest = await AgentManifestLoader.LoadAsync(
+            Path.Combine(AppContext.BaseDirectory, "csweet-plugin.json"), CancellationToken.None);
+        Assert.Equal(agent.AgentId, outputManifest.Id);
+        Assert.Equal(agent.Version, outputManifest.Version);
+        var project = System.Xml.Linq.XDocument.Load(Path.Combine(RepositoryRoot(),
+            "src/CSweet.Agent.Producer.VideoGame/CSweet.Agent.Producer.VideoGame.csproj"));
+        Assert.Equal(agent.Version, project.Descendants("Version").Single().Value);
+        var notes = await File.ReadAllLinesAsync(Path.Combine(RepositoryRoot(), "releases", $"{agent.Version}.md"));
+        Assert.Equal($"# {agent.Version}", notes[0]);
+    }
+
+    [Fact]
     public async Task Manifest_IsValidAndMatchesAgent()
     {
         var root = RepositoryRoot();
