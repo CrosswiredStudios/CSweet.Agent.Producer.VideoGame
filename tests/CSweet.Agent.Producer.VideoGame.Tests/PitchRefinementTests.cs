@@ -9,6 +9,101 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class PitchRefinementTests
 {
     [Fact]
+    public async Task RepeatedObjectionStopsBeforeAnotherDocumentRevisionAndSurvivesReplay()
+    {
+        var f = new Fixture();
+        f.SeedModel(1, new(false, ["Who approves audio?"], "Need authority.", Markdown));
+        var first = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(1), f.Context, default);
+        var previous = first.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        f.Add(f.Producer, first.Artifact);
+        f.Add(f.Director, PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, previous.DocumentId, previous.RevisionId, previous.RevisionSha256, false, "Use existing resources.", "")));
+        f.SeedModel(3, new(false, ["WHO approves audio ?"], "Still unclear.", Markdown + "\nRepeated demand."));
+        for (var replay = 0; replay < 2; replay++)
+        {
+            var result = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(3), f.Context, default);
+            Assert.Equal(AgentCoordinationDispositions.Blocked, result.Disposition);
+            Assert.Contains(previous.RevisionId.ToString(), result.Content);
+        }
+        Assert.Equal(1, f.Creates);
+        Assert.Equal(0, f.Revises);
+        Assert.Equal(0, f.Submits);
+        Assert.Equal(0, f.PackageCreates);
+        Assert.Empty(f.Todos);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task LegacyRepeatsAndRotatingObjectionsStopWithoutAModelEvenWhenTurnLimitIsMissing(bool sameQuestion)
+    {
+        var f = new Fixture();
+        var count = sameQuestion ? 2 : SpecialistAgent.MaximumPitchReviews;
+        for (var i = 0; i < count; i++)
+            f.Add(f.Producer, PitchProtocol.Artifact(PitchProtocol.ReviewType, f.Digest,
+                new PitchReview(f.Digest, Guid.NewGuid(), Guid.NewGuid(), "draft", false,
+                    [sameQuestion ? "Who approves audio?" : $"What is requirement {i}?"], "Unresolved.")));
+        var result = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(99), f.Context, default);
+        Assert.Equal(AgentCoordinationDispositions.Blocked, result.Disposition);
+        Assert.Equal(0, f.Creates);
+        Assert.Equal(0, f.Revises);
+    }
+
+    [Fact]
+    public async Task NewOwnerDecisionPermitsBoundedRefinementOfRetainedDraft()
+    {
+        var f = new Fixture();
+        f.SeedModel(1, new(false, ["Who approves audio?"], "Need authority.", Markdown));
+        var first = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(1), f.Context, default);
+        var review = first.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        for (var i = 0; i < SpecialistAgent.MaximumPitchReviews; i++) f.Add(f.Producer, first.Artifact);
+        f.Add(f.Director, PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, review.DocumentId, review.RevisionId, review.RevisionSha256, false,
+                "Owner confirmed existing resources; no new spending.", "") { OwnerDecisionId = Guid.NewGuid() }));
+        f.SeedModel(10, new(true, [], "Existing resources cover planning.", Markdown));
+        var result = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(10), f.Context, default);
+        Assert.Equal(AgentCoordinationDispositions.Continue, result.Disposition);
+        Assert.True(result.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!.Ready);
+        Assert.Equal(0, f.Revises);
+        Assert.Equal(1, f.Submits);
+        Assert.Equal(0, f.PackageCreates);
+    }
+
+    [Fact]
+    public async Task ReplayedOwnerDecisionDoesNotResetTheReviewBudget()
+    {
+        var f = new Fixture();
+        var decision = Guid.NewGuid();
+        var review = new PitchReview(f.Digest, Guid.NewGuid(), Guid.NewGuid(), "draft", false, ["Who approves audio?"], "Unresolved.");
+        var reply = PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, review.DocumentId, review.RevisionId, review.RevisionSha256, false, "Check existing resources.", "") { OwnerDecisionId = decision });
+        f.Add(f.Director, reply);
+        for (var i = 0; i < SpecialistAgent.MaximumPitchReviews; i++)
+            f.Add(f.Producer, PitchProtocol.Artifact(PitchProtocol.ReviewType, f.Digest, review with { Questions = [$"Question {i}?"] }));
+        f.Add(f.Director, reply);
+        var result = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(99), f.Context, default);
+        Assert.Equal(AgentCoordinationDispositions.Blocked, result.Disposition);
+        Assert.Equal(0, f.Creates);
+    }
+
+    [Fact]
+    public async Task ExactApprovalOfRetainedReadyBriefSurvivesExhaustedLegacyBudget()
+    {
+        var f = new Fixture();
+        f.SeedModel(1, new(true, [], "Existing scope supports planning.", Markdown));
+        var first = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(1), f.Context, default);
+        var review = first.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        for (var i = 0; i < SpecialistAgent.MaximumPitchReviews; i++) f.Add(f.Producer, first.Artifact);
+        f.Accept(review);
+        f.Add(f.Director, PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, review.DocumentId, review.RevisionId, review.RevisionSha256, true, "Approved exact brief.", "")));
+        var result = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(99), f.Context, default);
+        Assert.Equal(AgentCoordinationDispositions.Completed, result.Disposition);
+        Assert.Equal(1, f.PackageCreates);
+        Assert.Single(f.Todos);
+    }
+
+    [Fact]
     public async Task UnchangedBriefReusesRevisionAndCanBecomeReadyWithoutADeadline()
     {
         var f = new Fixture();
