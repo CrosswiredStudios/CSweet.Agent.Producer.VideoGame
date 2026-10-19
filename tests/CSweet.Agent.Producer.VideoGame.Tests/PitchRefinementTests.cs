@@ -8,6 +8,27 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class PitchRefinementTests
 {
+    [Fact]
+    public async Task UnchangedBriefReusesRevisionAndCanBecomeReadyWithoutADeadline()
+    {
+        var f = new Fixture();
+        f.SeedModel(1, new(false, ["Who may approve audio licensing?"], "Need authority.", Markdown));
+        var first = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(1), f.Context, default);
+        var review = first.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        f.Add(f.Producer, first.Artifact, first.Content);
+        f.Add(f.Director, PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, review.DocumentId, review.RevisionId, review.RevisionSha256, false,
+                "Use supplied audio only. Plan continuously with completion forecasts; no deadline is needed.", "") { OwnerDecisionId = Guid.NewGuid() }));
+        f.SeedModel(3, new(true, [], "Existing scope and resources suffice; feasibility refines the forecast.", Markdown));
+        var ready = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(3), f.Context, default);
+        var revised = ready.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        Assert.Equal(review.RevisionId, revised.RevisionId);
+        Assert.True(revised.Ready);
+        Assert.Equal(0, f.Revises);
+        Assert.Equal(1, f.Submits);
+        Assert.Equal(0, f.PackageCreates); // Still needs Naomi's exact-revision acceptance.
+    }
+
     internal static string Markdown => string.Join("\n", new[] { "Scope", "Player experience", "Non-goals", "Acceptance criteria", "Deliverables", "Constraints", "Risks", "Open questions" }.Select(x => $"## {x}\nPlanning detail for {x}."));
 
     [Fact]

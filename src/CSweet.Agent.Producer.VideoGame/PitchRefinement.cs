@@ -51,6 +51,14 @@ public sealed partial class SpecialistAgent
                     already answered. Incorporate the Director's answers and edits into the complete shared brief.
                     Preserve accepted scope and non-goals. Distinguish unresolved product questions from technical
                     investigations that can safely become planned work. Do not invent estimates, approvals or facts.
+                    Delivery is forecast-driven. Missing deadlines, dates or a fixed schedule are not blocking
+                    questions and do not require permission to proceed. Forecast completion after feasibility
+                    and estimates; preserve any explicit external date constraint separately. No deadline does
+                    not authorize spending. Planning readiness is not a production, schedule or spending lock.
+                    Missing specialist feasibility evidence is planned work, not a prerequisite to proposing
+                    the staffing needed to obtain it. Incorporate authoritative decisions relayed by your manager.
+                    This policy supersedes earlier transcript demands for dates or approval solely because dates
+                    were absent. Remove those obsolete questions; preserve genuine external constraints and authority gaps.
                     Return JSON: ready (boolean), questions (string array), rationale (string), draftMarkdown (string).
                     Only set ready=true when you have no remaining planning-blocking questions and can explain
                     a sufficient delivery approach. It requires an empty questions array. Missing hires do not block
@@ -91,8 +99,10 @@ public sealed partial class SpecialistAgent
             else
             {
                 document = await context.Platform.Artifacts.GetAsync(previous.DocumentId, token);
-                revision = await context.Platform.Artifacts.ReviseAsync(new CreateArtifactRevision(document.Id,
-                    previous.RevisionId, documentContent, documentKey), token);
+                var prior = document.Revisions.Single(x => x.Id == previous.RevisionId);
+                revision = prior.Content == documentContent ? prior :
+                    await context.Platform.Artifacts.ReviseAsync(new CreateArtifactRevision(document.Id,
+                        previous.RevisionId, documentContent, documentKey), token);
             }
             if (review.Ready)
                 await context.Platform.Artifacts.SubmitAsync(new SubmitArtifactRevision(document.Id, revision.Id,

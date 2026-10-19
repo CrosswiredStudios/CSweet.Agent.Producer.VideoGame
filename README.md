@@ -57,7 +57,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.0`
+- Version: `4.0.1`
 
 Progressive outline verification includes the Technical Director's empty `DependencyPins` ledger in the frozen scope digest. The exact saved outline can advance without regeneration; altered scope still fails validation. Terminal progressive validation/refinement failures retain the recovery marker, so attention wakes do not repeatedly requeue unchanged work. Retry remains explicit after the cause is corrected. The matching platform classifies historical digest failures as technical issues and uses the normalized report's owner-input policy.
 
@@ -385,3 +385,9 @@ Activation defaults to OnDemand. Durable messages, assignments, scheduled duties
 ## Small tasks and comment revisions
 
 Require small independently deliverable tasks and Technical Director implementation briefs in both planning flows. Resume revision waits only after an explicit correlated correction comment. Keep clarification/replacement requests blocked, escalate replacement recommendations, and prevent plain retries from bypassing them. Comments can supersede specific implementation guidance, but cannot waive accepted outcomes, criteria, reviews or grants. Substantial changes require linked replacement tickets through governed replanning; a replacement recommendation is not automatic cancellation or execution authority. The original stays blocked until that planning is applied.
+
+## Forecast-driven planning
+
+Use forecast-driven planning: absent deadlines never block brief readiness or staffing proposals. Technical feasibility and estimates refine forecasts after authorized staffing. Incorporate authoritative answers relayed by Naomi and reuse unchanged brief revisions. Exact-revision acceptance remains required.
+
+Package dependencies: WorkManagement.Contracts 5.1.0 and SDK 5.0.2. No deadline is invented and no date is required to submit an otherwise sufficient brief for creative acceptance.
