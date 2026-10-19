@@ -57,7 +57,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.5`
+- Version: `4.0.6`
 
 Pitch refinement stops after four Producer reviews or a repeated unchanged objection, retaining the
 existing brief and unresolved questions for manager resolution. A new recorded owner decision permits
