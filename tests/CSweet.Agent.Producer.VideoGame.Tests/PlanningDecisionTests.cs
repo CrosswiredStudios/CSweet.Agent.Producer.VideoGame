@@ -6,6 +6,35 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class PlanningDecisionTests
 {
+    [Theory]
+    [InlineData("material-strategy-change")]
+    [InlineData("material-management-direction")]
+    [InlineData("work-planning")]
+    public async Task Owner_answer_is_preserved_and_supplied_for_replanning_without_a_replacement_question(string rule)
+    {
+        var stream = Guid.NewGuid();
+        var answer = PlanningDecision(stream, "Review the prototype decision pack after it exists.") with {
+            AuthorityRuleKey = rule, SelectedOptionId = "provide-direction", Rationale = "do what is needed to get started"
+        };
+        var old = answer with { Id = Guid.NewGuid(), AuthorityRuleKey = "work-planning", Status = DecisionStatuses.Superseded,
+            SelectedOptionId = null, Rationale = null, SupersededByDecisionId = answer.Id };
+        var handoff = new ProducerAcceptedHandoff(stream, Guid.NewGuid(), Guid.NewGuid(), "accepted-sha", "handoff",
+            Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
+        var runtime = new AgentTestRuntime().RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(
+            PlatformCapabilities.DecisionRead, (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([old, answer]));
+        // No decision-write capability is registered: reconciliation must retain the owner answer.
+        var current = await SpecialistAgent.EnsurePlanningDecisionsAsync(stream, Guid.NewGuid(), "scope",
+            [answer.Summary], handoff, runtime.CreateContext(), default);
+        Assert.Equal(JsonSerializer.Serialize(answer), JsonSerializer.Serialize(current.Single(x => x.Id == answer.Id)));
+        var direction = Assert.Single(SpecialistAgent.ResolvedPlanningDirections(current, stream, "accepted-sha"));
+        Assert.Contains(answer.Id.ToString("D"), direction); Assert.Contains(answer.Rationale!, direction);
+        Assert.Contains(answer.Id.ToString("D"), SpecialistAgent.DescribePlanningBlocker([answer.Summary], current, stream, "accepted-sha", "Gabriel"));
+        Assert.Single(SpecialistAgent.UnresolvedPlanningQuestions([answer.Summary], current, stream, "accepted-sha"));
+        Assert.Empty(SpecialistAgent.ResolvedPlanningDirections([answer with { SupersededByDecisionId = Guid.NewGuid() },
+            answer with { WorkstreamId = Guid.NewGuid() }, answer with { Evidence = [] },
+            answer with { AuthorityRuleKey = "unrelated" }], stream, "accepted-sha"));
+    }
+
     [Fact]
     public void BlockerReportsExactEvidenceRequestAndExcludesResolvedOrForeignQuestions()
     {

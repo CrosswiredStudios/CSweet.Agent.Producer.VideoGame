@@ -2,7 +2,7 @@
 
 Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
-`AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 5.0.2 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
+`AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 5.0.4 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
 
 
 `ProgressivePublishedItems` ignores unrelated human follow-up title prefixes and rejects duplicate authoritative proposal identities. Staffing preserves the active increment's exact Epic set. `ReadProgressiveContinuationAsync` wakes accepted increments through current-state reads, with durable revision-bound recovery receipts that prevent duplicate events from resetting failed retries. Deferred release QA stays on the board. `ProgressiveSprintHandoffTests` covers the successor path through estimates, readiness and preflight to a single sprint start.
@@ -57,7 +57,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.2`
+- Version: `4.0.4`
 
 Pitch refinement stops after four Producer reviews or a repeated unchanged objection, retaining the
 existing brief and unresolved questions for manager resolution. A new recorded owner decision permits
@@ -397,4 +397,4 @@ Require small independently deliverable tasks and Technical Director implementat
 
 Use forecast-driven planning: absent deadlines never block brief readiness or staffing proposals. Technical feasibility and estimates refine forecasts after authorized staffing. Incorporate authoritative answers relayed by Naomi and reuse unchanged brief revisions. Exact-revision acceptance remains required.
 
-Package dependencies: WorkManagement.Contracts 5.1.0 and SDK 5.0.2. No deadline is invented and no date is required to submit an otherwise sufficient brief for creative acceptance.
+Package dependencies: WorkManagement.Contracts 5.1.0 and SDK 5.0.4. No deadline is invented and no date is required to submit an otherwise sufficient brief for creative acceptance.

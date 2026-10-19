@@ -9,13 +9,17 @@ public sealed partial class SpecialistAgent
 {
     internal const string PlanningDecisionBlockMarker = "Planning needs specific decision follow-up.";
 
+    private static bool IsPlanningDirection(DecisionRecord decision, Guid workstreamId, string acceptedBriefDigest) =>
+        decision.WorkstreamId == workstreamId && decision.TypeKey == "video-game.management-direction.v1" &&
+        decision.AuthorityRuleKey is "work-planning" or "material-strategy-change" or "material-management-direction" &&
+        decision.Status != DecisionStatuses.Superseded && decision.SupersededByDecisionId is null &&
+        decision.Evidence.Any(e => e.TypeKey == "video-game.production-plan.v1" &&
+            e.Digest == acceptedBriefDigest && e.Status == "Accepted");
+
     private static IEnumerable<DecisionRecord> CurrentPlanningDecisions(IReadOnlyList<string> questions,
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
-        decisions.Where(x => x.WorkstreamId == workstreamId &&
-            x.TypeKey == "video-game.management-direction.v1" && x.AuthorityRuleKey == "work-planning" &&
-            x.SupersededByDecisionId is null && questions.Any(q => q.Trim() == x.Summary.Trim()) &&
-            x.Evidence.Any(e => e.TypeKey == "video-game.production-plan.v1" &&
-                e.Digest == acceptedBriefDigest && e.Status == "Accepted"));
+        decisions.Where(x => IsPlanningDirection(x, workstreamId, acceptedBriefDigest) &&
+            questions.Any(q => q.Trim() == x.Summary.Trim()));
 
     internal static string PlanningDecisionFingerprint(IReadOnlyList<string> questions,
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
@@ -96,13 +100,9 @@ public sealed partial class SpecialistAgent
 
     internal static IReadOnlyList<string> ResolvedPlanningDirections(
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
-        decisions.Where(x => x.WorkstreamId == workstreamId &&
-                x.TypeKey == "video-game.management-direction.v1" &&
-                x.AuthorityRuleKey == "work-planning" && x.Status == DecisionStatuses.Decided &&
+        decisions.Where(x => IsPlanningDirection(x, workstreamId, acceptedBriefDigest) && x.Status == DecisionStatuses.Decided &&
                 x.SelectedOptionId == "provide-direction" &&
-                !string.IsNullOrWhiteSpace(x.Rationale) &&
-                x.Evidence.Any(e => e.TypeKey == "video-game.production-plan.v1" &&
-                    e.Digest == acceptedBriefDigest))
+                !string.IsNullOrWhiteSpace(x.Rationale))
             .OrderBy(x => x.Id)
             .Select(x => $"Decision {x.Id:D}: {x.Summary} => {x.SelectedOptionId}. {x.Rationale}")
             .ToArray();
@@ -112,12 +112,9 @@ public sealed partial class SpecialistAgent
     // decisions from approving scope. Material direction still requires specialist revision.
     internal static IReadOnlyList<string> UnresolvedPlanningQuestions(IReadOnlyList<string> questions,
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
-        questions.Where(question => !decisions.Any(x => x.WorkstreamId == workstreamId &&
-            x.TypeKey == "video-game.management-direction.v1" && x.AuthorityRuleKey == "work-planning" &&
+        questions.Where(question => !decisions.Any(x => IsPlanningDirection(x, workstreamId, acceptedBriefDigest) &&
             x.Status == DecisionStatuses.Decided && x.SelectedOptionId == "continue-current-plan" &&
-            !string.IsNullOrWhiteSpace(x.Rationale) && x.Summary.Trim() == question.Trim() &&
-            x.Evidence.Any(e => e.TypeKey == "video-game.production-plan.v1" &&
-                e.Digest == acceptedBriefDigest && e.Status == "Accepted")))
+            !string.IsNullOrWhiteSpace(x.Rationale) && x.Summary.Trim() == question.Trim()))
             .Distinct(StringComparer.Ordinal).ToArray();
 
     internal static async Task<IReadOnlyList<DecisionRecord>> EnsurePlanningDecisionsAsync(Guid workstreamId, Guid boardId,
@@ -130,6 +127,11 @@ public sealed partial class SpecialistAgent
         foreach (var request in PlanningDecisionRequests(workstreamId, boardId, fingerprint,
             UnresolvedPlanningQuestions(questions, existing, workstreamId, handoff.RevisionDigest), handoff))
         {
+            // Owner-routed decisions may supersede the original manager question.
+            // Preserve the recorded answer and pass its direction to the specialist;
+            // provide-direction does not itself waive unresolved acceptance questions.
+            if (CurrentPlanningDecisions([request.Summary], current, workstreamId, handoff.RevisionDigest)
+                .Any(x => x.Status == DecisionStatuses.Decided)) continue;
             // Replace earlier owner-routed planning questions with a manager-owned
             // decision. Keep the old record and card as superseded audit history.
             var legacy = existing.FirstOrDefault(x => x.TypeKey == request.TypeKey &&
