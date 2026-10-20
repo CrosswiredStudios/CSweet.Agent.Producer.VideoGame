@@ -64,7 +64,7 @@ public sealed class DirectedDeliveryRecoveryTests
             .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
                 (write, _) => {
                     Assert.False(states.ContainsKey(write.StateKey));
-                    var saved = new AgentOperatingStateResponse(Guid.NewGuid(), write.StateKey, write.SchemaId, 1, "Active",
+                    var saved = new AgentOperatingStateResponse(Guid.NewGuid(), write.StateKey, write.SchemaId, 1, write.Status,
                         new Dictionary<string,string>(), [], write.StateKey, [], Guid.NewGuid(), write.Payload, 1, now, now);
                     states.Add(write.StateKey, saved); return Task.FromResult(saved);
                 })
@@ -118,16 +118,16 @@ public sealed class DirectedDeliveryRecoveryTests
             Assert.Equal(2, states.Count); // Immutable scope page and header, neither rewritten on replay.
             Assert.Contains(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("Queued durable sprint recovery"));
         }
-        else if (scenario == "ancestor-amend")
+        else if (scenario is "ancestor-amend" or "amend-running")
         {
             await agent.HandleEventAsync(envelope, context, default);
             var todo = Assert.Single(todos);
-            var saved = await SpecialistAgent.ReadRoleRepairRequestAsync(todo.CorrelationId!, context, default);
-            Assert.Equal(turn, saved!.ScopeAuthorizingTurnId);
-            Assert.Single(saved.ScopeReplacements);
-            Assert.Equal("Independent QA", saved.OriginalItems[0].Planning!.AcceptanceCriteria[0]);
-            Assert.Equal(2, states.Count);
-            Assert.Contains(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("Queued the authorized scope amendment"));
+            var saved = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(SpecialistAgent.PendingScopeKey(board), default);
+            Assert.Equal(turn, saved!.Payload.Source.TurnId);
+            Assert.Equal("Pending", saved.Status);
+            Assert.Equal(sourceItem.PlanningRevision, saved.Payload.PlanningRevisions[sourceItem.Id]);
+            Assert.Single(states);
+            Assert.Contains(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("I saved your scope amendment"));
         }
         else { Assert.Empty(states); Assert.Empty(todos); }
     }

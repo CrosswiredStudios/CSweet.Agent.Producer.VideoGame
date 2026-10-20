@@ -57,7 +57,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.6`
+- Version: `4.0.7`
 
 Pitch refinement stops after four Producer reviews or a repeated unchanged objection, retaining the
 existing brief and unresolved questions for manager resolution. A new recorded owner decision permits
@@ -275,7 +275,7 @@ attempt counts or claims acceptance.
 
 ## Owner-directed scope amendments (2.11.0)
 
-`Amend ticket IDENTIFIER: direction` accepts an explicit current-message correction from the Producer's authenticated reporting chain. It discovers one current execution on a board the Producer manages, requires a stopped review boundary and no concurrent work or other pending approval, and records the authorizing turn plus bounded exact before/after replacements. Historical chat, retrieved content and colleague messages cannot authorize this action. General setup/staffing authority is unchanged.
+`Amend ticket IDENTIFIER: direction` accepts an explicit current-message correction from the Producer's authenticated reporting chain. It discovers one current execution on a board the Producer manages, retains the authenticated source direction even while work is running. It prepares bounded exact before/after replacements only at a stopped review boundary with no concurrent work or other pending approval. Arbitrary historical chat, retrieved content and colleague messages cannot authorize this action; the bounded upgrade recovery described below requires the exact original authenticated turn and Producer refusal. General setup/staffing authority is unchanged.
 
 The Producer obtains a corrected Technical Director proposal, checks it against the exact amendment while preserving unrelated criteria, ticket hierarchy, dependencies, roles and completed work, and then uses the normal cancellation/carryover workflow. Original attempts and source publications remain in history. Revised delivery briefs are finalized from the new canonical planning so coding and QA do not receive stale criteria. New estimates and QA readiness still govern the replacement sprint. A scope amendment never marks delivery accepted or missing measurements passed, and cannot edit an active assignment. Repeating the same chat turn recovers the durable request; a different direction at the same review boundary is rejected instead of overwriting it.
 ## Large planning handoffs (2.11.2)
@@ -405,3 +405,11 @@ Require small independently deliverable tasks and Technical Director implementat
 Use forecast-driven planning: absent deadlines never block brief readiness or staffing proposals. Technical feasibility and estimates refine forecasts after authorized staffing. Incorporate authoritative answers relayed by Naomi and reuse unchanged brief revisions. Exact-revision acceptance remains required.
 
 Package dependencies: WorkManagement.Contracts 5.1.0 and SDK 5.0.4. No deadline is invented and no date is required to submit an otherwise sufficient brief for creative acceptance.
+
+## Retained scope amendments (4.0.7)
+
+`DeferredScopeAmendment.RetainScopeAmendmentAsync` persists an owner-directed amendment before creating its agenda commitment. `RecoverPendingScopeAmendmentsAsync` uses existing work-state/attention wakes and bounded board discovery to repair missed agenda creation and wake the exact waiting commitment when the boundary becomes safe. The scheduled wait remains a reconnect fallback; there is no agent polling loop.
+
+`ReconcilePendingScopeAmendmentAsync` verifies the saved source message and current reporting chain, board/project/team ownership, exact sprint/stage and unchanged planning revisions. It hands the request to `ApplyScopeAmendmentAsync` and the existing corrected-planning workflow. Changed or revoked authority/scope holds the saved direction for review. Captures and state transitions use expected revisions; replay cannot overwrite an outstanding direction or duplicate its planning commitment. Existing source, attempt history, review and sprint mutation protections remain in force.
+
+Upgrade recovery checks up to 32 recent direct conversations, with up to 200 returned messages each. It recognizes only this Producer's exact historical stopped-boundary refusal paired with the original authorized command and conversation turn, and ignores superseded directions and changed stage boundaries. This recovers the earlier refused request without resending it when those records and authority remain current. Local tests do not modify the running installation; publish this release and update the Producer through Installed Agents.

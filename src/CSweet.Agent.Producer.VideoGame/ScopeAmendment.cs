@@ -18,9 +18,9 @@ public sealed partial class SpecialistAgent
                 s.Id != stageId && s.Status == "WaitingForApproval"));
     }
 
-    private async Task<string> QueueScopeAmendmentAsync(WorkSprintExecutionResponse execution,
+    private async Task<string> ApplyScopeAmendmentAsync(WorkSprintExecutionResponse execution,
         WorkItemExecutionResponse item, WorkStageExecutionResponse? stage, string direction, Guid turnId,
-        AgentRuntimeContext context, CancellationToken token)
+        AgentRuntimeContext context, CancellationToken token, IReadOnlyDictionary<Guid, long>? expectedPlanning = null)
     {
         if (stage is null || !CanAmendScope(execution, item.WorkItemId, stage.Id))
             return "Scope amendment requires the current work to reach a stopped review boundary. No running assignment or sprint was changed.";
@@ -28,6 +28,9 @@ public sealed partial class SpecialistAgent
         if (board.Board.ManagerOrganizationUserId?.ToString() != context.Identity?.EmployeeId ||
             board.Board.WorkstreamId is not { } project || board.Board.TeamId is not { } team)
             throw new InvalidOperationException("Scope amendment requires my current project/team board assignment.");
+        if (expectedPlanning is not null && (board.Items.Count != expectedPlanning.Count ||
+            board.Items.Any(x => !expectedPlanning.TryGetValue(x.Id, out var revision) || revision != x.PlanningRevision)))
+            throw new InvalidOperationException("Planning changed before amendment preparation; the retained direction needs review.");
         var key = RoleRepairPrefix + stage.Id.ToString("N");
         var saved = await ReadRoleRepairRequestAsync(key, context, token);
         if (saved is not null && (saved.ScopeDirection != direction || saved.ScopeAuthorizingTurnId != turnId))

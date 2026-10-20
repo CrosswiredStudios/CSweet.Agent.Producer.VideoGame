@@ -32,7 +32,9 @@ public sealed partial class SpecialistAgent
             if (TryReadRetryDirection(recoveryMessage, out var retryTicket, out var retryReason))
             {
                 var result = recoverySupervisor
-                    ? await RetryDirectedTicketAsync(retryTicket, retryReason, incoming.TurnId, context, cancellationToken, replan, amend)
+                    ? await RetryDirectedTicketAsync(retryTicket, retryReason, incoming.TurnId, context, cancellationToken, replan, amend,
+                        amend ? new ScopeAmendmentSource(Guid.Parse(incoming.Context![CommunicationMessageContextKeys.SenderOrganizationUserId]),
+                            conversation, incoming.MessageId, incoming.TurnId) : null)
                     : "A retry or scope amendment requires direction from my reporting chain.";
                 await stream.CommitAsync(result, cancellationToken);
                 return;

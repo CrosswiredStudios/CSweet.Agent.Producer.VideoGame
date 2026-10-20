@@ -166,6 +166,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (item.CorrelationId?.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal) == true)
+            return await ReconcilePendingScopeAmendmentAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(WorkflowRecoveryPrefix, StringComparison.Ordinal) == true)
             return await ReconcileWorkflowRecoveryAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(SprintRecoveryPrefix, StringComparison.Ordinal) == true)
@@ -223,6 +225,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return;
         }
         var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken);
+        await RecoverPendingScopeAmendmentsAsync(context, cancellationToken, boards);
         var snapshots = new List<ProducerMetricSnapshot>();
         var phases = new Dictionary<Guid, ProducerManagementPhase>();
         var commitments = new List<string>();
@@ -517,7 +520,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken,
         bool hiringDependencyReady = false,
-        ProgressiveContinuation? progressiveContinuation = null)
+        ProgressiveContinuation? progressiveContinuation = null,
+        bool scopeAmendmentReady = false)
     {
         var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
         var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
@@ -544,7 +548,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existingContext.WorkstreamId == workContext.WorkstreamId && workContext.WorkstreamId.HasValue &&
                 existingContext.TeamId == workContext.TeamId && workContext.TeamId.HasValue &&
                 existingContext.SourceFingerprint == workContext.SourceFingerprint;
-            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared && !acceptanceCleared)
+            var amendmentCleared = scopeAmendmentReady && correlationId.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal) &&
+                existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
+            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared && !acceptanceCleared && !amendmentCleared)
                 return existing;
             // A terminal planning conflict must not be requeued on every attention tick.
             // A later recovery generation may reassess it once with new repair logic.
@@ -612,7 +618,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var correlation = item.CorrelationId ?? string.Empty;
         if (correlation.StartsWith("producer-blocker:", StringComparison.Ordinal) ||
             correlation.StartsWith(StaffingGapCommitmentPrefix, StringComparison.Ordinal) ||
-            correlation.StartsWith(RoleRepairPrefix, StringComparison.Ordinal)) return 0;
+            correlation.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) ||
+            correlation.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal)) return 0;
         if (correlation.StartsWith("producer-gate:", StringComparison.Ordinal)) return 1;
         if (correlation.StartsWith(SprintReadinessCommitmentPrefix, StringComparison.Ordinal)) return 2;
         if (correlation.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) ||

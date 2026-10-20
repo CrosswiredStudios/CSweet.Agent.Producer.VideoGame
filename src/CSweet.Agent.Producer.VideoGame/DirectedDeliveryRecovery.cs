@@ -18,7 +18,8 @@ public sealed partial class SpecialistAgent
     }
 
     private async Task<string> RetryDirectedTicketAsync(string identifier, string reason,
-        Guid turnId, AgentRuntimeContext context, CancellationToken token, bool replan = false, bool amend = false)
+        Guid turnId, AgentRuntimeContext context, CancellationToken token, bool replan = false, bool amend = false,
+        ScopeAmendmentSource? source = null)
     {
         var producer = Guid.Parse(context.Identity!.EmployeeId);
         var boards = (await context.Platform.Work.ListBoardsAsync(cancellationToken: token))
@@ -40,7 +41,8 @@ public sealed partial class SpecialistAgent
         if (matches.Count != 1) return "The ticket does not identify exactly one current execution on a board I manage. No retry was requested.";
         var (current, item) = matches[0];
         var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
-        if (amend) return await QueueScopeAmendmentAsync(current, item, stage, reason, turnId, context, token);
+        if (amend) return source is null ? "Scope amendment requires its authenticated source turn."
+            : await RetainScopeAmendmentAsync(current, item, stage, reason, source, context, token);
         if (replan) return await QueueSprintRecoveryAsync(current, item, stage, reason, context, token);
         if (stage?.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) == true)
         {
