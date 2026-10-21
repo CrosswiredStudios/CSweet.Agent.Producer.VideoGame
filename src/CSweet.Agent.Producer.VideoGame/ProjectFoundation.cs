@@ -96,10 +96,22 @@ public sealed partial class SpecialistAgent
             request.Transcript.Any(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
                 x.Disposition == AgentCoordinationDispositions.Blocked) ? $"{request.SessionId:N}:{request.TurnOrdinal}" : "initial");
         if (prepared.Plan is null) return AgentCoordinationTurnResult.Blocked(prepared.Error!);
+        var plan = prepared.Plan;
+        // New Director handoffs bind the inferred product identity separately from delivery planning.
+        // Legacy handoffs and explicit manager revisions retain their existing proposal behavior.
+        if (feedback is null && original.Payload.TryGetProperty("projectIdentity", out var identity))
+        {
+            if (identity.ValueKind != JsonValueKind.Object ||
+                !identity.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String ||
+                !identity.TryGetProperty("description", out var description) || description.ValueKind != JsonValueKind.String ||
+                title.GetString() != template.Name || description.GetString() != template.Outcome)
+                return AgentCoordinationTurnResult.Blocked("The inferred project identity must match the manager's project template.");
+            plan = plan with { Name = template.Name, Outcome = template.Outcome };
+        }
         MutationResponse result;
         try
         {
-            result = await context.Platform.ProposeWorkstreamAsync(prepared.Plan, token);
+            result = await context.Platform.ProposeWorkstreamAsync(plan, token);
         }
         catch (PlatformCapabilityException ex) when (ex.Code == PlatformCapabilityErrorCode.ValidationFailed)
         {

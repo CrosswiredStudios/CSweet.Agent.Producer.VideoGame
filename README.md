@@ -57,7 +57,13 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.7`
+- Version: `4.0.8`
+
+`ProposeProjectFoundationAsync` preserves the Creative Director's inferred title and player-facing
+marketing blurb when the initial foundation payload binds `projectIdentity` to the project template.
+The Producer refines delivery rationale, success criteria and milestones without replacing that blurb
+with a planning summary. Legacy payloads and explicit manager-requested revisions retain their prior
+behavior. Use with Creative Director 2.1.7 through published releases and Installed Agents updates.
 
 Pitch refinement stops after four Producer reviews or a repeated unchanged objection, retaining the
 existing brief and unresolved questions for manager resolution. A new recorded owner decision permits

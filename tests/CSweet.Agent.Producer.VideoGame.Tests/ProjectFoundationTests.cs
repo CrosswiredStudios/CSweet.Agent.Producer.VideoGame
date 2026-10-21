@@ -94,9 +94,14 @@ public sealed class ProjectFoundationTests
         Assert.Equal(submissions[0].IdempotencyKey, submissions[1].IdempotencyKey);
     }
 
-    [Fact]
-    public async Task ProducerOwnsSubmissionAndModelCannotReplaceAuthorityIdentityOrEvidence()
+    [Theory]
+    [InlineData("legacy")]
+    [InlineData("inferred")]
+    [InlineData("mismatched")]
+    [InlineData("malformed")]
+    public async Task ProducerOwnsSubmissionAndModelCannotReplaceAuthorityIdentityOrEvidence(string identityBinding)
     {
+        var inferredIdentity = identityBinding != "legacy";
         var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var proposalId = Guid.NewGuid(); var team = Guid.NewGuid();
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var template = new WorkstreamPlanProposalV2Request("Game", "Accepted prototype", ["Playable"], "Concept", producer, team, [], [],
@@ -111,7 +116,7 @@ public sealed class ProjectFoundationTests
                     r.SourceRevisions, r.ConditionCodes, r.DecisionFingerprint, r.OpenCommitmentCorrelations, r.AttentionReviewId, r.Payload, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)))
             .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (_, _) => {
                 models++; return Task.FromResult(JsonSerializer.SerializeToElement(new { text = JsonSerializer.Serialize(template with {
-                    AccountableManagerOrganizationUserId = Guid.NewGuid(), InitialTeamId = null, ProfileKey = "invented", Outcome = "Refined delivery scope",
+                    Name = "Invented game name", AccountableManagerOrganizationUserId = Guid.NewGuid(), InitialTeamId = null, ProfileKey = "invented", Outcome = "Refined delivery scope",
                     AuthorityEnvelope = new(null, null, [], [], ["launch"], null) }, json), role = "assistant" })); })
             .RegisterCapability<WorkstreamPlanProposalV2Request, MutationResponse>("platform.workstream.plan.propose.v2", (r, _) => {
                 submitted.Add(r); return Task.FromResult(new MutationResponse(false, 0, proposalId, "Pending")); });
@@ -121,15 +126,33 @@ public sealed class ProjectFoundationTests
             JsonSerializer.SerializeToElement(new UpdateAgentConfigurationRequest(new Dictionary<string, JsonElement> {
                 ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid()), ["llmModel"] = JsonSerializer.SerializeToElement("test") }))), context, default);
         Assert.True(configured.Succeeded, configured.Error);
+        var payload = JsonSerializer.SerializeToElement(template, json);
+        if (inferredIdentity)
+        {
+            var fields = payload.EnumerateObject().ToDictionary(x => x.Name, x => x.Value.Clone());
+            fields["projectIdentity"] = identityBinding == "malformed" ? JsonSerializer.SerializeToElement("invalid") :
+                JsonSerializer.SerializeToElement(new { title = identityBinding == "mismatched" ? "Other game" : template.Name, description = template.Outcome });
+            payload = JsonSerializer.SerializeToElement(fields);
+        }
         var request = new AgentCoordinationTurnRequest(Guid.NewGuid(), 1, 1, "Create project", "Review proposal", [],
             new(producer, Guid.NewGuid(), "Producer", "Producer"), new(manager, Guid.NewGuid(), "Director", "Director"), false,
             [new(Guid.NewGuid(), 0, manager, "Continue", "Prepare proposal", DateTimeOffset.UtcNow,
-                new("video-game.project-foundation.request.v1", "1.0", "vision-digest", 1, true, JsonSerializer.SerializeToElement(template, json), "digest"))]);
+                new("video-game.project-foundation.request.v1", "1.0", "vision-digest", 1, true, payload, "digest"))]);
         var first = await agent.HandleCoordinationTurnAsync(request, context, default);
         var replay = await agent.HandleCoordinationTurnAsync(request, context, default);
-        Assert.Equal(1, models); Assert.Equal(2, submitted.Count);
+        Assert.Equal(1, models);
+        if (identityBinding is "mismatched" or "malformed")
+        {
+            Assert.Empty(submitted);
+            Assert.Equal("Blocked", first.Disposition);
+            Assert.Equal("Blocked", replay.Disposition);
+            return;
+        }
+        Assert.Equal(2, submitted.Count);
         Assert.Equal(submitted[0].IdempotencyKey, submitted[1].IdempotencyKey);
         Assert.All(submitted, x => { Assert.Equal(producer, x.AccountableManagerOrganizationUserId); Assert.Equal(team, x.InitialTeamId);
+            Assert.Equal(template.Name, x.Name);
+            Assert.Equal(inferredIdentity ? template.Outcome : "Refined delivery scope", x.Outcome);
             Assert.Equal(template.ProfileKey, x.ProfileKey); Assert.Contains("launch", x.AuthorityEnvelope.HumanRequiredActionKeys); });
         Assert.Equal("Continue", first.Disposition);
         Assert.Equal(proposalId, first.Artifact!.Payload.GetProperty("proposalId").GetGuid());
