@@ -45,8 +45,20 @@ public sealed partial class SpecialistAgent
         var source = request.OriginalItems.Single(x => x.Id == request.WorkItemId);
         if (source.Planning is null) throw new InvalidOperationException("Role repair requires pinned canonical planning.");
         var artifact = PlanningArtifact(cycle, members);
-        if (request.ScopeDirection is not null) return artifact;
         var payload = JsonNode.Parse(artifact.Payload.GetRawText())!.AsObject();
+        if (request.ScopeDirection is not null)
+        {
+            _ = ScopeExpectedItems(request);
+            payload["scopeAmendment"] = JsonSerializer.SerializeToNode(new
+            {
+                schemaVersion = 1, sourceWorkItemId = source.Id,
+                authorizingTurnId = request.ScopeAuthorizingTurnId,
+                sourcePlanningDigests = request.OriginalItems.ToDictionary(x => x.Id,
+                    x => Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(x.Planning)))),
+                replacements = request.ScopeReplacements
+            }, AcceptanceJson);
+            return artifact with { Payload = JsonSerializer.SerializeToElement(payload) };
+        }
         payload["roleRepair"] = JsonSerializer.SerializeToNode(new
         {
             schemaVersion = 1,
@@ -67,7 +79,7 @@ public sealed partial class SpecialistAgent
             var findings = new List<string> { error.Message };
             if (request.ScopeDirection is not null)
             {
-                foreach (var expected in ScopeExpectedItems(request).Where(x => x.Status != "Cancelled"))
+                foreach (var expected in ScopeExpectedItems(request).Where(x => x.Status != "Cancelled" && ProposalKey(x) is not null))
                 {
                     var key = ProposalKey(expected);
                     var actual = items.SingleOrDefault(x => x.ProposalKey == key);

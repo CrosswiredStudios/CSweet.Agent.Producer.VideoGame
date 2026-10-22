@@ -46,14 +46,17 @@ public sealed class ScopeHandoffTests
         for (var i = 0; i < 2; i++)
             await SpecialistAgent.EnsurePlanningSessionAsync(member, cycle.BoardId, cycle, "Planning", new string('o', 1000),
                 "video-game.production.technical-delivery-proposal.v1", [], directions, runtime.CreateContext(), default,
-                SpecialistAgent.RoleRepairContext(request));
+                SpecialistAgent.RoleRepairContext(request), roleRepair: request);
         Assert.Equal(calls[0].IdempotencyKey, calls[1].IdempotencyKey);
         Assert.All(calls, call => {
             Assert.InRange(call.InitialMessage.Length, 1, 32768);
-            var complete = call.Artifact!.Payload.GetProperty("coordinationContext").GetString()!;
+            var complete = call.InitialMessage;
             Assert.InRange(call.Artifact.Payload.GetRawText().Length, 1, 65536);
             Assert.Contains(directions[0], complete);
             Assert.Contains(SpecialistAgent.RoleRepairContext(request), complete);
+            var replacements = call.Artifact.Payload.GetProperty("scopeAmendment").GetProperty("replacements")
+                .Deserialize<ScopeTextReplacement[]>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            Assert.Equal(request.ScopeReplacements, replacements);
             Assert.Equal(cycle, call.Artifact.Payload.Deserialize<GameProductionPlanningCycleV1>());
         });
     }

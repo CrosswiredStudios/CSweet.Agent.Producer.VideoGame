@@ -721,7 +721,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (roleRepair is null ? RoleBoundary : RoleRepairObjective(roleRepair)),
             "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken,
             roleRepair is null ? null : RoleRepairContext(roleRepair), reusePrior ? priorCycle?.TechnicalDirectorSessionId : null,
-            progressivePlanning: roleRepair is null && designer is null);
+            progressivePlanning: roleRepair is null && designer is null, roleRepair: roleRepair);
         if (roleRepair is not null && !roleRepairPublished && designer is null)
             technicalSession = await EnsureRoleRepairCorrectionAsync(roleRepair, technicalSession, cycle, memberDigests, managerDirections, context, cancellationToken);
         var designerSession = designer is null ? technicalSession : await EnsurePlanningSessionAsync(designer, boardId, cycle,
@@ -1117,7 +1117,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         IReadOnlyList<ArtifactPackageMemberDigest> members,
         IReadOnlyList<string> managerDirections,
         AgentRuntimeContext context,
-        CancellationToken cancellationToken, string? additionalContext = null, Guid? existingSessionId = null, bool progressivePlanning = false)
+        CancellationToken cancellationToken, string? additionalContext = null, Guid? existingSessionId = null, bool progressivePlanning = false,
+        RoleRepairRequest? roleRepair = null)
     {
         if (!Guid.TryParse(teammate.EmployeeId, out var targetUserId))
             throw new InvalidOperationException($"{subject} target has no authoritative organization-user identity.");
@@ -1157,7 +1158,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var start = new StartBoardCoordinationRequest(targetUserId, boardId, subject, objective,
                 ["Proposal binds the exact planning cycle.", "Every leaf has testable acceptance criteria and one accountable role.",
                     "Required and preferred skills are explicit; estimates are not invented."],
-                message, sessionKey, PlanningArtifact(cycle, members));
+                message, sessionKey, roleRepair is null ? PlanningArtifact(cycle, members) : RoleRepairArtifact(cycle, members, roleRepair));
         if (progressivePlanning)
             start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + ":progressive-v1"),
                 InitialMessage = "Publish the complete approved scope as an outline first. Do not detail the entire game. " + start.InitialMessage,
@@ -1535,7 +1536,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     }
 
     private static string? ProposalKey(WorkItem item) =>
-        item.ProposalProvenance?.ProposalItemKey ?? ExtractKey(item.Title);
+        item.TypeKey == "work.workflow-ticket.v1" ? null : item.ProposalProvenance?.ProposalItemKey ?? ExtractKey(item.Title);
 
     private static string? ExtractKey(string title)
     {

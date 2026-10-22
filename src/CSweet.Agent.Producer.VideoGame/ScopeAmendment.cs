@@ -124,6 +124,7 @@ public sealed partial class SpecialistAgent
         AgentRuntimeContext context, CancellationToken token)
     {
         if (request?.ScopeDirection is null) return;
+        await RefreshAmendedWorkflowPlanningAsync(request, boardId, context, token);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
         foreach (var item in board.Items.Where(x => x.Status is not ("Done" or "Completed" or "Cancelled") && x.Delivery is not null))
         {
@@ -137,6 +138,26 @@ public sealed partial class SpecialistAgent
             var refreshed = await context.Platform.Work.FinalizeItemDeliveryAsync(new(boardId, item.Id, updated,
                 owner, item.StageAssignments, item.Revision, $"producer-scope-finalize:{request.ReviewStageId:N}:{item.Id:N}:{item.PlanningRevision}"), token);
             ValidateAmendedDevelopment(refreshed, updated);
+        }
+    }
+
+    internal static async Task RefreshAmendedWorkflowPlanningAsync(RoleRepairRequest request, Guid boardId,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        var changed = request.ScopeReplacements.Select(x => x.ItemId).ToHashSet();
+        var expected = ScopeExpectedItems(request).Where(x => x.TypeKey == "work.workflow-ticket.v1" && changed.Contains(x.Id));
+        foreach (var amended in expected)
+        {
+            var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
+            var current = board.Items.Single(x => x.Id == amended.Id);
+            if (JsonSerializer.Serialize(current.Planning) == JsonSerializer.Serialize(amended.Planning)) continue;
+            var original = request.OriginalItems.Single(x => x.Id == current.Id);
+            if (current.Status is "Done" or "Completed" or "Cancelled" or "InProgress" ||
+                JsonSerializer.Serialize(current.Planning) != JsonSerializer.Serialize(original.Planning))
+                throw new InvalidOperationException("Generated workflow planning changed before applying its exact authorized amendment.");
+            await context.Platform.Work.RevisePlanningAsync(new(boardId, current.Id, current.Title,
+                amended.Description, current.ParentItemId, amended.Planning!, current.Revision, current.PlanningRevision,
+                $"producer-scope-workflow:{request.ReviewStageId:N}:{current.Id:N}"), token);
         }
     }
     internal static void ValidateAmendedDevelopment(WorkItem item, WorkItemDeliverySpecification updated)
