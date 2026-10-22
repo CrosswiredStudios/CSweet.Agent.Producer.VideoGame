@@ -20,7 +20,8 @@ public sealed partial class SpecialistAgent
 
     private async Task<string> ApplyScopeAmendmentAsync(WorkSprintExecutionResponse execution,
         WorkItemExecutionResponse item, WorkStageExecutionResponse? stage, string direction, Guid turnId,
-        AgentRuntimeContext context, CancellationToken token, IReadOnlyDictionary<Guid, long>? expectedPlanning = null)
+        AgentRuntimeContext context, CancellationToken token, IReadOnlyDictionary<Guid, long>? expectedPlanning = null,
+        string? priorRepairKey = null)
     {
         if (stage is null || !CanAmendScope(execution, item.WorkItemId, stage.Id))
             return "Scope amendment requires the current work to reach a stopped review boundary. No running assignment or sprint was changed.";
@@ -31,13 +32,24 @@ public sealed partial class SpecialistAgent
         if (expectedPlanning is not null && (board.Items.Count != expectedPlanning.Count ||
             board.Items.Any(x => !expectedPlanning.TryGetValue(x.Id, out var revision) || revision != x.PlanningRevision)))
             throw new InvalidOperationException("Planning changed before amendment preparation; the retained direction needs review.");
-        var key = RoleRepairPrefix + stage.Id.ToString("N");
+        var key = ScopeRepairKey(stage.Id, turnId);
         var saved = await ReadRoleRepairRequestAsync(key, context, token);
         if (saved is not null && (saved.ScopeDirection != direction || saved.ScopeAuthorizingTurnId != turnId))
             throw new InvalidOperationException("This review boundary already has a different planning correction. Finish or resolve it before replacing the direction.");
         if (saved is null)
         {
             if (board.Items.Count > 200) throw new InvalidOperationException("Scope amendment exceeds the bounded board size.");
+            IReadOnlyList<ScopeTextReplacement>? edits = null;
+            if (priorRepairKey is not null)
+            {
+                var prior = await ReadRoleRepairRequestAsync(priorRepairKey, context, token);
+                if (prior?.ScopeDirection != direction || prior.ReviewStageId != stage.Id || prior.BoardId != board.Board.Id ||
+                    prior.WorkItemId != item.WorkItemId)
+                    throw new InvalidOperationException("Renewal does not identify the same exact amendment and stopped boundary.");
+                edits = prior.ScopeReplacements;
+            }
+            if (edits is null)
+            {
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure a planning provider.");
             var client = context.CreateChatClient(new AgentLlmSelection(provider, Settings.GetString("llmModel")));
             var response = await client.GetResponseAsync([
@@ -58,12 +70,13 @@ public sealed partial class SpecialistAgent
                 new(ChatRole.User, JsonSerializer.Serialize(new { direction, anchorItemId = item.WorkItemId,
                     items = board.Items.Select(x => new { x.Id, x.Identifier, x.Status, x.Title, x.Planning }) }, AcceptanceJson))
             ], ResponseOptions(), token);
-            var edits = ModelJson.Deserialize<ScopeAmendmentPlan>(response.Text, AcceptanceJson, "Scope amendment").Replacements
+            edits = ModelJson.Deserialize<ScopeAmendmentPlan>(response.Text, AcceptanceJson, "Scope amendment").Replacements
                 ?? throw new InvalidOperationException("Scope amendment returned no exact replacements; no planning was changed.");
+            }
             var sprints = await context.Platform.Work.ListSprintsAsync(execution.BoardId, token);
             saved = new(execution.BoardId, project, team, execution.SprintId, stage.Id, item.WorkItemId,
                 [], [direction], board.Items, sprints.Select(x => x.Sequence ?? 0).DefaultIfEmpty().Max() + 1, DateTimeOffset.UtcNow)
-            { ScopeDirection = direction, ScopeAuthorizingTurnId = turnId, ScopeReplacements = edits };
+            { ScopeDirection = direction, ScopeAuthorizingTurnId = turnId, ScopeStateKey = key, ScopeReplacements = edits };
             _ = ScopeExpectedItems(saved);
             await PersistRoleRepairRequestAsync(key, saved, context, token);
         }

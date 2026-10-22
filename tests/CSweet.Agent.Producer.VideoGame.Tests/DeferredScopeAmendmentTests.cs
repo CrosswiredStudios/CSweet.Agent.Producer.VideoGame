@@ -18,7 +18,7 @@ public sealed class DeferredScopeAmendmentTests
         var restarted = await f.AgentAsync();
         await restarted.HandlePersonalTodoAsync(f.Todos[0], f.Context, default);
         Assert.Equal("Queued", f.Pending.Status);
-        var handoff = await SpecialistAgent.ReadRoleRepairRequestAsync("producer-role-replan:" + f.Stage.Id.ToString("N"), f.Context, default);
+        var handoff = await SpecialistAgent.ReadRoleRepairRequestAsync(SpecialistAgent.ScopeRepairKey(f.Stage.Id, f.Source.TurnId), f.Context, default);
         Assert.Equal(direction, handoff!.ScopeDirection);
         Assert.Equal(1, f.ModelCalls);
     }
@@ -50,7 +50,7 @@ public sealed class DeferredScopeAmendmentTests
         Assert.Equal("Queued", f.Pending.Status);
         Assert.Equal(1, f.ModelCalls);
         Assert.Equal(2, f.Todos.Count); // Deferred request and the exact planning successor.
-        var role = await SpecialistAgent.ReadRoleRepairRequestAsync("producer-role-replan:" + f.Stage.Id.ToString("N"), f.Context, default);
+        var role = await SpecialistAgent.ReadRoleRepairRequestAsync(SpecialistAgent.ScopeRepairKey(f.Stage.Id, f.Source.TurnId), f.Context, default);
         Assert.Equal(f.Source.TurnId, role!.ScopeAuthorizingTurnId);
         Assert.Equal(f.Direction, role.ScopeDirection);
         await agent.HandlePersonalTodoAsync(f.Todos[0], f.Context, default);
@@ -185,6 +185,77 @@ public sealed class DeferredScopeAmendmentTests
         Assert.Equal(0, f.ModelCalls);
         await agent.RecoverPendingScopeAmendmentsAsync(f.Context, default);
         Assert.Equal(recover ? 1 : 0, f.Todos.Count);
+    }
+
+    [Theory]
+    [InlineData("valid")]
+    [InlineData("revoked-authority")]
+    [InlineData("changed-original")]
+    public async Task FreshSameDirectionRenewsBlockedCorrectionAgainstCurrentSourceWithoutRepeatingInference(string scenario)
+    {
+        var f = new Fixture(); f.StopOtherWork();
+        var agent = await f.AgentAsync();
+        await f.CaptureAsync(agent);
+        await agent.HandlePersonalTodoAsync(f.Todos[0], f.Context, default);
+        var priorKey = SpecialistAgent.ScopeRepairKey(f.Stage.Id, f.Source.TurnId);
+        f.Todos[1] = f.Todos[1] with { Status = "Blocked" };
+        f.Item = f.Item with { PlanningRevision = 2, Planning = f.Item.Planning! with { Constraints = ["Current approved constraint"] } };
+        if (scenario == "changed-original") f.Item = f.Item with { Planning = f.Item.Planning! with { AcceptanceCriteria = ["Different criterion"] } };
+        f.Detail = f.Detail with { Items = [f.Item] };
+        f.Source = f.Source with { MessageId = Guid.NewGuid(), TurnId = Guid.NewGuid() };
+        f.Messages.Add(new(f.Source.MessageId, 2, f.Source.ConversationId, f.Requester, "Owner", "Human",
+            "Amend ticket VGDEMO-29: " + f.Direction, f.Now, f.Source.TurnId));
+        Assert.Contains("I saved", await f.CaptureAsync(agent));
+        Assert.Equal(priorKey, f.Pending.Payload.Deserialize<PendingScopeAmendment>(f.Json)!.PriorRepairStateKey);
+        if (scenario == "revoked-authority") f.Authorized = false;
+        await agent.HandlePersonalTodoAsync(f.Todos[2], f.Context, default);
+        Assert.Equal(1, f.ModelCalls);
+        Assert.Equal(scenario == "valid" ? "Queued" : "NeedsReview", f.Pending.Status);
+        var renewed = await SpecialistAgent.ReadRoleRepairRequestAsync(SpecialistAgent.ScopeRepairKey(f.Stage.Id, f.Source.TurnId), f.Context, default);
+        if (scenario == "valid")
+        {
+            Assert.NotNull(renewed);
+            Assert.Equal(new[] { "Current approved constraint" }, renewed.OriginalItems[0].Planning!.Constraints);
+            Assert.Equal(f.Source.TurnId, renewed.ScopeAuthorizingTurnId);
+            Assert.Equal(priorKey, SpecialistAgent.RoleRepairStateKey((await SpecialistAgent.ReadRoleRepairRequestAsync(priorKey, f.Context, default))!));
+        }
+        else Assert.Null(renewed);
+    }
+
+    [Fact]
+    public async Task FreshDirectionCannotReplaceAnActiveCorrection()
+    {
+        var f = new Fixture(); f.StopOtherWork();
+        var agent = await f.AgentAsync();
+        await f.CaptureAsync(agent);
+        await agent.HandlePersonalTodoAsync(f.Todos[0], f.Context, default);
+        f.Todos[1] = f.Todos[1] with { Status = "Running" };
+        var priorTurn = f.Source.TurnId;
+        f.Source = f.Source with { MessageId = Guid.NewGuid(), TurnId = Guid.NewGuid() };
+        Assert.Contains("already retained", await f.CaptureAsync(agent));
+        Assert.Equal(priorTurn, f.Pending.Payload.Deserialize<PendingScopeAmendment>(f.Json)!.Source.TurnId);
+        Assert.Equal(2, f.Todos.Count);
+    }
+
+    [Fact]
+    public async Task OrdinaryPlanningWaitsForScopeOwnerAndAppliedStateIsSourceBoundAndIdempotent()
+    {
+        var f = new Fixture(); f.StopOtherWork();
+        var agent = await f.AgentAsync();
+        await f.CaptureAsync(agent);
+        var ordinary = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with { CorrelationId = "producer-planning:test",
+            WorkContext = new(WorkstreamId: f.Detail.Board.WorkstreamId, TeamId: f.Detail.Board.TeamId, BoardId: f.Board, SourceFingerprint: "test") };
+        Assert.Contains("owns the planning boundary", ResultContent(await agent.HandlePersonalTodoAsync(ordinary, f.Context, default)));
+        await agent.HandlePersonalTodoAsync(f.Todos[0], f.Context, default);
+        Assert.Contains("owns the planning boundary", ResultContent(await agent.HandlePersonalTodoAsync(ordinary, f.Context, default)));
+        var request = (await SpecialistAgent.ReadRoleRepairRequestAsync(SpecialistAgent.ScopeRepairKey(f.Stage.Id, f.Source.TurnId), f.Context, default))!;
+        await SpecialistAgent.MarkScopeAppliedAsync(request with { ScopeAuthorizingTurnId = Guid.NewGuid() }, f.Context, default);
+        Assert.Equal("Queued", f.Pending.Status);
+        await SpecialistAgent.MarkScopeAppliedAsync(request, f.Context, default);
+        Assert.Equal("Applied", f.Pending.Status);
+        var revision = f.Pending.Revision;
+        await SpecialistAgent.MarkScopeAppliedAsync(request, f.Context, default);
+        Assert.Equal(revision, f.Pending.Revision);
     }
 
     private static string ResultContent(PersonalTodoResult result) => (string)typeof(PersonalTodoResult)

@@ -643,8 +643,16 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         {
             roleRepair = await ReadRoleRepairRequestAsync(source.SourceFingerprint, context, cancellationToken);
             if (roleRepair is null || roleRepair.WorkstreamId != workstreamId || roleRepair.TeamId != teamId ||
-                roleRepair.BoardId != source.BoardId || source.SourceFingerprint != RoleRepairPrefix + roleRepair.ReviewStageId.ToString("N"))
+                roleRepair.BoardId != source.BoardId || source.SourceFingerprint != RoleRepairStateKey(roleRepair) ||
+                roleRepair.ScopeStateKey is not null && roleRepair.ScopeStateKey != ScopeRepairKey(roleRepair.ReviewStageId, roleRepair.ScopeAuthorizingTurnId))
                 return PersonalTodoResult.Blocked("Role repair is missing its exact persisted scope and review evidence.");
+        }
+        if (roleRepair is null && source.BoardId is { } planningBoard)
+        {
+            var amendment = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(PendingScopeKey(planningBoard), cancellationToken);
+            if (amendment?.Status is "Pending" or "Queued")
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                    "An authenticated scope amendment owns the planning boundary; ordinary replanning waits until it is applied or resolved.");
         }
         var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
         var stateStore = new RevisionSafeProjectState(context.Platform);
@@ -671,6 +679,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         }
 
         var boardId = source.BoardId ?? (await EnsureProductionBoardAsync(workstream, teamId, context, cancellationToken)).Id;
+        if (roleRepair is null && source.BoardId is null)
+        {
+            var amendment = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(PendingScopeKey(boardId), cancellationToken);
+            if (amendment?.Status is "Pending" or "Queued")
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                    "An authenticated scope amendment owns the planning boundary; ordinary replanning waits until it is applied or resolved.");
+        }
         // Initial commitments may predate board creation. Carry the resolved board into
         // every downstream staffing, estimation, and sprint-readiness commitment.
         source = source with { BoardId = boardId };
@@ -828,6 +843,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
         await BindAvailableWorkAsync(boardId, roster, cycle.ProfileDigest, context, cancellationToken);
         await RefreshAmendedDeliveriesAsync(roleRepair, boardId, context, cancellationToken);
+        await MarkScopeAppliedAsync(roleRepair, context, cancellationToken);
         var currentBoard = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var unassigned = currentBoard.Items.Where(x =>
                 x.ExecutionMode == WorkItemExecutionModes.Executable &&

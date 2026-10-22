@@ -33,11 +33,15 @@ public sealed partial class SpecialistAgent
             if (prior.Status == "Pending") await EnsurePendingScopeCommitmentAsync(prior.Payload, CanAmendScope(execution, item.WorkItemId, stage.Id), context, token);
             return PendingScopeReply(prior.Status);
         }
-        if (prior is not null && (prior.Status == "Pending" || prior.Status == "Queued" && prior.Payload.ExecutionId == execution.Id))
+        string? priorRepairKey = null;
+        if (prior?.Status == "Queued" && prior.Payload.ExecutionId == execution.Id && prior.Payload.Direction == direction &&
+            CanAmendScope(execution, item.WorkItemId, stage.Id))
+            priorRepairKey = await RenewableScopeRepairAsync(prior.Payload, context, token);
+        if (prior is not null && (prior.Status == "Pending" || prior.Status == "Queued" && prior.Payload.ExecutionId == execution.Id && priorRepairKey is null))
             return "A scope amendment is already retained for this board. It must be resolved before a different direction can replace it.";
         var pending = new PendingScopeAmendment(execution.BoardId, project, team, execution.Id, execution.SprintId,
             item.WorkItemId, item.ItemIdentifier!, stage.Id, direction, source,
-            board.Items.ToDictionary(x => x.Id, x => x.PlanningRevision));
+            board.Items.ToDictionary(x => x.Id, x => x.PlanningRevision), priorRepairKey);
         try { await WritePendingScopeAsync(pending, "Pending", prior?.Revision, context, token); }
         catch (PlatformCapabilityException error) when (error.Code == PlatformCapabilityErrorCode.Conflict)
         {
@@ -58,6 +62,7 @@ public sealed partial class SpecialistAgent
     {
         "Queued" => "Your retained scope amendment is already queued for corrected planning; execution has not been reported as changed or complete.",
         "NeedsReview" => "Your scope amendment remains saved and needs review before it can be applied. Its authority, source scope or exact replacement plan could not be verified.",
+        "Applied" => "Your exact scope amendment is applied to canonical planning and delivery. Independent QA and delivery acceptance remain required.",
         _ => "I saved your scope amendment. I will apply it automatically at the next safe stopped boundary after rechecking authority and scope. You do not need to resend it."
     };
 
@@ -105,7 +110,7 @@ public sealed partial class SpecialistAgent
         var saved = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(PendingScopeKey(boardId), token);
         if (saved is null || commitment.CorrelationId != PendingScopeCorrelation(saved.Payload))
             return PersonalTodoResult.Blocked("This commitment does not identify the current saved amendment.");
-        if (saved.Status == "Queued") return PersonalTodoResult.Completed("The exact retained amendment was handed to corrected planning.");
+        if (saved.Status is "Queued" or "Applied") return PersonalTodoResult.Completed(PendingScopeReply(saved.Status));
         if (saved.Status != "Pending") return PersonalTodoResult.Blocked(PendingScopeReply(saved.Status));
         var pending = saved.Payload;
         var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
@@ -131,12 +136,38 @@ public sealed partial class SpecialistAgent
                 "Your amendment is saved. Waiting for running assignments to reach a stopped boundary; work-state events will recheck it.");
         // Existing application re-reads the board, pins exact replacements, and creates an
         // idempotent planning commitment. Final sprint mutation still rechecks active writers.
-        try { await ApplyScopeAmendmentAsync(execution, item, stage, pending.Direction, pending.Source.TurnId, context, token, pending.PlanningRevisions); }
+        try { await ApplyScopeAmendmentAsync(execution, item, stage, pending.Direction, pending.Source.TurnId, context, token, pending.PlanningRevisions, pending.PriorRepairStateKey); }
         catch (InvalidOperationException) { return await HoldPendingScopeAsync(saved, context, token); }
         catch (PlatformCapabilityException error) when (error.Code is PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.NotFound)
         { return await HoldPendingScopeAsync(saved, context, token); }
         await WritePendingScopeAsync(pending, "Queued", saved.Revision, context, token);
         return PersonalTodoResult.Completed("The retained amendment is queued for corrected planning. No benchmark or unperformed validation was marked passed.");
+    }
+
+    private static async Task<string?> RenewableScopeRepairAsync(PendingScopeAmendment pending,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        var key = ScopeRepairKey(pending.StageId, pending.Source.TurnId);
+        var repair = await ReadRoleRepairRequestAsync(key, context, token);
+        if (repair is null)
+        {
+            key = RoleRepairPrefix + pending.StageId.ToString("N");
+            repair = await ReadRoleRepairRequestAsync(key, context, token);
+        }
+        if (repair?.ScopeAuthorizingTurnId != pending.Source.TurnId || repair.ScopeDirection != pending.Direction ||
+            repair.BoardId != pending.BoardId || repair.WorkItemId != pending.ItemId) return null;
+        var commitments = await context.Platform.PersonalTodo.ListAsync(token);
+        return commitments.Boards.SelectMany(x => x.Items).Any(x => x.CorrelationId == key &&
+            x.Status == PersonalTodoStatuses.Blocked) ? key : null;
+    }
+
+    internal static async Task MarkScopeAppliedAsync(RoleRepairRequest? request, AgentRuntimeContext context, CancellationToken token)
+    {
+        if (request?.ScopeDirection is null) return;
+        var pending = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(PendingScopeKey(request.BoardId), token);
+        if (pending is null || pending.Payload.Source.TurnId != request.ScopeAuthorizingTurnId ||
+            pending.Payload.Direction != request.ScopeDirection || pending.Status == "Applied") return;
+        await WritePendingScopeAsync(pending.Payload, "Applied", pending.Revision, context, token);
     }
 
     private static async Task<PersonalTodoResult> HoldPendingScopeAsync(AgentOperatingState<PendingScopeAmendment> saved,
@@ -239,4 +270,5 @@ public sealed partial class SpecialistAgent
 
 internal sealed record ScopeAmendmentSource(Guid RequesterId, Guid ConversationId, Guid MessageId, Guid TurnId);
 internal sealed record PendingScopeAmendment(Guid BoardId, Guid ProjectId, Guid TeamId, Guid ExecutionId, Guid SprintId,
-    Guid ItemId, string Identifier, Guid StageId, string Direction, ScopeAmendmentSource Source, IReadOnlyDictionary<Guid, long> PlanningRevisions);
+    Guid ItemId, string Identifier, Guid StageId, string Direction, ScopeAmendmentSource Source, IReadOnlyDictionary<Guid, long> PlanningRevisions,
+    string? PriorRepairStateKey = null);

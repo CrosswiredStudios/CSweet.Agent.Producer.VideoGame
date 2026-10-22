@@ -57,14 +57,19 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.10`
+- Version: `4.0.11`
 
 Exact owner amendments use a source-bound `scopeAmendment` planning artifact. Install Technical
-Director 5.0.3 before Producer 4.0.10. The Director verifies current planning digests and returns
+Director 5.0.3 before Producer 4.0.11. The Director verifies current planning digests and returns
 the exact amended proposal without regenerating unrelated work. Generated workflow tickets never
 derive proposal identities from bracketed titles; their explicitly amended planning is refreshed
 with current revisions and replay protection. Existing stopped correction commitments can be
 reopened through the normal work UI; do not send a different amendment or edit retained records.
+If that correction is blocked because its source changed, a fresh authenticated message with the
+same exact direction can renew it. The Producer reuses replacements only if every original entry
+still matches current planning, preserves the prior immutable request, and rechecks authority.
+Ordinary backlog reconciliation waits while the amendment owns the planning boundary. Applied
+means canonical planning and delivery were refreshed; it never means QA or acceptance passed.
 
 Scope-amendment commands accept detailed multiline owner direction without an amendment-specific
 character limit. Concision is guidance, not a validation gate. Full direction and exact replacement

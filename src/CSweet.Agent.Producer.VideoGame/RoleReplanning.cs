@@ -9,6 +9,8 @@ namespace CSweet.Agent.Producer.VideoGame;
 public sealed partial class SpecialistAgent
 {
     private const string RoleRepairPrefix = "producer-role-replan:";
+    internal static string ScopeRepairKey(Guid stage, Guid turn) => RoleRepairPrefix + stage.ToString("N") + ":scope:" + turn.ToString("N");
+    internal static string RoleRepairStateKey(RoleRepairRequest request) => request.ScopeStateKey ?? RoleRepairPrefix + request.ReviewStageId.ToString("N");
     private const string RoleBoundary = "The Technical Director plans and reviews only. Engineering implements code, prototypes, package locks and repository commits; QA independently validates them.";
 
     private static async Task RequestRoleRepairAsync(WorkBoardSummary board, WorkSprintExecutionResponse execution,
@@ -179,7 +181,7 @@ public sealed partial class SpecialistAgent
     internal static async Task PrepareRoleRepairSprintAsync(RoleRepairRequest request, AgentRuntimeContext context, CancellationToken token)
     {
         var boardId = request.BoardId;
-        var key = (request.InfrastructureRecovery ? SprintRecoveryPrefix : RoleRepairPrefix) + request.ReviewStageId.ToString("N");
+        var key = request.InfrastructureRecovery ? SprintRecoveryPrefix + request.ReviewStageId.ToString("N") : RoleRepairStateKey(request);
         var execution = await context.Platform.Work.ReadOrchestrationAsync(new(boardId, SprintId: request.SprintId), token)
             ?? throw new InvalidOperationException("The source sprint execution is unavailable.");
         if (execution.Status != "Cancelled")
@@ -235,5 +237,6 @@ internal sealed record RoleRepairRequest(Guid BoardId, Guid WorkstreamId, Guid T
     public bool InfrastructureRecovery { get; init; }
     public string? ScopeDirection { get; init; }
     public Guid ScopeAuthorizingTurnId { get; init; }
+    public string? ScopeStateKey { get; init; }
     public IReadOnlyList<ScopeTextReplacement> ScopeReplacements { get; init; } = [];
 }
