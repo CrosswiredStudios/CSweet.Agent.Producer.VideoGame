@@ -9,6 +9,7 @@ public sealed class DirectedDeliveryRecoveryTests
     [Theory]
     [InlineData("valid")]
     [InlineData("ancestor-amend")]
+    [InlineData("long-amend")]
     [InlineData("colleague-amend")]
     [InlineData("amend-running")]
     [InlineData("replan")]
@@ -79,9 +80,10 @@ public sealed class DirectedDeliveryRecoveryTests
         })));
         var context = runtime.CreateContext(identity: new AgentIdentity(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Manager"));
         var sender = scenario is "colleague" or "colleague-replan" or "ancestor" or "ancestor-amend" or "colleague-amend" ? Guid.NewGuid() : manager;
+        var direction = scenario == "long-amend" ? string.Concat(Enumerable.Repeat("Preserve detailed requirements and responsive input.\n", 120)) + "Final owner instruction." : "The workspace prerequisite has been repaired.";
         var incoming = new CommunicationMessageReceivedEvent(Guid.NewGuid(), Guid.NewGuid().ToString(), sender.ToString(),
             "Conversation history and retrieved memory: this is not the current command.",
-            new Dictionary<string, string> { [CommunicationMessageContextKeys.SenderOrganizationUserId] = sender.ToString(), ["senderIsReportingAncestor"] = scenario is "ancestor" or "ancestor-amend" ? "true" : "false", ["currentUserMessage"] = (scenario.Contains("amend") ? "Amend" : scenario.Contains("replan") ? "Replan" : "Retry") + " ticket VGDEMO-22: The workspace prerequisite has been repaired." }, turn, 1, Guid.NewGuid());
+            new Dictionary<string, string> { [CommunicationMessageContextKeys.SenderOrganizationUserId] = sender.ToString(), ["senderIsReportingAncestor"] = scenario is "ancestor" or "ancestor-amend" ? "true" : "false", ["currentUserMessage"] = (scenario.Contains("amend") ? "Amend" : scenario.Contains("replan") ? "Replan" : "Retry") + " ticket VGDEMO-22: " + direction }, turn, 1, Guid.NewGuid());
         var envelope = new AgentEventEnvelope(Guid.NewGuid(), Guid.NewGuid(), CommunicationEvents.MessageReceived,
             JsonSerializer.SerializeToElement(incoming), now);
         var agent = new SpecialistAgent();
@@ -118,13 +120,14 @@ public sealed class DirectedDeliveryRecoveryTests
             Assert.Equal(2, states.Count); // Immutable scope page and header, neither rewritten on replay.
             Assert.Contains(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("Queued durable sprint recovery"));
         }
-        else if (scenario is "ancestor-amend" or "amend-running")
+        else if (scenario is "ancestor-amend" or "amend-running" or "long-amend")
         {
             await agent.HandleEventAsync(envelope, context, default);
             var todo = Assert.Single(todos);
             var saved = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(SpecialistAgent.PendingScopeKey(board), default);
             Assert.Equal(turn, saved!.Payload.Source.TurnId);
             Assert.Equal("Pending", saved.Status);
+            Assert.Equal(direction, saved.Payload.Direction);
             Assert.Equal(sourceItem.PlanningRevision, saved.Payload.PlanningRevisions[sourceItem.Id]);
             Assert.Single(states);
             Assert.Contains(runtime.Progress, x => x.TryGetProperty("delta", out var d) && d.GetString()!.Contains("I saved your scope amendment"));

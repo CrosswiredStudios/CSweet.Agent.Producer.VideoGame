@@ -21,6 +21,17 @@ public sealed class ScopeAmendmentTests
     }
 
     [Fact]
+    public void LongReplacementDescriptionsArePreservedWithoutAmendmentSpecificTextCaps()
+    {
+        var (request, _) = Fixture();
+        var edit = request.ScopeReplacements[0] with { Replacement = string.Concat(Enumerable.Repeat("Detailed replacement requirement. ", 1000)) + "End of complete amendment." };
+        request = request with { ScopeReplacements = [edit] };
+        var revised = SpecialistAgent.ScopeExpectedItems(request);
+        Assert.Equal(edit.Replacement, revised[0].Planning!.AcceptanceCriteria[1]);
+        Assert.Equal("Measure on physical Android", request.OriginalItems[0].Planning!.AcceptanceCriteria[1]);
+    }
+
+    [Fact]
     public void ExactAmendmentPreservesOriginalSnapshotAndUnrelatedRequirements()
     {
         var (request, proposals) = Fixture();

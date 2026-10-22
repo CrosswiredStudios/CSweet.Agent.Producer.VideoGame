@@ -9,7 +9,7 @@ public sealed partial class SpecialistAgent
     // Only the current authenticated message authorizes recovery, never history or model output.
     internal static bool TryReadRetryDirection(string message, out string ticket, out string reason)
     {
-        var match = Regex.Match(message.Trim(), @"\ARetry ticket ([A-Za-z0-9]+-[0-9]+):\s*(.{1,1000})\z",
+        var match = Regex.Match(message.Trim(), @"\ARetry ticket ([A-Za-z0-9]+-[0-9]+):\s*(.+)\z",
             RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant,
             TimeSpan.FromSeconds(1));
         ticket = match.Success ? match.Groups[1].Value : "";

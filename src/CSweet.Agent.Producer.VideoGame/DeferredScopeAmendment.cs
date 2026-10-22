@@ -17,7 +17,7 @@ public sealed partial class SpecialistAgent
     {
         if (source.TurnId == Guid.Empty || source.MessageId == Guid.Empty || source.ConversationId == Guid.Empty || source.RequesterId == Guid.Empty ||
             stage is null || stage.Traversal != item.Traversal || execution.Status != "Active" ||
-            item.Status is "Completed" or "Cancelled" || direction.Length is < 1 or > 1000)
+            item.Status is "Completed" or "Cancelled" || string.IsNullOrWhiteSpace(direction))
             return "The amendment needs a current unfinished ticket and its authenticated conversation turn. No scope was changed.";
         var board = await context.Platform.Work.ReadBoardAsync(execution.BoardId, token);
         if (board.Board.IsArchived || board.Board.ManagerOrganizationUserId?.ToString() != context.Identity?.EmployeeId ||

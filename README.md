@@ -57,7 +57,12 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.8`
+- Version: `4.0.9`
+
+Scope-amendment commands accept detailed multiline owner direction without an amendment-specific
+character limit. Concision is guidance, not a validation gate. Full direction and exact replacement
+text are preserved through retained requests and recovery; source authority, current scope and
+safe execution boundaries are still checked before any change.
 
 `ProposeProjectFoundationAsync` preserves the Creative Director's inferred title and player-facing
 marketing blurb when the initial foundation payload binds `projectIdentity` to the project template.

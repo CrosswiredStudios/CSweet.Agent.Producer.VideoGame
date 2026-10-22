@@ -7,6 +7,23 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class DeferredScopeAmendmentTests
 {
     [Fact]
+    public async Task LongAmendmentSurvivesRestartSourceReauthorizationAndPlanningHandoffWithoutTruncation()
+    {
+        var direction = string.Concat(Enumerable.Repeat("Detailed owner requirement: preserve responsive behavior, QA and exact source evidence.\n", 180)) + "Final instruction: Chromium only.";
+        Assert.True(SpecialistAgent.TryReadAmendmentDirection("Amend ticket VGDEMO-29: " + direction, out var ticket, out var parsed));
+        Assert.Equal("VGDEMO-29", ticket); Assert.Equal(direction, parsed);
+        var f = new Fixture(direction); f.StopOtherWork();
+        await f.CaptureAsync(await f.AgentAsync());
+        Assert.Equal(direction, f.Pending.Payload.Deserialize<PendingScopeAmendment>(f.Json)!.Direction);
+        var restarted = await f.AgentAsync();
+        await restarted.HandlePersonalTodoAsync(f.Todos[0], f.Context, default);
+        Assert.Equal("Queued", f.Pending.Status);
+        var handoff = await SpecialistAgent.ReadRoleRepairRequestAsync("producer-role-replan:" + f.Stage.Id.ToString("N"), f.Context, default);
+        Assert.Equal(direction, handoff!.ScopeDirection);
+        Assert.Equal(1, f.ModelCalls);
+    }
+
+    [Fact]
     public async Task Running_work_retains_direction_and_restart_rechecks_boundary_without_resending()
     {
         var f = new Fixture();
@@ -193,8 +210,9 @@ public sealed class DeferredScopeAmendmentTests
         public int ModelCalls, Requeues;
         public AgentOperatingStateResponse Pending => States[SpecialistAgent.PendingScopeKey(Board)];
 
-        public Fixture()
+        public Fixture(string? direction = null)
         {
+            if (direction is not null) Direction = direction;
             Source = new(Requester, Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
             Stage = new(Guid.NewGuid(), "specialist-execution", "AgentExecution", 0, "Blocked", "AgentInstallation", Producer,
                 Guid.NewGuid(), null, 1, "blocked", null, null, null, Now.AddMinutes(-5));
