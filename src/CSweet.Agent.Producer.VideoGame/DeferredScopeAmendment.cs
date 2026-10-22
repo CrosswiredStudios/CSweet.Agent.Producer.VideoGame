@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
+using CrosswiredStudios.VideoGame.AgentKit;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
@@ -94,12 +95,43 @@ public sealed partial class SpecialistAgent
         foreach (var board in boards)
         {
             var saved = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(PendingScopeKey(board.Id), token);
+            if (saved?.Status == "Applied")
+            {
+                await RecoverAppliedScopePlanningAsync(saved, context, token);
+                continue;
+            }
             if (saved?.Status != "Pending") continue;
             var pending = saved.Payload;
             var execution = await context.Platform.Work.ReadOrchestrationAsync(new(board.Id, pending.SprintId), token);
             var ready = execution?.Id == pending.ExecutionId && CanAmendScope(execution, pending.ItemId, pending.StageId);
             await EnsurePendingScopeCommitmentAsync(pending, ready, context, token);
         }
+    }
+
+    internal static async Task<bool> OwnsAppliedScopePlanningAsync(AgentOperatingState<PendingScopeAmendment>? amendment,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        if (amendment?.Status is "Pending" or "Queued") return true;
+        if (amendment?.Status != "Applied") return false;
+        var board = await context.Platform.Work.ReadBoardAsync(amendment.Payload.BoardId, token);
+        return board.Items.Any(item => item.Id == amendment.Payload.ItemId && item.Status is not ("Completed" or "Done" or "Cancelled"));
+    }
+
+    private static async Task RecoverAppliedScopePlanningAsync(AgentOperatingState<PendingScopeAmendment> saved,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        if (!await OwnsAppliedScopePlanningAsync(saved, context, token) ||
+            !await AuthorizesRetainedScopeAsync(saved.Payload, context, token)) return;
+        var pending = saved.Payload;
+        var key = ScopeRepairKey(pending.StageId, pending.Source.TurnId);
+        var portfolio = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), token);
+        if (portfolio?.Payload.PlanningCycles.TryGetValue(pending.ProjectId, out var cycle) != true || cycle is null || cycle.PlanningFingerprint == key) return;
+        var request = await ReadRoleRepairRequestAsync(key, context, token);
+        if (request?.ScopeAuthorizingTurnId != pending.Source.TurnId || request.ScopeDirection != pending.Direction) return;
+        await EnsureCommitmentAsync(key + ":continuation", "Restore the applied scope delivery handoff",
+            "Reuse the completed source-bound proposal, retain the applied criteria, and restore estimates/readiness after competing ordinary planning. Do not regenerate or broaden scope.",
+            WorkPriorities.Critical, new(WorkstreamId: pending.ProjectId, TeamId: pending.TeamId, BoardId: pending.BoardId,
+                SprintId: pending.SprintId, WorkItemId: pending.ItemId, SourceFingerprint: key), context, token);
     }
 
     internal async Task<PersonalTodoResult> ReconcilePendingScopeAmendmentAsync(PersonalTodoItem commitment,

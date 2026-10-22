@@ -1,5 +1,6 @@
 using System.Text.Json;
 using CSweet.Agent.SDK;
+using CrosswiredStudios.VideoGame.AgentKit;
 using CSweet.WorkManagement.Contracts;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
@@ -256,6 +257,22 @@ public sealed class DeferredScopeAmendmentTests
         var revision = f.Pending.Revision;
         await SpecialistAgent.MarkScopeAppliedAsync(request, f.Context, default);
         Assert.Equal(revision, f.Pending.Revision);
+        Assert.Contains("owns the planning boundary", ResultContent(await agent.HandlePersonalTodoAsync(ordinary, f.Context, default)));
+        var project = f.Detail.Board.WorkstreamId!.Value;
+        var portfolio = new ProducerOperatingState { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> {
+            [project] = new(project, f.Board, f.Detail.Board.TeamId!.Value, "competing-ordinary-cycle", null, null, null, null, null, null, f.Now) } };
+        await f.Context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(ProjectStateKeys.Portfolio("producer"),
+            "test.portfolio.v1", 1, "Active", new Dictionary<string,string>(), [], "portfolio", [], Guid.NewGuid(),
+            JsonSerializer.SerializeToElement(portfolio, f.Json), null, "portfolio"), default);
+        await agent.RecoverPendingScopeAmendmentsAsync(f.Context, default, [f.Detail.Board]);
+        Assert.Contains(f.Todos, todo => todo.CorrelationId == SpecialistAgent.ScopeRepairKey(f.Stage.Id, f.Source.TurnId) + ":continuation" &&
+            todo.WorkContext?.SourceFingerprint == SpecialistAgent.ScopeRepairKey(f.Stage.Id, f.Source.TurnId));
+        var count = f.Todos.Count;
+        await agent.RecoverPendingScopeAmendmentsAsync(f.Context, default, [f.Detail.Board]);
+        Assert.Equal(count, f.Todos.Count);
+        f.Detail = f.Detail with { Items = [f.Item with { Status = "Completed" }] };
+        Assert.False(await SpecialistAgent.OwnsAppliedScopePlanningAsync(
+            await f.Context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(SpecialistAgent.PendingScopeKey(f.Board), default), f.Context, default));
     }
 
     private static string ResultContent(PersonalTodoResult result) => (string)typeof(PersonalTodoResult)

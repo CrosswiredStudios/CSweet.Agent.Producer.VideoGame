@@ -650,7 +650,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (roleRepair is null && source.BoardId is { } planningBoard)
         {
             var amendment = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(PendingScopeKey(planningBoard), cancellationToken);
-            if (amendment?.Status is "Pending" or "Queued")
+            if (await OwnsAppliedScopePlanningAsync(amendment, context, cancellationToken))
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                     "An authenticated scope amendment owns the planning boundary; ordinary replanning waits until it is applied or resolved.");
         }
@@ -682,7 +682,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (roleRepair is null && source.BoardId is null)
         {
             var amendment = await context.Platform.ReadOperatingStateAsync<PendingScopeAmendment>(PendingScopeKey(boardId), cancellationToken);
-            if (amendment?.Status is "Pending" or "Queued")
+            if (await OwnsAppliedScopePlanningAsync(amendment, context, cancellationToken))
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                     "An authenticated scope amendment owns the planning boundary; ordinary replanning waits until it is applied or resolved.");
         }
@@ -869,7 +869,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                     x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike)))
         {
             var estimationSprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
-            _ = await EnsureCommitmentAsync(
+            var estimation = await EnsureCommitmentAsync(
                 SprintEstimationCorrelation(boardId, reconciledDigest, PlanningSprintSequence(estimationSprints)),
                 "Collect estimates and QA sprint-readiness evidence",
                 questions.Count == 0
@@ -878,6 +878,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 WorkPriorities.Critical,
                 source with { SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
+            if (roleRepair?.ScopeDirection is not null && estimation.Status == "Blocked" &&
+                estimation.BlockReason == "The candidate planning evidence changed.")
+                await context.Platform.PersonalTodo.RequeueAsync(new(estimation.Id, estimation.Revision,
+                    BoundedMutationKey($"scope-readiness-recovered:{estimation.Id:N}:{estimation.Revision}")), cancellationToken);
         }
         if (progressiveMode && questions.Count == 0 && priorCycle.Progressive is { } progress)
         {

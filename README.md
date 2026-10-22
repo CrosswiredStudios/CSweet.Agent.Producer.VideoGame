@@ -57,10 +57,10 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.12`
+- Version: `4.0.13`
 
 Exact owner amendments use a source-bound `scopeAmendment` planning artifact. Install Technical
-Director 5.0.3 before Producer 4.0.12. The Director verifies current planning digests and returns
+Director 5.0.3 before Producer 4.0.13. The Director verifies current planning digests and returns
 the exact amended proposal without regenerating unrelated work. Generated workflow tickets never
 derive proposal identities from bracketed titles; their explicitly amended planning is refreshed
 with current revisions and replay protection. Existing stopped correction commitments can be
