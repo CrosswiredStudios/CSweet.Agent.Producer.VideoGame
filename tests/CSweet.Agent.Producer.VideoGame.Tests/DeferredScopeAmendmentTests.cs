@@ -299,6 +299,8 @@ public sealed class DeferredScopeAmendmentTests
                     (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(States.GetValueOrDefault(r.StateKey))))
                 .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite, (r, _) =>
                 {
+                    Assert.InRange(r.StateKey.Length, 1, 160);
+                    Assert.InRange(r.DecisionFingerprint.Length, 1, 128);
                     var interruptQueued = FailQueuedWrite && r.Status == "Queued";
                     if (interruptQueued && !SaveQueuedBeforeFailure) { FailQueuedWrite = false; throw new IOException("Lost handoff response"); }
                     var old = States.GetValueOrDefault(r.StateKey);

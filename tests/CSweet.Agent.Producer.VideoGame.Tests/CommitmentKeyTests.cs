@@ -19,6 +19,18 @@ public sealed class CommitmentKeyTests
     }
 
     [Fact]
+    public void RenewedScopeCycleStateKeyFitsIncludingMergeAttemptSuffix()
+    {
+        var project = Guid.NewGuid();
+        var fingerprint = SpecialistAgent.ScopeRepairKey(Guid.NewGuid(), Guid.NewGuid());
+        var now = DateTimeOffset.UtcNow;
+        var key = SpecialistAgent.PlanningStateMutationKey(project, fingerprint, now);
+        Assert.InRange((key + ":3").Length, 1, 160);
+        Assert.Equal(key, SpecialistAgent.PlanningStateMutationKey(project, fingerprint, now));
+        Assert.NotEqual(key, SpecialistAgent.PlanningStateMutationKey(project, fingerprint, now.AddTicks(1)));
+    }
+
+    [Fact]
     public void Long_staffing_role_does_not_prevent_followup_creation()
     {
         var correlation = $"producer-staffing-gap:{Guid.NewGuid():N}:game-technical-director:{new string('a', 64)}";

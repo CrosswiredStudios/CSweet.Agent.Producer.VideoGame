@@ -1315,9 +1315,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 UpdatedAt = DateTimeOffset.UtcNow
             },
             new Dictionary<string, string> { [cycle.WorkstreamId.ToString("D")] = cycle.PlanningFingerprint },
-            $"producer-planning-state:{cycle.WorkstreamId:N}:{cycle.PlanningFingerprint}:{cycle.UpdatedAt.UtcTicks}",
+            PlanningStateMutationKey(cycle.WorkstreamId, cycle.PlanningFingerprint, cycle.UpdatedAt),
             cancellationToken);
     }
+
+    internal static string PlanningStateMutationKey(Guid project, string fingerprint, DateTimeOffset updated) =>
+        BoundedMutationKey($"producer-planning-state:{project:N}:{fingerprint}:{updated.UtcTicks}");
 
     internal static async Task<int> PublishCanonicalBacklogAsync(
         Guid boardId,

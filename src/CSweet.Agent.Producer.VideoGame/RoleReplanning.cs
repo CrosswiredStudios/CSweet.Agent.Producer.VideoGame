@@ -65,7 +65,7 @@ public sealed partial class SpecialistAgent
         try
         {
             await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(key,
-                schema, 1, "Active", new Dictionary<string,string>(), [], key, [], Guid.NewGuid(), json, null, key), token);
+                schema, 1, "Active", new Dictionary<string,string>(), [], ProducerPolicyFingerprint.Digest(key), [], Guid.NewGuid(), json, null, key), token);
         }
         catch (PlatformCapabilityException error) when (error.Code == PlatformCapabilityErrorCode.Conflict) { }
     }
