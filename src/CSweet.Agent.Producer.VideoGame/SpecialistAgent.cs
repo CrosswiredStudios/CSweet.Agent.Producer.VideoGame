@@ -338,12 +338,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 }
                 if (!(planned?.CapacityPoints > 0) &&
                          accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
-                         !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest) && planningCycle.OutstandingAuthorityQuestions.Count == 0)
+                         !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest))
                 {
                     var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
                     var candidateExists = detail.Items.Any(x =>
                         IsSprintCandidate(x, sprints) &&
-                        HasStaffedExecution(x) && x.ProposalProvenance is not null);
+                        HasStaffedExecution(x) && x.ProposalProvenance is not null &&
+                        CanPrepareWithPlanningDecisions(x, planningCycle));
                     if (candidateExists)
                     {
                         var nextSequence = PlanningSprintSequence(sprints);
@@ -798,6 +799,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             designerSession = technicalSession; designerArtifact = technicalArtifact;
         }
 
+        var engineeringPrerequisites = ReadEngineeringPrerequisites(technicalProposal, technicalArtifact!);
         var questions = UnresolvedPlanningQuestions(
             designerProposal.OpenCreativeDecisions.Concat(technicalProposal.OpenFeasibilityDecisions).ToArray(),
             planningDecisions, workstreamId, handoff.RevisionDigest);
@@ -836,6 +838,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             TechnicalProposalDigest = technicalArtifact!.Digest,
             ReconciledDigest = reconciledDigest,
             OutstandingAuthorityQuestions = questions,
+            EngineeringPrerequisiteKeys = engineeringPrerequisites,
             AuthorityDecisionFingerprint = PlanningDecisionFingerprint(questions, currentPlanningDecisions,
                 workstreamId, handoff.RevisionDigest),
             UpdatedAt = DateTimeOffset.UtcNow
@@ -865,8 +868,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         await EnsureDraftSprintAsync(boardId, reconciledDigest, context, cancellationToken);
         await PopulateDraftScopeAsync(boardId, context, cancellationToken);
         if (currentBoard.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                HasStaffedExecution(x) && (questions.Count == 0 ||
-                    x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike)))
+                HasStaffedExecution(x) && CanPrepareWithPlanningDecisions(x, priorCycle)))
         {
             var estimationSprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
             var estimation = await EnsureCommitmentAsync(
@@ -874,7 +876,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 "Collect estimates and QA sprint-readiness evidence",
                 questions.Count == 0
                     ? "Collect role-owned estimates and capacity for the reconciled executable scope, obtain QA readiness evidence, pull eligible leaves to Ready, and create the bounded planned sprint."
-                    : "Collect estimates and QA readiness only for research spikes that produce evidence for pending authority decisions. Keep decision-dependent implementation out of the sprint.",
+                    : "Collect estimates and QA readiness only for declared engineering prerequisites and research spikes. Keep decision-dependent implementation out of the sprint; completing a prerequisite does not approve a pending decision.",
                 WorkPriorities.Critical,
                 source with { SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
@@ -922,11 +924,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (planningState?.Payload.PlanningCycles.TryGetValue(workstreamId, out var currentCycle) != true ||
             currentCycle is null || currentCycle.ReconciledDigest != source.SourceFingerprint)
             return PersonalTodoResult.Blocked("The candidate planning evidence changed.");
-        var discoveryOnly = currentCycle.OutstandingAuthorityQuestions.Count > 0;
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var candidates = board.Items.Where(x => IsSprintCandidate(x, planningSprints) &&
-                (!discoveryOnly || x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike))
+                CanPrepareWithPlanningDecisions(x, currentCycle))
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
         if (candidates.Count == 0)
             return PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope.");
@@ -1108,6 +1109,17 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Completed($"Sprint {sprint.Name} is already {sprint.Status}.");
         if (!(sprint.CapacityPoints > 0))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "This sprint is still a provisional draft awaiting estimates and QA readiness.");
+        // Authority can change between QA preparation and start. Recheck the current scope,
+        // rather than letting an old readiness callback start decision-dependent work.
+        var state = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), cancellationToken);
+        if (item.WorkContext.WorkstreamId is not { } project || state?.Payload.PlanningCycles.TryGetValue(project, out var cycle) != true || cycle is null)
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "Current planning evidence is required before finalizing sprint scope.");
+        var current = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        if (current.Items.Any(x => x.SprintId == sprintId && x.ExecutionMode == WorkItemExecutionModes.Executable &&
+            !CanPrepareWithPlanningDecisions(x, cycle)))
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "Sprint scope includes implementation that still depends on an unresolved planning decision.");
         var deliveryWait = await FinalizeSprintDeliveriesAsync(item, boardId, sprintId, context, cancellationToken);
         if (deliveryWait is not null)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), deliveryWait);
