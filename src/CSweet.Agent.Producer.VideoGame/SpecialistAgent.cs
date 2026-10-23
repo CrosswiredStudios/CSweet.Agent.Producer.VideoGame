@@ -783,6 +783,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Blocked("The completed planning sessions do not contain current, correlated proposal artifacts.");
 
         var progressiveMode = ReadProgressiveEvidence(technicalArtifact!) is not null;
+        var authorityReviewDirectionsDigest = ReadProgressiveEvidence(technicalArtifact!)?.DirectionsDigest;
+        IReadOnlyList<string>? reviewedAuthorityQuestions = null;
         if (progressiveMode && roleRepair is null && designer is null)
         {
             var advance = await AdvanceProgressivePlanningAsync(boardId, roster, cycle, memberDigests, technicalDirector,
@@ -793,6 +795,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (advance.Complete) return PersonalTodoResult.Completed("Every retained scope Story has been refined and its published increment work completed; aggregate delivery acceptance remains authoritative.");
             if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), advance.Waiting);
             technicalSession = advance.Session!;
+            reviewedAuthorityQuestions = advance.ReviewedAuthorityQuestions;
             technicalArtifact = technicalSession.Turns.Last(x => x.SpeakerOrganizationUserId == technicalSession.Target.OrganizationUserId &&
                 x.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1").Artifact!;
             technicalProposal = technicalArtifact.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
@@ -801,7 +804,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 
         var engineeringPrerequisites = ReadEngineeringPrerequisites(technicalProposal, technicalArtifact!);
         var questions = UnresolvedPlanningQuestions(
-            designerProposal.OpenCreativeDecisions.Concat(technicalProposal.OpenFeasibilityDecisions).ToArray(),
+            designerProposal.OpenCreativeDecisions.Concat(reviewedAuthorityQuestions ?? technicalProposal.OpenFeasibilityDecisions).ToArray(),
             planningDecisions, workstreamId, handoff.RevisionDigest);
         var currentPlanningDecisions = await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
             handoff, context, cancellationToken);
@@ -837,6 +840,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             DesignerProposalDigest = designerArtifact!.Digest,
             TechnicalProposalDigest = technicalArtifact!.Digest,
             ReconciledDigest = reconciledDigest,
+            Progressive = reviewedAuthorityQuestions is not null && priorCycle.Progressive is not null
+                ? priorCycle.Progressive with { ReviewedDirectionsDigest = authorityReviewDirectionsDigest }
+                : priorCycle.Progressive,
             OutstandingAuthorityQuestions = questions,
             EngineeringPrerequisiteKeys = engineeringPrerequisites,
             AuthorityDecisionFingerprint = PlanningDecisionFingerprint(questions, currentPlanningDecisions,

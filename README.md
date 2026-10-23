@@ -57,7 +57,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.14`
+- Version: `4.0.15`
 
 Engineering prerequisites declared by the current Technical Director proposal may receive estimates
 and QA readiness while authority decisions remain pending. Only the declared, provenance-bound

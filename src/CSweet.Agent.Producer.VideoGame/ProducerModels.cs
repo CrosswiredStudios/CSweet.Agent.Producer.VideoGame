@@ -88,7 +88,10 @@ public sealed record ProducerPlanningCycleState(
 
 public sealed record ProgressivePlanningProgress(string ScopeKey, string OutlineDigest, string DirectionsDigest,
     IReadOnlyList<string> DetailedStoryKeys, Guid? RefinementSessionId = null, string? PendingStoryKey = null,
-    string? ScheduledArtifactDigest = null);
+    string? ScheduledArtifactDigest = null)
+{
+    public string? ReviewedDirectionsDigest { get; init; }
+}
 
 public static class ProducerPhaseResolver
 {
