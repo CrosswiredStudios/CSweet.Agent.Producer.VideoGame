@@ -62,7 +62,9 @@ public sealed class ProjectFoundationTests
                     binding = new { payload = plan }, decision = new { decision = "RequestRevision", comment = "Make acceptance measurable." } }, json) } : []))
             .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (r, _) => {
                 models++; Assert.Contains("Make acceptance measurable", r.GetRawText());
-                return Task.FromResult(JsonSerializer.SerializeToElement(new { text = JsonSerializer.Serialize(plan with { Outcome = "Measurable delivery outcome" }, json), role = "assistant" })); })
+                return Task.FromResult(JsonSerializer.SerializeToElement(new { text = JsonSerializer.Serialize(plan with {
+                    Outcome = "Measurable delivery outcome", ProfileData = JsonSerializer.SerializeToElement(new { genre = "Arcade brick-breaker" })
+                }, json), role = "assistant" })); })
             .RegisterCapability<WorkstreamPlanProposalV2Request, MutationResponse>("platform.workstream.plan.propose.v2", (r, _) => {
                 submissions.Add(r); return Task.FromResult(new MutationResponse(false, 0, newId, "Pending")); });
         var context = runtime.CreateContext(identity: new(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
@@ -76,6 +78,7 @@ public sealed class ProjectFoundationTests
         Assert.Equal(1, models);
         var revised = Assert.Single(submissions);
         Assert.Equal("Measurable delivery outcome", revised.Outcome);
+        Assert.Equal("Arcade brick-breaker", revised.ProfileData.GetProperty("genre").GetString());
         Assert.Equal(producer, revised.AccountableManagerOrganizationUserId);
         Assert.Contains("launch", revised.AuthorityEnvelope.HumanRequiredActionKeys);
         Assert.Contains(newId.ToString(), cache[indexKey].Payload.GetRawText());

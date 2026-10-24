@@ -57,7 +57,12 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.15`
+- Version: `4.0.16`
+
+Project proposal drafts include descriptive `profileData` so manager-requested genre, platform and
+accessibility corrections can reach the submitted proposal. Revision recovery rereads the exact
+accepted documents. The agent preserves command identity, profile selection, team, evidence,
+budgets, authority and submitted-command idempotency while the manager reviews the corrected plan.
 
 Engineering prerequisites declared by the current Technical Director proposal may receive estimates
 and QA readiness while authority decisions remain pending. Only the declared, provenance-bound
