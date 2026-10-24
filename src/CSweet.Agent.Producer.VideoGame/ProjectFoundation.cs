@@ -38,9 +38,15 @@ public sealed partial class SpecialistAgent
                         x.Workstream.Status is not ("Completed" or "Cancelled")))
                         return new ProjectRecovery("ContinueExistingProject");
                 }
+                var source = new List<string>();
+                foreach (var evidence in template.InitialEvidence.Where(x => x.Kind == "artifact"))
+                {
+                    var accepted = await context.Platform.Artifacts.ReadAcceptedAsync(new(evidence.ResourceId, evidence.RevisionId!.Value, evidence.Digest!), token);
+                    source.Add(accepted.Revision.Content);
+                }
                 var prepared = await PrepareProjectDraftAsync($"producer-project-revision-plan:{id:N}",
                     template with { IdempotencyKey = $"producer-project-revised:{id:N}" },
-                    new { feedback = decision.GetProperty("comment").GetString() }, "producer-project-revision", context, token);
+                    new { source, feedback = decision.GetProperty("comment").GetString() }, "producer-project-revision", context, token);
                 if (prepared.Plan is null) throw new InvalidOperationException(prepared.Error);
                 var proposal = await context.Platform.ProposeWorkstreamAsync(prepared.Plan, token);
                 if (proposal.ApprovalId is not { } revisedId) throw new InvalidOperationException("Revised proposal has no approval ID.");

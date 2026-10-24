@@ -22,7 +22,10 @@ public sealed partial class SpecialistAgent
         public IReadOnlyList<object> DependencyPins { get; init; } = [];
     }
     internal sealed record ProgressiveAdvance(ProgressivePlanningProgress Progress, AgentCoordinationSession? Session = null,
-        string? Waiting = null, string? Blocker = null, bool Complete = false);
+        string? Waiting = null, string? Blocker = null, bool Complete = false)
+    {
+        public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
+    }
     private static readonly JsonSerializerOptions ProgressiveJson = new(JsonSerializerDefaults.Web);
 
     internal static ProgressiveEvidence? ReadProgressiveEvidence(AgentCoordinationArtifact artifact) =>
@@ -116,8 +119,27 @@ public sealed partial class SpecialistAgent
         try
         {
             ValidateProgressiveProposal(outline, evidence, outline, evidence, [], null);
+            IReadOnlyList<string>? reviewedQuestions = null;
+            var needsAuthorityReconciliation = false;
             if (progress.ScopeKey != evidence.ScopeKey || progress.OutlineDigest != evidence.OutlineDigest)
-                throw new InvalidOperationException("Progressive state refers to different approved scope; reconcile the amendment before proceeding.");
+            {
+                if (progress.RefinementSessionId is not { } retainedSessionId || evidence.DirectionsDigest == progress.DirectionsDigest)
+                    throw new InvalidOperationException("Progressive state refers to different approved scope; reconcile the amendment before proceeding.");
+                var retained = await context.Platform.Communication.ReadCoordinationAsync(retainedSessionId, token);
+                if (retained.Status != "Completed" || retained.Target.OrganizationUserId != outlineSession.Target.OrganizationUserId ||
+                    retained.Initiator.OrganizationUserId != outlineSession.Initiator.OrganizationUserId || retained.BoardSource?.BoardId != boardId)
+                    throw new InvalidOperationException("Direction reconciliation requires the completed refinement from the same board and planning authorities.");
+                var artifact = retained.Turns.LastOrDefault(x => x.SpeakerOrganizationUserId == retained.Target.OrganizationUserId &&
+                    x.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1")?.Artifact
+                    ?? throw new InvalidOperationException("The retained refinement has no authoritative proposal.");
+                var detail = artifact.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
+                var priorEvidence = ReadProgressiveEvidence(artifact) ?? throw new InvalidOperationException("The retained refinement has no scope binding.");
+                var original = RetainScopeAfterPlanningDirection(outline, evidence, detail, priorEvidence, progress);
+                needsAuthorityReconciliation = progress.ReviewedDirectionsDigest != evidence.DirectionsDigest;
+                reviewedQuestions = outline.OpenFeasibilityDecisions;
+                outline = original;
+                evidence = priorEvidence with { Phase = "Outline", DetailedStoryKeys = [] };
+            }
             AgentCoordinationSession? currentSession = null;
             AgentCoordinationArtifact? currentArtifact = null;
             GameTechnicalDeliveryProposalV1 current = outline;
@@ -137,7 +159,8 @@ public sealed partial class SpecialistAgent
                 var currentEvidence = ReadProgressiveEvidence(currentArtifact) ?? throw new InvalidOperationException("The refinement omitted progressive scope evidence.");
                 ValidateProgressiveProposal(outline, evidence, current, currentEvidence, progress.DetailedStoryKeys, progress.PendingStoryKey);
                 progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null };
-                if (progress.ScheduledArtifactDigest != currentArtifact.Digest) return new(progress, currentSession);
+                if (progress.ScheduledArtifactDigest != currentArtifact.Digest || needsAuthorityReconciliation)
+                    return new(progress, currentSession) { ReviewedAuthorityQuestions = reviewedQuestions };
             }
             else
             {
@@ -176,6 +199,29 @@ public sealed partial class SpecialistAgent
                 "Progressive planning retained the existing scope but could not advance: " + error.Message +
                 " Escalate through the reporting manager for a code correction. Retry only after its cause changes; accepted scope and saved specialist output are retained.");
         }
+    }
+
+    internal static GameTechnicalDeliveryProposalV1 RetainScopeAfterPlanningDirection(GameTechnicalDeliveryProposalV1 reviewed,
+        ProgressiveEvidence reviewedEvidence, GameTechnicalDeliveryProposalV1 retained, ProgressiveEvidence retainedEvidence,
+        ProgressivePlanningProgress progress)
+    {
+        // Recorded direction is not an accepted-scope amendment. Retain exact immutable containers and
+        // detailed work, while the new specialist review answers authority questions independently.
+        if (reviewed.Cycle != retained.Cycle || progress.ScopeKey != retainedEvidence.ScopeKey ||
+            progress.OutlineDigest != retainedEvidence.OutlineDigest || progress.DirectionsDigest != retainedEvidence.DirectionsDigest ||
+            reviewedEvidence.DirectionsDigest == retainedEvidence.DirectionsDigest ||
+            !reviewedEvidence.ScopeCoverage.Select(x => x.SourceKey).Order().SequenceEqual(retainedEvidence.ScopeCoverage.Select(x => x.SourceKey).Order()))
+            throw new InvalidOperationException("Planning direction cannot replace changed accepted inputs or an unrelated retained scope.");
+        var containers = retained.DeliveryItems.Where(IsScopeContainer).ToArray();
+        var incoming = reviewed.DeliveryItems.ToDictionary(x => x.ProposalKey, StringComparer.Ordinal);
+        if (containers.Length != incoming.Count || containers.Any(x => !incoming.TryGetValue(x.ProposalKey, out var other) ||
+            x.WorkItemTypeKey != other.WorkItemTypeKey || x.ParentProposalKey != other.ParentProposalKey ||
+            !x.DependencyProposalKeys.SequenceEqual(other.DependencyProposalKeys)))
+            throw new InvalidOperationException("Planning direction changed frozen scope identities or dependencies; an explicit amendment is required.");
+        var original = retained with { DeliveryItems = containers };
+        var originalEvidence = retainedEvidence with { Phase = "Outline", DetailedStoryKeys = [] };
+        ValidateProgressiveProposal(original, originalEvidence, retained, retainedEvidence, progress.DetailedStoryKeys, progress.PendingStoryKey);
+        return original;
     }
 
     internal static IReadOnlyDictionary<string, WorkItem> ProgressivePublishedItems(IReadOnlyList<WorkItem> items,

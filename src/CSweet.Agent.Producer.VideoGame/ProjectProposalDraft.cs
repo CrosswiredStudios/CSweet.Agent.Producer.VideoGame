@@ -12,7 +12,8 @@ public sealed partial class SpecialistAgent
 {
     private sealed record ProjectDraftResult(WorkstreamPlanProposalV2Request? Plan, string? Error);
     private sealed record ProjectDraft(string? Outcome, string? Rationale,
-        IReadOnlyList<string>? SuccessCriteria, IReadOnlyList<WorkstreamMilestoneProposal>? InitialMilestones);
+        IReadOnlyList<string>? SuccessCriteria, IReadOnlyList<WorkstreamMilestoneProposal>? InitialMilestones,
+        JsonElement? ProfileData);
 
     // A terminal invalid draft is cached as well: duplicate wakes must not restart the correction budget.
     private async Task<ProjectDraftResult> PrepareProjectDraftAsync(string cacheKey,
@@ -37,12 +38,17 @@ public sealed partial class SpecialistAgent
             List<ChatMessage> messages = [
                 new(ChatRole.System, """
                     Prepare the project proposal as delivery lead using the accepted evidence and manager feedback.
-                    Return a JSON object with outcome, rationale, successCriteria, and initialMilestones at its root.
+                    Return a JSON object with outcome, rationale, successCriteria, initialMilestones, and profileData at its root.
                     outcome and rationale must be nonempty strings of at most 4000 characters; successCriteria must
                     be a nonempty array of nonempty strings. initialMilestones must contain the template's milestones
                     with the same keys, lifecycleStage, targetDate, requiredEvidenceTypeKeys and requiredReviewerRoleKeys;
                     refine their names to describe delivery clearly. Do not expand accepted scope or invent authority,
                     identity, budget or dates. Missing budgets are allowed under the current Unlimited spending policy.
+                    profileData is the complete descriptive metadata object for the existing profile. Correct its genre,
+                    platform and accessibility fields against the accepted documents and manager feedback; do not retain
+                    contradictory template defaults. Preserve unrelated metadata. The final submitted command also retains
+                    the template's identity, profile key/version, team, evidence and authority fields in code. The response
+                    field list describes your draft, not a request to omit required fields from the submitted command.
                     The manager reviews the submitted proposal; never assert that approval occurred.
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { template, evidence }, ProjectFoundationJson))
@@ -57,7 +63,8 @@ public sealed partial class SpecialistAgent
                     var draft = JsonSerializer.Deserialize<ProjectDraft>(raw, ProjectFoundationJson);
                     var plan = draft is null ? null : template with {
                         Outcome = draft.Outcome!, Rationale = draft.Rationale!,
-                        SuccessCriteria = draft.SuccessCriteria!, InitialMilestones = draft.InitialMilestones! };
+                        SuccessCriteria = draft.SuccessCriteria!, InitialMilestones = draft.InitialMilestones!,
+                        ProfileData = draft.ProfileData ?? template.ProfileData };
                     if (plan is not null && ValidProjectDraft(plan, template)) return new ProjectDraftResult(plan, null);
                 }
                 catch (JsonException) { /* A single corrective model request follows; no mutation has run. */ }
@@ -77,7 +84,8 @@ public sealed partial class SpecialistAgent
             left is not null && right is not null && left.SequenceEqual(right, StringComparer.Ordinal);
         if (!Text(plan.Outcome, 4000) || !Text(plan.Rationale, 4000) ||
             plan.SuccessCriteria is not { Count: > 0 and <= 100 } || plan.SuccessCriteria.Any(x => !Text(x, 4000)) ||
-            plan.InitialMilestones is null || plan.InitialMilestones.Count != template.InitialMilestones.Count)
+            plan.InitialMilestones is null || plan.InitialMilestones.Count != template.InitialMilestones.Count ||
+            plan.ProfileData.ValueKind != JsonValueKind.Object || plan.ProfileData.GetRawText().Length > 128000)
             return false;
         var keys = new HashSet<string>(StringComparer.Ordinal);
         foreach (var milestone in plan.InitialMilestones)

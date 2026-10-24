@@ -7,6 +7,15 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class SprintDeliveryFinalizationTests
 {
     [Fact]
+    public async Task A_new_authority_question_after_readiness_blocks_ordinary_scope_before_finalization()
+    {
+        var fixture = new Journey { PendingAuthority = true };
+        await new SpecialistAgent().HandlePersonalTodoAsync(fixture.Commitment, fixture.Context, default);
+        Assert.Empty(fixture.Finalizations);
+        Assert.Equal(0, fixture.Starts);
+    }
+
+    [Fact]
     public async Task Ready_planning_is_finalized_before_preflight_and_restart_does_not_duplicate_delivery()
     {
         var fixture = new Journey { PreflightValid = false };
@@ -98,6 +107,7 @@ public sealed class SprintDeliveryFinalizationTests
         public List<FinalizeWorkItemDeliveryRequest> Finalizations { get; } = [];
         public IReadOnlyList<TeamRepositoryOption> Repositories { get; set; }
         public bool PreflightValid { get; set; } = true;
+        public bool PendingAuthority { get; set; }
         public int Starts { get; private set; }
 
         public Journey()
@@ -121,6 +131,14 @@ public sealed class SprintDeliveryFinalizationTests
             UnscheduledId = unscheduled.Id; ContainerId = container.Id; Original = new(Items);
             Repositories = [new(RepositoryId, "Project repository", "InternalGit", "internal/game", "main", "PullRequest")];
             var runtime = new AgentTestRuntime()
+                .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead, (_, _) => {
+                    var cycle = new ProducerPlanningCycleState(_projectId, _boardId, _teamId, "cycle", null, null, null, null, null, "reconciled", DateTimeOffset.UtcNow) {
+                        OutstandingAuthorityQuestions = PendingAuthority ? ["Changed scope"] : []
+                    };
+                    var state = new ProducerOperatingState { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> { [_projectId] = cycle } };
+                    return Task.FromResult(new AgentOperatingStateReadResponse(new(Guid.NewGuid(), "producer", "producer", 1, "Active", new Dictionary<string, string>(), [], "state", [], Guid.Empty,
+                        JsonSerializer.SerializeToElement(state), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
+                })
                 .RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([Sprint]))
                 .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(new WorkBoardDetail(
                     new(_boardId, "GAME", "Game board", false, false, 1, []) { WorkstreamId = _projectId, TeamId = _teamId }, [], Items.Values.ToArray())))

@@ -57,7 +57,19 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.13`
+- Version: `4.0.16`
+
+Project proposal drafts include descriptive `profileData` so manager-requested genre, platform and
+accessibility corrections can reach the submitted proposal. Revision recovery rereads the exact
+accepted documents. The agent preserves command identity, profile selection, team, evidence,
+budgets, authority and submitted-command idempotency while the manager reviews the corrected plan.
+
+Engineering prerequisites declared by the current Technical Director proposal may receive estimates
+and QA readiness while authority decisions remain pending. Only the declared, provenance-bound
+engineering tasks and research spikes are eligible; dependent implementation stays gated. The
+retained Director 5.0.4 Phaser-pin prerequisite is supported without changing its saved proposal.
+After upgrading through Installed Agents, retry the existing blocked planning task to reconcile
+that declaration and prepare the bounded prerequisite sprint.
 
 Exact owner amendments use a source-bound `scopeAmendment` planning artifact. Install Technical
 Director 5.0.3 before Producer 4.0.13. The Director verifies current planning digests and returns
