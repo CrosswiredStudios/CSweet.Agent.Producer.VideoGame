@@ -56,7 +56,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         new() { MaxOutputTokens = ResolveOutputTokens(Settings) };
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
-    protected override string RolePrompt => "You are the operational lead for one video game team. Follow the actual manager direction. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Start from a lightweight manager brief when available; a Creative Director and formal creative documents are optional unless the manager or a specific approved workflow requires them. Convert uncertainty into assigned work or durable decisions.";
+    protected override string RolePrompt => "You are the shared Video Game Producer for the business portfolio, reporting to the Video Game Director. Manage each authorized project's delivery, boards, sprints, dependencies, staffing evidence, capacity and risks independently. Use the exact CEO-approved pitch and Director-reviewed creative and production documents. Collaborate with the Creative Director as a peer. Propose justified staffing to the Director and supply attributed portfolio evidence for Director-owned CEO updates. Never invent pitch approval or absorb creative, technical or QA authority.";
     protected override IReadOnlyList<string> RequiredSections => ["Schedule", "Budget", "Dependencies", "Staffing", "Risks", "Status Reporting"];
 
     public override async Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(
@@ -499,7 +499,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         return await EnsureCommitmentAsync(
             $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
             "Reconcile scope, technical backlog and delivery staffing",
-            "Use the accepted production brief to propose the smallest justified delivery team to the Creative Director, reconcile technical feasibility, and publish provenance-bound planning work.",
+            "Use the accepted production brief to propose the smallest justified delivery team to the Video Game Director, reconcile technical feasibility, and publish provenance-bound planning work.",
             "High", new PersonalTodoWorkContext {
                 WorkstreamId = workstream.Id, TeamId = teamId, BoardId = boardId,
                 CoordinationSessionId = sessionId, SourceFingerprint = fingerprint
@@ -661,7 +661,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             ProjectStateKeys.Portfolio("producer"), cancellationToken);
         var operatingState = state?.Payload;
         if (operatingState is null || !operatingState.AcceptedHandoffs.TryGetValue(workstreamId, out var handoff))
-            return PersonalTodoResult.Blocked("The exact Creative Director handoff is no longer available.");
+            return PersonalTodoResult.Blocked("The exact Video Game Director handoff is no longer available.");
 
         var rosterResponse = await context.Platform.ReadTeamRosterAsync(
             new TeamRosterV2Request(teamId, workstreamId, 1, 100), cancellationToken);
@@ -760,7 +760,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
             return PersonalTodoResult.Blocked(IsTechnicalPlanningGenerationBlock(technicalSession)
                 ? TechnicalPlanningBlockDescription(technicalSession)
-                : $"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Creative Director authority.");
+                : $"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Video Game Director authority.");
         if (designerSession.Status != AgentCoordinationStatuses.Completed ||
             technicalSession.Status != AgentCoordinationStatuses.Completed)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
@@ -1177,7 +1177,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var message = $"Planning cycle {cycle.PlanningFingerprint}. {objective} Return final artifact type {expectedArtifactType}.";
         if (!string.IsNullOrWhiteSpace(additionalContext)) message += "\n" + additionalContext;
         if (managerDirections.Count > 0)
-            message += " Incorporate these recorded Creative Director decisions into the proposal and close only the questions they resolve: " +
+            message += " Incorporate these recorded Video Game Director decisions into the proposal and close only the questions they resolve: " +
                 string.Join(" ", managerDirections);
         if (objective.Length > 4096)
             throw new InvalidOperationException("Planning coordination exceeds the host content limits; provide a bounded handoff without dropping scope.");

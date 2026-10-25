@@ -33,7 +33,7 @@ public sealed class ManagerChatTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ManagerChatReusesProductionProjectsOrPendingSetupForRenamedGame(bool pending)
+    public async Task ManagerChatDoesNotCreateAnUnscopedGameDespiteModelSuggestion(bool pending)
     {
         var manager = Guid.NewGuid(); var producer = Guid.NewGuid();
         var game = Project("Pulse Break", "video-game-production.v2") with { AccountableManagerOrganizationUserId = producer };
@@ -72,7 +72,7 @@ public sealed class ManagerChatTests
         await new SpecialistAgent().HandleEventAsync(new(Guid.NewGuid(), Guid.NewGuid(), CommunicationEvents.MessageReceived,
             JsonSerializer.SerializeToElement(incoming), DateTimeOffset.UtcNow), context, default);
         Assert.Contains(runtime.Progress, x => x.GetProperty("isFinal").GetBoolean() &&
-            x.GetProperty("delta").GetString()!.Contains(pending ? "Reusing the pending project setup" : "Reusing the approved project Pulse Break"));
+            x.GetProperty("delta").GetString()!.Contains("CEO-approved pitch"));
     }
 
     [Theory]
@@ -112,7 +112,7 @@ public sealed class ManagerChatTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task DirectManagerRequestProducesFinalAnswerAndGovernedProjectProposal(bool staffingDenied)
+    public async Task DirectManagerChatCannotBypassApprovedPitchHandoff(bool staffingDenied)
     {
         var manager = Guid.NewGuid();
         var producer = Guid.NewGuid();
@@ -162,18 +162,10 @@ public sealed class ManagerChatTests
             CommunicationEvents.MessageReceived, JsonSerializer.SerializeToElement(received),
             DateTimeOffset.UtcNow), context, default);
 
-        Assert.NotNull(proposal);
-        Assert.NotNull(teamProposal);
-        Assert.Equal(turn, teamProposal.ChatTurnId);
-        Assert.Equal(new[] { "game-engineer", "game-quality-assurance" },
-            teamProposal.Roles.Select(x => x.RoleKey));
-        Assert.Equal(producer, proposal.AccountableManagerOrganizationUserId);
-        Assert.Empty(proposal.InitialSupervisors);
-        Assert.Empty(proposal.InitialEvidence);
-        Assert.Equal("Breakout Demo", proposal.Name);
-        Assert.Contains(runtime.Progress, x => x.GetProperty("isFinal").GetBoolean()
-            && x.GetProperty("kind").GetString() == AgentTurnStreamKinds.FinalCommit
-            && x.GetProperty("delta").GetString()!.Contains(staffingDenied ? "Staffing grant revoked" : "Submitted project setup"));
+        Assert.Null(proposal);
+        Assert.Null(teamProposal);
+        Assert.Contains(runtime.Progress, x => x.GetProperty("isFinal").GetBoolean() &&
+            x.GetProperty("delta").GetString()!.Contains("CEO-approved pitch"));
         Assert.DoesNotContain(runtime.Progress, x => x.TryGetProperty("delta", out var delta) && delta.GetString()!.Contains("The team is hired and the sprint is running"));
     }
 

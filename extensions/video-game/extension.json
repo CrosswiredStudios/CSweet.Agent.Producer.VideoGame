@@ -5,8 +5,8 @@
   "sourcePath": "extensions/video-game",
   "files": {
     "VideoGameContracts.cs": "cc70bda54039bd30ebdbff26d35c9562cb7aff5f98d9efa456255750bf495e7a",
-    "VideoGameAgentKit.cs": "6d77a0f4d9ee4a238f96972fbfbd0b25fced74ec1555153cdb432bb961e49027",
-    "README.md": "d28f5ca0cc892f3626a5aad07a6dd28d838f0ce2af65faf80b8476b6774a6211"
+    "VideoGameAgentKit.cs": "6717b6ac1a5f5c44981e6a6596fbc2ed1caf24f1df46da1c9e2b989c5ce100fc",
+    "README.md": "524cfedeb0c712ae241373d2175718a03affd411483c10156b8a2a6955896447"
   },
   "localAdaptations": [
     "VideoGameAgentKit.cs"

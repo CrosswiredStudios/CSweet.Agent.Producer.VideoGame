@@ -26,7 +26,7 @@ public sealed partial class SpecialistAgent
             request.WorkContext?.WorkstreamId is not Guid workstream || request.WorkContext.TeamId is not Guid team ||
             brief.Vision.HighLevelGddArtifactId is not Guid gddId || brief.Vision.HighLevelGddAcceptedRevisionId is not Guid gddRevision ||
             !Guid.TryParse(context.Identity?.ManagerEmployeeId, out var manager) || manager != request.Counterpart.OrganizationUserId)
-            return AgentCoordinationTurnResult.Blocked("Pitch refinement requires the exact pitch, accepted GDD, project/team context and Creative Director manager.");
+            return AgentCoordinationTurnResult.Blocked("Pitch refinement requires the exact pitch, accepted GDD, project/team context and Video Game Director manager.");
         var pitch = await PitchProtocol.ReadAcceptedAsync(brief.PitchArtifactId, brief.PitchRevisionId, brief.PitchSha256, context, token);
         var gdd = await PitchProtocol.ReadAcceptedAsync(gddId, gddRevision, brief.Vision.HighLevelGddRevisionSha256!, context, token);
         var latest = request.Transcript.LastOrDefault(x => x.Artifact is not null)?.Artifact;
@@ -73,7 +73,7 @@ public sealed partial class SpecialistAgent
                 new AgentLlmInvocationContext(null, null, "producer-pitch-refinement")));
             var response = await client.GetResponseAsync([
                 new ChatMessage(ChatRole.System, """
-                    You are the Producer collaborating with the Creative Director before proposing any hires.
+                    You are the Producer collaborating with the Video Game Director before proposing any hires.
                     Read the actual accepted pitch and GDD. Ask focused questions whose answers materially affect
                     scope, delivery, acceptance criteria, dependencies, effort or team needs. Do not ask questions
                     already answered. Incorporate the Director's answers and edits into the complete shared brief.

@@ -31,9 +31,12 @@ validation and sprint-preflight changes.
 
 `ReconcileSprintReadinessAsync` finalizes the selected executable leaves before sprint preflight through `FinalizeSprintDeliveriesAsync`. It preserves the current planning requirements, acceptance criteria, constraints, dependencies, accountable owner and exact stage assignments. Repository selection reuses an existing sprint binding or the approved team's sole repository option with a default branch; ambiguous or incomplete prerequisites remain pending. Existing delivery specifications are preserved. The host still validates authority, approvals and revisions, and the sprint starts only after authoritative preflight passes. Reconnect and retry resume partial finalization without duplicating delivery.
 
-## Direct manager kickoff (2.9.0)
+## Shared portfolio leadership (5.0.0)
 
-The Producer now answers direct Communications turns and finishes each valid turn with a final response. An explicit manager request can generate a lightweight project proposal and a role-specific team proposal through the existing approval paths. Project and hiring approvals remain visible to the manager; a submitted proposal is not an approved project, team, or hire. The Producer package provides its own lightweight game project profile, so project setup does not depend on importing the Creative Director package. The project and team proposals are separate, so an approved project may still need its approved team attached before board execution. The Producer does not require a Creative Director, accepted pitch, or GDD for this path. The older formal creative-handoff flow still applies when that workflow is used.
+One Producer serves all approved games under the Video Game Director. The Director owns CEO concept alignment, exact pitch approval, constraints and CEO reporting preferences. The Creative Director is a peer providing creative direction and GDDs. The Producer owns per-project delivery plans, boards, sprints, dependencies, staffing proposals and risk evidence, with cross-project capacity considered before promising schedules.
+
+Every new game requires the CEO-approved pitch and the Director's project-foundation coordination. Direct chat cannot create a project or bypass this approval. Existing projects remain independently scoped, and ambiguous requests require project selection. Explicit work context takes precedence over model-inferred project IDs. Proposed staffing goes to the Director through governed resource approval. The Director is formal studio-team lead; the Producer is its operational delivery and project-board manager.
+
 ## Kanban model
 
 The Producer deliberately uses two boards without duplicating work:
@@ -46,7 +49,7 @@ The five-minute attention cycle reconciles authoritative state and queues or req
 
 ## Planning and staffing gates
 
-- An accepted, digest-verified Creative Director handoff is sufficient for the Producer to configure the board and publish milestone shells.
+- An accepted, digest-verified Video Game Director handoff is sufficient for the Producer to configure the board and publish milestone shells.
 - Detailed backlog publication requires a Technical Director and accepted creative brief. An available Game Designer contributes design proposals; a dedicated designer is not mandatory.
 - QA readiness evidence is required before executable work moves to `Ready`, but QA does not block initial backlog drafting.
 - A runnable prototype or vertical-slice sprint additionally requires a Game Engineer.
@@ -57,7 +60,7 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.16`
+- Version: `5.0.0`
 
 Project proposal drafts include descriptive `profileData` so manager-requested genre, platform and
 accessibility corrections can reach the submitted proposal. Revision recovery rereads the exact

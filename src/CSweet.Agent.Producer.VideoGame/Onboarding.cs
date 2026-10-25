@@ -25,7 +25,7 @@ public sealed partial class SpecialistAgent
                 throw new InvalidOperationException("Producer onboarding requires an authoritative manager.");
 
             var managerName = context.Identity?.ManagerDisplayName;
-            // The kickoff names the next step for both kinds of manager: a Creative Director hands over
+            // The kickoff names the next step for both kinds of manager: a Video Game Director hands over
             // the accepted pitch and GDD, while an owner-manager can start from a short brief.
             await context.Platform.Communication.SendDirectMessageAsync(managerId,
                 "I have joined as Producer and report to you. If you already have an accepted game vision, " +

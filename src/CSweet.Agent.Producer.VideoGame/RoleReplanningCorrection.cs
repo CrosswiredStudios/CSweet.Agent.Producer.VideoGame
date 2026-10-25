@@ -27,7 +27,7 @@ public sealed partial class SpecialistAgent
             "Preserve the exact authorized text even when adding explanation. Do not report execution as complete.\n" +
             JsonSerializer.Serialize(findings, AcceptanceJson);
         if (managerDirections.Count > 0)
-            message += "\nRecorded Creative Director decisions: " + JsonSerializer.Serialize(managerDirections, AcceptanceJson);
+            message += "\nRecorded Video Game Director decisions: " + JsonSerializer.Serialize(managerDirections, AcceptanceJson);
         var handoff = BoundPlanningHandoff(message, RoleRepairArtifact(cycle, members, request));
         // One stable correction session per original planning session and role policy. Repeated attention reviews
         // recover that session, including terminal failure; they never create another retry generation.
