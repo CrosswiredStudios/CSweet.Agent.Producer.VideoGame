@@ -212,9 +212,9 @@ public sealed partial class SpecialistAgent
         return context.Platform.ProposeResourceChangeAsync(new ResourceChangeProposalRequest(
             Guid.Parse(incoming.ConversationId), incoming.TurnId,
             plan.ProjectOutcome ?? "Deliver the manager's requested game milestone.",
-            "Start with the smallest set of specialist roles justified by the manager's brief.",
+            "Start with the smallest set of specialist roles justified by the accepted project scope.",
             1, roles,
-            ["The initial scope is a lightweight manager brief; details will be refined during work."],
+            ["Staffing must trace to the accepted project scope and delivery backlog."],
             ["Hiring and spending require manager approval.", "Execution waits for staffed roles and readiness evidence."],
             null, $"producer-manager-team:{incoming.TurnId:N}")
         {
@@ -225,45 +225,5 @@ public sealed partial class SpecialistAgent
             TeamName = teamName,
             TeamDescription = plan.ProjectOutcome
         }, token);
-    }
-    private static async Task<MutationResponse> ProposeManagerProjectAsync(
-        string name, string outcome, Guid producerId, Guid turnId,
-        AgentRuntimeContext context, CancellationToken token, string? managerDirection = null, bool separateNewProject = false)
-    {
-        var title = name.Trim();
-        if (title.Length > 160) title = title[..160];
-        var goal = outcome.Trim();
-        if (goal.Length > 4000) goal = goal[..4000];
-        var initialTeamId = Guid.TryParse(context.Identity?.TeamContext?.TeamId, out var teamId)
-            ? teamId : (Guid?)null;
-        var metadata = new VideoGameProjectMetadataV1(
-            title, "To be defined", ["To be defined"], "To be validated",
-            "Technical choice pending", "To be defined",
-            ["Deliver the manager's stated demo outcome"],
-            "To be defined", false, false,
-            ["Readable presentation", "Configurable controls"], []);
-        var authority = new WorkstreamAuthorityEnvelope(
-            0.05m, 14,
-            typeof(VideoGameRoleKeys).GetFields().Where(x => x.IsLiteral)
-                .Select(x => (string)x.GetRawConstantValue()!).Concat(new[] { "software-architect", "software-developer", "software-qa" }).ToList(),
-            ["funding-exception", "material-strategy-change", "legal-commitment",
-             "publication", "launch", "sunset"],
-            ["work-planning", "routine-staffing", "build", "validation",
-             "preview", "evaluation", "gate-submit"], null);
-        var result = await context.Platform.ProposeWorkstreamAsync(new WorkstreamPlanProposalV2Request(
-            title, goal,
-            ["A playable demo demonstrates the manager's requested game loop.",
-             "Visual effects and performance are validated on the agreed target."],
-            VideoGameLifecyclePhases.Concept, producerId, initialTeamId, [],
-            ["game-production", "game-design", "software-delivery", "quality-assurance"],
-            null, null, null, null,
-            "The reporting manager requested a lightweight project start and a small delivery team.",
-            $"producer-manager-project:{turnId:N}",
-            "video-game-manager-brief.v1", 3,
-            JsonSerializer.SerializeToElement(new { metadata.WorkingTitle, managerDirection = managerDirection ?? goal, separateNewProject },
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-            authority, [], []), token);
-        if (result.ApprovalId is { } id) await RememberSubmittedProjectAsync(id, context, token);
-        return result;
     }
 }

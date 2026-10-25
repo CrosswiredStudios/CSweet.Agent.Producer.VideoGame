@@ -8,7 +8,7 @@ public sealed class HandoffFollowUpTests
     private static readonly DateTimeOffset Start = new(2026, 10, 2, 0, 7, 0, TimeSpan.Zero);
 
     [Fact]
-    public void AgentManagerIsNudgedTwiceThenTheOwnerIsToldOnce()
+    public void DirectorIsNudgedTwiceWithoutContactingTheOwner()
     {
         var manager = Guid.NewGuid();
         var watch = new ProducerHandoffWatch(manager, "Naomi", Guid.NewGuid(), Guid.NewGuid(), Start, 0, null, null);
@@ -18,7 +18,7 @@ public sealed class HandoffFollowUpTests
         Assert.Equal(HandoffFollowUpAction.None, HandoffFollowUpPolicy.Decide(watch, Start.AddMinutes(45)));
         Assert.Equal(HandoffFollowUpAction.NudgeManager, HandoffFollowUpPolicy.Decide(watch, Start.AddMinutes(60)));
         watch = watch with { Nudges = 2, LastNudgeAt = Start.AddMinutes(60) };
-        Assert.Equal(HandoffFollowUpAction.EscalateToOwner, HandoffFollowUpPolicy.Decide(watch, Start.AddMinutes(90)));
+        Assert.Equal(HandoffFollowUpAction.None, HandoffFollowUpPolicy.Decide(watch, Start.AddMinutes(90)));
         watch = watch with { EscalatedAt = Start.AddMinutes(90) };
         Assert.Equal(HandoffFollowUpAction.None, HandoffFollowUpPolicy.Decide(watch, Start.AddDays(1)));
     }
@@ -33,12 +33,12 @@ public sealed class HandoffFollowUpTests
     }
 
     [Fact]
-    public void OwnerManagerGetsOneReminderAndNoEscalation()
+    public void ManagerReminderIsBoundedWithoutOwnerEscalation()
     {
         var owner = Guid.NewGuid();
         var watch = new ProducerHandoffWatch(owner, "Matt", owner, Guid.NewGuid(), Start, 0, null, null);
         Assert.Equal(HandoffFollowUpAction.NudgeManager, HandoffFollowUpPolicy.Decide(watch, Start.AddHours(1)));
-        watch = watch with { Nudges = 1, LastNudgeAt = Start.AddHours(1) };
+        watch = watch with { Nudges = 2, LastNudgeAt = Start.AddHours(1) };
         Assert.Equal(HandoffFollowUpAction.None, HandoffFollowUpPolicy.Decide(watch, Start.AddDays(1)));
     }
 
@@ -50,7 +50,7 @@ public sealed class HandoffFollowUpTests
     }
 
     [Fact]
-    public async Task ReviewsWithoutAProjectFollowUpThenEscalateIdempotently()
+    public async Task ReviewsWithoutAProjectFollowUpOnlyWithDirectorIdempotently()
     {
         var h = new Harness();
         await SpecialistAgent.FollowUpAwaitedHandoffAsync(Start, h.Context, default);
@@ -65,10 +65,9 @@ public sealed class HandoffFollowUpTests
             await SpecialistAgent.FollowUpAwaitedHandoffAsync(Start.AddMinutes(minutes), h.Context, default);
 
         Assert.Equal(2, h.Messages.Keys.Count(x => x.StartsWith("producer-handoff-nudge:", StringComparison.Ordinal)));
-        var escalation = Assert.Single(h.Messages, x => x.Key.StartsWith("producer-handoff-escalation:", StringComparison.Ordinal));
-        Assert.Contains("Creative Director", escalation.Value);
-        Assert.Equal(h.OwnerConversation, h.EscalationChat);
-        Assert.NotNull(h.Watch!.EscalatedAt);
+        Assert.DoesNotContain(h.Messages.Keys, x => x.StartsWith("producer-handoff-escalation:"));
+        Assert.Null(h.EscalationChat);
+        Assert.Null(h.Watch!.EscalatedAt);
     }
 
     private sealed class Harness

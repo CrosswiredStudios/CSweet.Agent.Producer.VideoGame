@@ -13,7 +13,7 @@ public sealed class OnboardingTests
         var h = new Harness(managerIsOwner);
         await h.Deliver();
         Assert.Single(h.Messages);
-        Assert.Contains(h.Messages.Values, x => x.Contains("short brief"));
+        Assert.Contains(h.Messages.Values, x => x.Contains("CEO-approved pitch"));
         Assert.Equal(h.ManagerId, Assert.Single(h.Recipients));
         Assert.Equal(h.ManagerChat, Assert.Single(h.MessageChats));
         Assert.NotNull(h.State);

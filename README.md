@@ -1,6 +1,11 @@
-# Video Game Producer
+# Producer 6.0.0
 
-Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
+Require the Director-approved project handoff. Remove owner escalation and short-brief onboarding. Use SDK supporting-specialist interaction policy for delivery planning; creative authority remains with Naomi.
+
+CEO communication and material business decisions belong to the Video Game Director. Specialists preserve independent discipline evidence; no role may manufacture another role's acceptance.
+
+
+Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A new project requires the exact CEO-approved pitch through the Director handoff; delivery planning then requires the reviewed GDD and production brief. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 `AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 5.0.4 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
 
@@ -259,25 +264,7 @@ Unresolved planning questions are recorded as durable workstream decisions with 
 
 ## Manager-directed delivery
 
-An approved short brief can use profile `video-game-manager-brief.v1` version 2. Gabriel discovers
-his accountable projects, attaches already approved team members, obtains a bounded technical plan
-from the Technical Director or Software Architect, publishes the tickets and sprints, assigns a
-Software Developer and technical reviewer, and starts each increment after authoritative preflight.
-The workflow requires real published test results, independent review, Producer acceptance and a
-governed exact-candidate merge. A dedicated QA employee and formal creative handoff are optional.
-
-The personal delivery commitment survives restarts. Hiring, planning, repository and sprint events
-wake reconciliation; its durable wait provides bounded missed-event recovery. Existing version-1
-projects retain their immutable profile until its governed upgrade is approved. Project/hiring,
-repository and final completion decisions still respect the business's approval policies.
-
-Delivery setup requests `work.project-delivery.prepare.v1`; repository-bound ticket assignment uses
-`work.item.delivery.finalize`. Profile upgrades and final lifecycle changes use
-`platform.workstream.change.propose.v1`. Source provisioning and team repository discovery retain
-platform policy checks, and `git.merge.review.v2` / `git.merge.authorize.v2` are limited to assigned
-work-item evidence and acceptance. These declarations require effective approved installation grants.
-
-The Producer uses its existing work.orchestration.retry capability for one bounded retry per stage and missing-section error. It retains the current assignment revision, host attempt limit, and substantive acceptance gates. Other blockers are not automatically retried.
+The former manager-brief project profile is retired. New games use the Director-owned production profile and exact approved pitch.
 
 ## Correcting mixed planning and implementation work
 

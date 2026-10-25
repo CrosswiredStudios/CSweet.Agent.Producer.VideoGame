@@ -6,14 +6,19 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class ProjectFoundationTests
 {
+    private static readonly EvidenceReference PitchEvidence = new("artifact", Guid.NewGuid(), Guid.NewGuid(), new string('a', 64), "video-game.vision.v1", "Accepted");
+    private static ArtifactDocument ApprovedPitch() => new(PitchEvidence.ResourceId, "Official pitch", PitchEvidence.TypeKey,
+        "Approved", PitchEvidence.RevisionId, null, PitchEvidence.RevisionId, null, null,
+        [new(PitchEvidence.RevisionId!.Value, 1, null, "Bounded browser game", PitchEvidence.Digest!, "Accepted", DateTimeOffset.UtcNow, null, null)]);
+
     [Fact]
-    public async Task DuplicateRevisionFeedbackContinuesExistingGameWithoutResubmission()
+    public async Task RetiredBriefProfileCannotRecreateAProject()
     {
         var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var proposal = Guid.NewGuid();
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var plan = new WorkstreamPlanProposalV2Request("Renamed game", "Refined brief", ["Playable"], "Concept", producer, null, [], [],
             null, null, null, null, "Deliver", "original", "video-game-manager-brief.v1", 3, JsonSerializer.SerializeToElement(new { }),
-            new(null, 14, [], ["launch"], ["work-planning"], null), [], []);
+            new(null, 14, [], ["launch"], ["work-planning"], null), [], [PitchEvidence]);
         const string indexKey = "producer-submitted-project-proposals";
         var states = new Dictionary<string, AgentOperatingStateResponse> { [indexKey] = new(Guid.NewGuid(), indexKey, "test", 1, "Active",
             new Dictionary<string, string>(), [], "index", [], Guid.NewGuid(), JsonSerializer.SerializeToElement(new { proposalIds = new[] { proposal } }),
@@ -21,6 +26,7 @@ public sealed class ProjectFoundationTests
         var game = new WorkstreamDetail(Guid.NewGuid(), "Pulse Break", "Original game", ["Playable"], "Concept", "Approved", producer,
             null, null, null, "video-game-production.v2", 6, null, "digest", 1);
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<JsonElement, ArtifactDocument>(PlatformCapabilities.ArtifactRead, (_, _) => Task.FromResult(ApprovedPitch()))
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(r.StateKey))))
             .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
@@ -36,7 +42,7 @@ public sealed class ProjectFoundationTests
         var context = runtime.CreateContext(identity: new(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
         await new SpecialistAgent().RecoverSubmittedProjectsAsync(context, default);
         await new SpecialistAgent().RecoverSubmittedProjectsAsync(context, default);
-        Assert.Contains(states.Values, x => x.Payload.GetRawText().Contains("ContinueExistingProject"));
+        Assert.Contains(states.Values, x => x.Payload.GetRawText().Contains("UnsupportedUnapprovedProject"));
     }
 
     [Fact]
@@ -45,13 +51,14 @@ public sealed class ProjectFoundationTests
         var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var oldId = Guid.NewGuid(); var newId = Guid.NewGuid(); var models = 0;
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var plan = new WorkstreamPlanProposalV2Request("Game", "Original outcome", ["Playable"], "Concept", producer, null, [], [],
-            null, null, null, null, "Deliver", "original", "game", 1, JsonSerializer.SerializeToElement(new { }),
-            new(null, 14, [], ["launch"], ["work-planning"], null), [], []);
+            null, null, null, null, "Deliver", "original", "video-game-production.v2", 8, JsonSerializer.SerializeToElement(new { }),
+            new(null, 14, [], ["launch"], ["work-planning"], null), [], [PitchEvidence]);
         var indexKey = "producer-submitted-project-proposals";
         var cache = new Dictionary<string, AgentOperatingStateResponse> { [indexKey] = new(Guid.NewGuid(), indexKey, "test", 1, "Active",
             new Dictionary<string, string>(), [], "index", [], Guid.NewGuid(), JsonSerializer.SerializeToElement(new { proposalIds = new[] { oldId } }), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow) };
         var submissions = new List<WorkstreamPlanProposalV2Request>();
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<JsonElement, ArtifactDocument>(PlatformCapabilities.ArtifactRead, (_, _) => Task.FromResult(ApprovedPitch()))
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(cache.GetValueOrDefault(r.StateKey))))
             .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
@@ -108,10 +115,11 @@ public sealed class ProjectFoundationTests
         var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var proposalId = Guid.NewGuid(); var team = Guid.NewGuid();
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var template = new WorkstreamPlanProposalV2Request("Game", "Accepted prototype", ["Playable"], "Concept", producer, team, [], [],
-            null, null, null, null, "Deliver", "template", "game", 1, JsonSerializer.SerializeToElement(new { }),
-            new(null, 14, [], ["launch"], ["work-planning"], null), [], []);
+            null, null, null, null, "Deliver", "template", "video-game-production.v2", 8, JsonSerializer.SerializeToElement(new { }),
+            new(null, 14, [], ["launch"], ["work-planning"], null), [], [PitchEvidence]);
         var cached = new Dictionary<string, AgentOperatingStateResponse>(); var models = 0; var submitted = new List<WorkstreamPlanProposalV2Request>();
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<JsonElement, ArtifactDocument>(PlatformCapabilities.ArtifactRead, (_, _) => Task.FromResult(ApprovedPitch()))
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(cached.GetValueOrDefault(r.StateKey))))
             .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,

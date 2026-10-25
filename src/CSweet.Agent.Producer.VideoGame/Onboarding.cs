@@ -25,17 +25,11 @@ public sealed partial class SpecialistAgent
                 throw new InvalidOperationException("Producer onboarding requires an authoritative manager.");
 
             var managerName = context.Identity?.ManagerDisplayName;
-            // The kickoff names the next step for both kinds of manager: a Video Game Director hands over
-            // the accepted pitch and GDD, while an owner-manager can start from a short brief.
             await context.Platform.Communication.SendDirectMessageAsync(managerId,
-                "I have joined as Producer and report to you. If you already have an accepted game vision, " +
-                "please share the accepted pitch and high-level GDD with me so we can refine the production brief " +
-                "and plan staffing together. Otherwise, tell me what you want to make, the first useful milestone, " +
-                "and any time, budget, or team constraints you already know. A short brief is enough to " +
-                "start a project proposal and a small hiring plan.",
+                "I have joined as Producer and report to you as Video Game Director. Share the exact CEO-approved pitch and reviewed GDD through the project-foundation handoff. I own delivery planning, capacity, dependencies and staffing proposals across approved games. Naomi owns creative direction; I will bring resource and scope decisions to you.",
                 $"{key}:manager", cancellationToken);
             // Record what the Producer now waits for (before the onboarding record, so a retry rewrites it),
-            // letting attention reviews follow up with the manager and escalate to the owner.
+            // letting attention reviews follow up only with the reporting Director.
             var watch = new ProducerHandoffWatch(managerId, managerName, onboarded.HiringOrganizationUserId,
                 onboarded.ConversationId, DateTimeOffset.UtcNow, 0, null, null);
             await new RevisionSafeProjectState(context.Platform).MergeAsync<ProducerHandoffWatch>(

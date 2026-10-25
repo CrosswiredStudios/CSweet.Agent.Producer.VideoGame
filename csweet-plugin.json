@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "5.0.0",
+  "version": "6.0.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -39,23 +39,7 @@
     "maximumVersion": "2.x"
   },
   "workstreamProfiles": {
-    "provides": [
-      {
-        "key": "video-game-manager-brief.v1",
-        "version": 3,
-        "definitionResource": "profiles/video-game-manager-brief.v3.json"
-      },
-      {
-        "key": "video-game-manager-brief.v1",
-        "version": 1,
-        "definitionResource": "profiles/video-game-manager-brief.v1.json"
-      },
-      {
-        "version": 2,
-        "definitionResource": "profiles/video-game-manager-brief.v2.json",
-        "key": "video-game-manager-brief.v1"
-      }
-    ],
+    "provides": [],
     "requires": []
   },
   "provides": [
