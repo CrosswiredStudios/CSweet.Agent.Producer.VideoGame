@@ -5,7 +5,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 /// <summary>
 /// What the Producer is waiting for before any project exists: its manager's handoff (accepted pitch
-/// and GDD, or a short brief). Durable, so a restarted or upgraded Producer still knows the next step.
+/// and reviewed GDD). Durable, so a restarted or upgraded Producer still knows the next step.
 /// </summary>
 internal sealed record ProducerHandoffWatch(
     Guid ManagerId,
@@ -17,7 +17,7 @@ internal sealed record ProducerHandoffWatch(
     DateTimeOffset? LastNudgeAt,
     DateTimeOffset? EscalatedAt);
 
-internal enum HandoffFollowUpAction { None, NudgeManager, EscalateToOwner }
+internal enum HandoffFollowUpAction { None, NudgeManager }
 
 internal static class HandoffFollowUpPolicy
 {
@@ -36,33 +36,22 @@ internal static class HandoffFollowUpPolicy
     public static HandoffFollowUpAction Decide(ProducerHandoffWatch watch, DateTimeOffset now)
     {
         if (now - (watch.LastNudgeAt ?? watch.WaitingSince) < Patience) return HandoffFollowUpAction.None;
-        // A human manager who hired the Producer directly gets one reminder and no escalation.
-        var managerIsOwner = watch.OwnerId == watch.ManagerId;
-        if (watch.Nudges < (managerIsOwner ? 1 : MaximumNudges)) return HandoffFollowUpAction.NudgeManager;
-        return !managerIsOwner && watch.EscalatedAt is null && watch.OwnerConversationId.HasValue
-            ? HandoffFollowUpAction.EscalateToOwner
-            : HandoffFollowUpAction.None;
+        return watch.Nudges < MaximumNudges ? HandoffFollowUpAction.NudgeManager : HandoffFollowUpAction.None;
     }
 
     public static string NudgeMessage(ProducerHandoffWatch watch) =>
         "Following up on my kickoff: I still have no project or accepted brief to plan from, so the next step is " +
-        "yours. Please share the accepted pitch and high-level GDD (or a short brief if there isn't one yet). " +
+        "yours. Please share the CEO-approved pitch and reviewed GDD through the Director handoff. " +
         "I check again automatically on my reviews; nothing needs to be resent.";
 
-    public static string EscalationMessage(ProducerHandoffWatch watch)
-    {
-        var manager = watch.ManagerName ?? "my manager";
-        return $"Status: I've been waiting since {watch.WaitingSince:yyyy-MM-dd HH:mm} UTC for {manager} to hand over " +
-            $"the project (accepted pitch and high-level GDD) and have followed up {watch.Nudges} times without a handoff. " +
-            $"The next step is on {manager}'s side. You may want to check on {manager}, or give me direction here.";
-    }
+
 }
 
 public sealed partial class SpecialistAgent
 {
     /// <summary>
     /// Runs on attention reviews while the Producer has no visible project. Instead of silently
-    /// idling, it follows up with its manager and, if the handoff still does not arrive, tells the owner.
+    /// idling, it follows up with its manager and leaves business escalation with the Director.
     /// </summary>
     internal static async Task FollowUpAwaitedHandoffAsync(DateTimeOffset now, AgentRuntimeContext context,
         CancellationToken token)
@@ -96,14 +85,7 @@ public sealed partial class SpecialistAgent
                     current => (current ?? watch) with { Nudges = Math.Max((current ?? watch).Nudges, nudge), LastNudgeAt = now },
                     new Dictionary<string, string>(), $"{HandoffFollowUpPolicy.StateKey}:nudge:{nudge}", token);
                 break;
-            case HandoffFollowUpAction.EscalateToOwner:
-                await context.Platform.Communication.SendMessageAsync(watch.OwnerConversationId!.Value,
-                    HandoffFollowUpPolicy.EscalationMessage(watch),
-                    $"producer-handoff-escalation:{watch.WaitingSince.UtcTicks}", token);
-                await store.MergeAsync<ProducerHandoffWatch>(HandoffFollowUpPolicy.StateKey, HandoffFollowUpPolicy.SchemaId, 1,
-                    current => (current ?? watch) with { EscalatedAt = now },
-                    new Dictionary<string, string>(), $"{HandoffFollowUpPolicy.StateKey}:escalated", token);
-                break;
+
         }
     }
 }

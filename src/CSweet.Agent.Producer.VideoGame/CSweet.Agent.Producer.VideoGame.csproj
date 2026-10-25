@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>4.0.13</Version>
+    <Version>6.0.0</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
@@ -16,12 +16,11 @@
   <ItemGroup>
     <PackageReference Include="CSweet.WorkManagement.Contracts" Version="5.1.0" Condition="'$(UseLocalCSweetWorkManagementContracts)' != 'true'" />
     <ProjectReference Include="$(CSweetWorkManagementContractsRepositoryRoot)\src\CSweet.WorkManagement.Contracts\CSweet.WorkManagement.Contracts.csproj" Condition="'$(UseLocalCSweetWorkManagementContracts)' == 'true'" />
-    <PackageReference Include="CSweet.Agent.SDK" Version="5.0.5" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <PackageReference Include="CSweet.Agent.SDK" Version="5.5.0" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
     <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\\src\\CSweet.Agent.SDK\\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
-    <Content Include="../../profiles/*.json" Link="profiles/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" Pack="true" PackagePath="content/profiles/" />
     <Content Include="..\..\csweet-plugin.json" Link="csweet-plugin.json" CopyToOutputDirectory="Always" CopyToPublishDirectory="Always" Pack="true" PackagePath="content\" />
   </ItemGroup>
   <ItemGroup>

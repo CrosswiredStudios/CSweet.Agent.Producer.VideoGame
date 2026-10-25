@@ -56,7 +56,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         new() { MaxOutputTokens = ResolveOutputTokens(Settings) };
     protected override string RoleKey => "game-producer";
     protected override string ArtifactTypeKey => "video-game.production-plan.v1";
-    protected override string RolePrompt => "You are the operational lead for one video game team. Follow the actual manager direction. Own board health, sprint planning, schedule, budget, dependencies, staffing, risks, and attributed portfolio reporting. Start from a lightweight manager brief when available; a Creative Director and formal creative documents are optional unless the manager or a specific approved workflow requires them. Convert uncertainty into assigned work or durable decisions.";
+    protected override string RolePrompt => "You are the shared Video Game Producer for the business portfolio, reporting to the Video Game Director. Manage each authorized project's delivery, boards, sprints, dependencies, staffing evidence, capacity and risks independently. Use the exact CEO-approved pitch and Director-reviewed creative and production documents. Collaborate with the Creative Director as a peer. Propose justified staffing to the Director and supply attributed portfolio evidence for Director-owned CEO updates. Never invent pitch approval or absorb creative, technical or QA authority.";
     protected override IReadOnlyList<string> RequiredSections => ["Schedule", "Budget", "Dependencies", "Staffing", "Risks", "Status Reporting"];
 
     public override async Task<AgentCoordinationTurnResult> HandleCoordinationTurnAsync(
@@ -338,12 +338,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 }
                 if (!(planned?.CapacityPoints > 0) &&
                          accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
-                         !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest) && planningCycle.OutstandingAuthorityQuestions.Count == 0)
+                         !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest))
                 {
                     var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
                     var candidateExists = detail.Items.Any(x =>
                         IsSprintCandidate(x, sprints) &&
-                        HasStaffedExecution(x) && x.ProposalProvenance is not null);
+                        HasStaffedExecution(x) && x.ProposalProvenance is not null &&
+                        CanPrepareWithPlanningDecisions(x, planningCycle));
                     if (candidateExists)
                     {
                         var nextSequence = PlanningSprintSequence(sprints);
@@ -498,7 +499,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         return await EnsureCommitmentAsync(
             $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
             "Reconcile scope, technical backlog and delivery staffing",
-            "Use the accepted production brief to propose the smallest justified delivery team to the Creative Director, reconcile technical feasibility, and publish provenance-bound planning work.",
+            "Use the accepted production brief to propose the smallest justified delivery team to the Video Game Director, reconcile technical feasibility, and publish provenance-bound planning work.",
             "High", new PersonalTodoWorkContext {
                 WorkstreamId = workstream.Id, TeamId = teamId, BoardId = boardId,
                 CoordinationSessionId = sessionId, SourceFingerprint = fingerprint
@@ -660,7 +661,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             ProjectStateKeys.Portfolio("producer"), cancellationToken);
         var operatingState = state?.Payload;
         if (operatingState is null || !operatingState.AcceptedHandoffs.TryGetValue(workstreamId, out var handoff))
-            return PersonalTodoResult.Blocked("The exact Creative Director handoff is no longer available.");
+            return PersonalTodoResult.Blocked("The exact Video Game Director handoff is no longer available.");
 
         var rosterResponse = await context.Platform.ReadTeamRosterAsync(
             new TeamRosterV2Request(teamId, workstreamId, 1, 100), cancellationToken);
@@ -759,7 +760,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
             return PersonalTodoResult.Blocked(IsTechnicalPlanningGenerationBlock(technicalSession)
                 ? TechnicalPlanningBlockDescription(technicalSession)
-                : $"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Creative Director authority.");
+                : $"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Video Game Director authority.");
         if (designerSession.Status != AgentCoordinationStatuses.Completed ||
             technicalSession.Status != AgentCoordinationStatuses.Completed)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
@@ -782,6 +783,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Blocked("The completed planning sessions do not contain current, correlated proposal artifacts.");
 
         var progressiveMode = ReadProgressiveEvidence(technicalArtifact!) is not null;
+        var authorityReviewDirectionsDigest = ReadProgressiveEvidence(technicalArtifact!)?.DirectionsDigest;
+        IReadOnlyList<string>? reviewedAuthorityQuestions = null;
         if (progressiveMode && roleRepair is null && designer is null)
         {
             var advance = await AdvanceProgressivePlanningAsync(boardId, roster, cycle, memberDigests, technicalDirector,
@@ -792,14 +795,16 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (advance.Complete) return PersonalTodoResult.Completed("Every retained scope Story has been refined and its published increment work completed; aggregate delivery acceptance remains authoritative.");
             if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), advance.Waiting);
             technicalSession = advance.Session!;
+            reviewedAuthorityQuestions = advance.ReviewedAuthorityQuestions;
             technicalArtifact = technicalSession.Turns.Last(x => x.SpeakerOrganizationUserId == technicalSession.Target.OrganizationUserId &&
                 x.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1").Artifact!;
             technicalProposal = technicalArtifact.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
             designerSession = technicalSession; designerArtifact = technicalArtifact;
         }
 
+        var engineeringPrerequisites = ReadEngineeringPrerequisites(technicalProposal, technicalArtifact!);
         var questions = UnresolvedPlanningQuestions(
-            designerProposal.OpenCreativeDecisions.Concat(technicalProposal.OpenFeasibilityDecisions).ToArray(),
+            designerProposal.OpenCreativeDecisions.Concat(reviewedAuthorityQuestions ?? technicalProposal.OpenFeasibilityDecisions).ToArray(),
             planningDecisions, workstreamId, handoff.RevisionDigest);
         var currentPlanningDecisions = await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
             handoff, context, cancellationToken);
@@ -835,7 +840,11 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             DesignerProposalDigest = designerArtifact!.Digest,
             TechnicalProposalDigest = technicalArtifact!.Digest,
             ReconciledDigest = reconciledDigest,
+            Progressive = reviewedAuthorityQuestions is not null && priorCycle.Progressive is not null
+                ? priorCycle.Progressive with { ReviewedDirectionsDigest = authorityReviewDirectionsDigest }
+                : priorCycle.Progressive,
             OutstandingAuthorityQuestions = questions,
+            EngineeringPrerequisiteKeys = engineeringPrerequisites,
             AuthorityDecisionFingerprint = PlanningDecisionFingerprint(questions, currentPlanningDecisions,
                 workstreamId, handoff.RevisionDigest),
             UpdatedAt = DateTimeOffset.UtcNow
@@ -865,8 +874,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         await EnsureDraftSprintAsync(boardId, reconciledDigest, context, cancellationToken);
         await PopulateDraftScopeAsync(boardId, context, cancellationToken);
         if (currentBoard.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable &&
-                HasStaffedExecution(x) && (questions.Count == 0 ||
-                    x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike)))
+                HasStaffedExecution(x) && CanPrepareWithPlanningDecisions(x, priorCycle)))
         {
             var estimationSprints = await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken);
             var estimation = await EnsureCommitmentAsync(
@@ -874,7 +882,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 "Collect estimates and QA sprint-readiness evidence",
                 questions.Count == 0
                     ? "Collect role-owned estimates and capacity for the reconciled executable scope, obtain QA readiness evidence, pull eligible leaves to Ready, and create the bounded planned sprint."
-                    : "Collect estimates and QA readiness only for research spikes that produce evidence for pending authority decisions. Keep decision-dependent implementation out of the sprint.",
+                    : "Collect estimates and QA readiness only for declared engineering prerequisites and research spikes. Keep decision-dependent implementation out of the sprint; completing a prerequisite does not approve a pending decision.",
                 WorkPriorities.Critical,
                 source with { SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
@@ -922,11 +930,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (planningState?.Payload.PlanningCycles.TryGetValue(workstreamId, out var currentCycle) != true ||
             currentCycle is null || currentCycle.ReconciledDigest != source.SourceFingerprint)
             return PersonalTodoResult.Blocked("The candidate planning evidence changed.");
-        var discoveryOnly = currentCycle.OutstandingAuthorityQuestions.Count > 0;
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var candidates = board.Items.Where(x => IsSprintCandidate(x, planningSprints) &&
-                (!discoveryOnly || x.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike))
+                CanPrepareWithPlanningDecisions(x, currentCycle))
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
         if (candidates.Count == 0)
             return PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope.");
@@ -1108,6 +1115,17 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Completed($"Sprint {sprint.Name} is already {sprint.Status}.");
         if (!(sprint.CapacityPoints > 0))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "This sprint is still a provisional draft awaiting estimates and QA readiness.");
+        // Authority can change between QA preparation and start. Recheck the current scope,
+        // rather than letting an old readiness callback start decision-dependent work.
+        var state = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), cancellationToken);
+        if (item.WorkContext.WorkstreamId is not { } project || state?.Payload.PlanningCycles.TryGetValue(project, out var cycle) != true || cycle is null)
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "Current planning evidence is required before finalizing sprint scope.");
+        var current = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        if (current.Items.Any(x => x.SprintId == sprintId && x.ExecutionMode == WorkItemExecutionModes.Executable &&
+            !CanPrepareWithPlanningDecisions(x, cycle)))
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "Sprint scope includes implementation that still depends on an unresolved planning decision.");
         var deliveryWait = await FinalizeSprintDeliveriesAsync(item, boardId, sprintId, context, cancellationToken);
         if (deliveryWait is not null)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), deliveryWait);
@@ -1159,7 +1177,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var message = $"Planning cycle {cycle.PlanningFingerprint}. {objective} Return final artifact type {expectedArtifactType}.";
         if (!string.IsNullOrWhiteSpace(additionalContext)) message += "\n" + additionalContext;
         if (managerDirections.Count > 0)
-            message += " Incorporate these recorded Creative Director decisions into the proposal and close only the questions they resolve: " +
+            message += " Incorporate these recorded Video Game Director decisions into the proposal and close only the questions they resolve: " +
                 string.Join(" ", managerDirections);
         if (objective.Length > 4096)
             throw new InvalidOperationException("Planning coordination exceeds the host content limits; provide a bounded handoff without dropping scope.");

@@ -12,6 +12,12 @@ public sealed partial class SpecialistAgent
     private sealed record SubmittedProjects { public IReadOnlyList<Guid> ProposalIds { get; init; } = []; }
     private sealed record ProjectRecovery(string Status);
 
+    internal static bool HasApprovedPitchReference(WorkstreamPlanProposalV2Request plan) =>
+        plan.ProfileKey == "video-game-production.v2" && plan.ProfileVersion >= 8 &&
+        plan.InitialEvidence.Any(x => x.Kind == "artifact" && x.TypeKey == "video-game.vision.v1" &&
+            x.ResourceId != Guid.Empty && x.RevisionId is { } revision && revision != Guid.Empty &&
+            x.Digest?.Length == 64 && x.Status == "Accepted");
+
     private static async Task RememberSubmittedProjectAsync(Guid proposalId, AgentRuntimeContext context, CancellationToken token) =>
         _ = await new RevisionSafeProjectState(context.Platform).MergeAsync<SubmittedProjects>(SubmittedProjectsKey,
             "producer.submitted-projects.v1", 1, prior => new() { ProposalIds = (prior?.ProposalIds ?? []).Append(proposalId).Distinct().TakeLast(100).ToArray() },
@@ -30,17 +36,17 @@ public sealed partial class SpecialistAgent
             await CrosswiredStudios.VideoGame.PitchCollaboration.PitchProtocol.CachedAsync($"producer-project-revision:{id:N}", context, async () =>
             {
                 var template = review.GetProperty("binding").GetProperty("payload").Deserialize<WorkstreamPlanProposalV2Request>(ProjectFoundationJson)!;
-                if (template.ProfileKey == "video-game-manager-brief.v1" &&
-                    !(template.ProfileData.TryGetProperty("separateNewProject", out var separate) && separate.ValueKind == JsonValueKind.True))
+                if (!HasApprovedPitchReference(template)) return new ProjectRecovery("UnsupportedUnapprovedProject");
+                var source = new List<string>();
+                foreach (var evidence in template.InitialEvidence.Where(x => x.Kind == "artifact"))
                 {
-                    var portfolio = await context.Platform.ReadPortfolioAsync(new(), token);
-                    if (portfolio.Workstreams.Any(x => x.Workstream.AccountableManagerOrganizationUserId == template.AccountableManagerOrganizationUserId &&
-                        x.Workstream.Status is not ("Completed" or "Cancelled")))
-                        return new ProjectRecovery("ContinueExistingProject");
+                    var accepted = await context.Platform.Artifacts.ReadAcceptedAsync(new(evidence.ResourceId, evidence.RevisionId!.Value, evidence.Digest!), token);
+                    if (accepted.Document.DocumentType != evidence.TypeKey) throw new InvalidOperationException("Approved evidence type mismatch.");
+                    source.Add(accepted.Revision.Content);
                 }
                 var prepared = await PrepareProjectDraftAsync($"producer-project-revision-plan:{id:N}",
                     template with { IdempotencyKey = $"producer-project-revised:{id:N}" },
-                    new { feedback = decision.GetProperty("comment").GetString() }, "producer-project-revision", context, token);
+                    new { source, feedback = decision.GetProperty("comment").GetString() }, "producer-project-revision", context, token);
                 if (prepared.Plan is null) throw new InvalidOperationException(prepared.Error);
                 var proposal = await context.Platform.ProposeWorkstreamAsync(prepared.Plan, token);
                 if (proposal.ApprovalId is not { } revisedId) throw new InvalidOperationException("Revised proposal has no approval ID.");
@@ -84,10 +90,13 @@ public sealed partial class SpecialistAgent
             commandKey = $"producer-project-revised:{previousId:N}";
             revisionFeedback = decision.GetProperty("comment").GetString();
         }
+        if (!HasApprovedPitchReference(template))
+            return AgentCoordinationTurnResult.Blocked("Project setup requires the Director production profile and an exact CEO-approved pitch reference.");
         var source = new List<string>();
         foreach (var evidence in template.InitialEvidence.Where(x => x.Kind == "artifact"))
         {
             var accepted = await context.Platform.Artifacts.ReadAcceptedAsync(new(evidence.ResourceId, evidence.RevisionId!.Value, evidence.Digest!), token);
+            if (accepted.Document.DocumentType != evidence.TypeKey) throw new InvalidOperationException("Approved evidence type mismatch.");
             source.Add(accepted.Revision.Content);
         }
         var prepared = await PrepareProjectDraftAsync(

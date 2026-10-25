@@ -6,6 +6,54 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class ProjectProposalValidationTests
 {
+    [Fact]
+    public async Task DescriptiveMetadataCorrectionsReachProposalWithoutReplacingAuthorityOrIdentity()
+    {
+        var f = new Fixture();
+        f.Template = f.Template with { ProfileData = JsonSerializer.SerializeToElement(new {
+            genre = "To be confirmed", targetPlatforms = new[] { "web" },
+            accessibilityTargets = new[] { "Remappable controls" } }) };
+        var corrected = JsonSerializer.SerializeToElement(new {
+            genre = "Arcade brick-breaker", targetPlatforms = new[] { "Desktop web / Chromium" },
+            accessibilityTargets = new[] { "Color-blind-safe palettes", "Screen-shake and flash toggles", "Adjustable ball speed" } });
+        f.Responses.Enqueue(JsonSerializer.Serialize(f.Template with {
+            ProfileData = corrected, Name = "Unauthorized rename", ProfileKey = "other-profile",
+            InitialTeamId = Guid.NewGuid(), AccountableManagerOrganizationUserId = Guid.NewGuid(),
+            ProposedBudgetAmount = 100000, AuthorityEnvelope = new(null, null, [], [], ["launch"], null)
+        }, Fixture.Json));
+        Assert.Equal("Continue", (await f.RunAsync()).Disposition);
+        var submitted = Assert.Single(f.Submissions);
+        Assert.Equal(corrected.GetRawText(), submitted.ProfileData.GetRawText());
+        Assert.Equal(f.Template.Name, submitted.Name);
+        Assert.Equal(f.Template.ProfileKey, submitted.ProfileKey);
+        Assert.Equal(f.Template.InitialTeamId, submitted.InitialTeamId);
+        Assert.Equal(f.Template.AccountableManagerOrganizationUserId, submitted.AccountableManagerOrganizationUserId);
+        Assert.Equal(f.Template.ProposedBudgetAmount, submitted.ProposedBudgetAmount);
+        Assert.Equal(JsonSerializer.Serialize(f.Template.AuthorityEnvelope, Fixture.Json),
+            JsonSerializer.Serialize(submitted.AuthorityEnvelope, Fixture.Json));
+        await f.RunAsync();
+        Assert.Equal(1, f.ModelCalls);
+        Assert.Equal(submitted.IdempotencyKey, f.Submissions[1].IdempotencyKey);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    [InlineData("\"invalid\"")]
+    public async Task InvalidDescriptiveMetadataIsCorrectedBeforeSubmission(string metadata)
+    {
+        var f = new Fixture();
+        var fields = JsonSerializer.SerializeToElement(f.Template, Fixture.Json).EnumerateObject()
+            .ToDictionary(x => x.Name, x => x.Value.Clone());
+        fields["profileData"] = JsonDocument.Parse(metadata).RootElement.Clone();
+        f.Responses.Enqueue(JsonSerializer.Serialize(fields));
+        // null means no metadata correction, so the existing valid template remains usable.
+        if (metadata != "null") f.Responses.Enqueue(f.ValidJson);
+        Assert.Equal("Continue", (await f.RunAsync()).Disposition);
+        Assert.Equal(metadata == "null" ? 1 : 2, f.ModelCalls);
+        Assert.Equal(JsonValueKind.Object, Assert.Single(f.Submissions).ProfileData.ValueKind);
+    }
+
     [Theory]
     [InlineData("{}")]
     [InlineData("{\"outcome\":null}")]
@@ -95,6 +143,22 @@ public sealed class ProjectProposalValidationTests
         Assert.DoesNotContain("producer-submitted-project-proposals", f.Cache.Keys);
     }
 
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("draft")]
+    [InlineData("old-profile")]
+    public async Task Unapproved_or_retired_foundation_never_reaches_model_or_submission(string fault)
+    {
+        var f = new Fixture();
+        f.Template = fault switch {
+            "missing" => f.Template with { InitialEvidence = [] },
+            "draft" => f.Template with { InitialEvidence = [f.Template.InitialEvidence[0] with { Status = "Draft" }] },
+            _ => f.Template with { ProfileKey = "video-game-manager-brief.v1" }
+        };
+        var result = await f.RunAsync();
+        Assert.Equal("Blocked", result.Disposition); Assert.Equal(0, f.ModelCalls); Assert.Empty(f.Submissions);
+    }
+
     private sealed class Fixture
     {
         internal static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -116,8 +180,12 @@ public sealed class ProjectProposalValidationTests
         public Fixture()
         {
             Template = new("Game", "Playable game", ["Playable"], "Concept", Producer, null, [], [], null, null, null, null,
-                "Deliver", "template", "game", 1, JsonSerializer.SerializeToElement(new { }), new(null, 14, [], ["launch"], [], null), [], []);
+                "Deliver", "template", "video-game-production.v2", 8, JsonSerializer.SerializeToElement(new { }), new(null, 14, [], ["launch"], [], null), [], [new("artifact", Guid.NewGuid(), Guid.NewGuid(), new string('a', 64), "video-game.vision.v1", "Accepted")]);
             var runtime = new AgentTestRuntime()
+                .RegisterCapability<JsonElement, ArtifactDocument>(PlatformCapabilities.ArtifactRead, (_, _) => {
+                    var e = Template.InitialEvidence.Single();
+                    return Task.FromResult(new ArtifactDocument(e.ResourceId, "Official pitch", e.TypeKey, "Approved", e.RevisionId, null, e.RevisionId, null, null,
+                        [new(e.RevisionId!.Value, 1, null, "Approved browser arcade scope", e.Digest!, "Accepted", DateTimeOffset.UtcNow, null, null)])); })
                 .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                     (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(Cache.GetValueOrDefault(r.StateKey))))
                 .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,

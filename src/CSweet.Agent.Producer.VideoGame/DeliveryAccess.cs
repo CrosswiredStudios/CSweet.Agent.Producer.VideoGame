@@ -51,7 +51,7 @@ public sealed partial class SpecialistAgent
 
     /// <summary>
     /// Raised once per board and refused capability. The message follows the delivery-escalation convention
-    /// (an ask and a reply command), so a non-deciding manager such as the Creative Director passes it up the chain.
+    /// (an ask and a reply command), so a non-deciding manager such as the Video Game Director passes it up the chain.
     /// </summary>
     internal static (string Key, string Content) DeliveryAccessEscalation(string? projectName, Guid boardId, string capability, string reason)
     {

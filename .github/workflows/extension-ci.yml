@@ -9,8 +9,6 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    env:
-      NUGET_PACKAGES: ${{ runner.temp }}/clean-packages
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -27,6 +25,8 @@ jobs:
             }
           }
       - name: Test using only public package dependencies
+        env:
+          NUGET_PACKAGES: ${{ runner.temp }}/clean-packages
         shell: pwsh
         run: |
           $manifest = Get-Content csweet-plugin.json -Raw | ConvertFrom-Json

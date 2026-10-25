@@ -9,8 +9,10 @@ public sealed partial class ProgressivePlanningTests
 {
     // One retained board, proposal, planning commitment and sprint history across
     // acceptance, recovery, refinement, estimates, QA readiness and real agent start callbacks.
-    [Fact]
-    public async Task Accepted_increment_recovers_planning_and_starts_successor_once_across_restart_and_duplicate_wakes()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Accepted_increment_recovers_planning_and_starts_successor_once_across_restart_and_duplicate_wakes(bool pendingAuthority)
     {
         var f = new Fixture();
         var initial = await f.Advance(null); f.CompleteRefinement();
@@ -30,7 +32,11 @@ public sealed partial class ProgressivePlanningTests
         var states = new Dictionary<string, AgentOperatingStateResponse>();
         ProducerOperatingState Portfolio() => new() { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> {
             [f.Cycle.WorkstreamId] = new(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId, f.Cycle.PlanningFingerprint,
-                null, null, null, null, null, "reconciled", DateTimeOffset.UtcNow) { Progressive = progress } } };
+                null, null, null, null, f.DetailArtifact!.Digest, "reconciled", DateTimeOffset.UtcNow) {
+                Progressive = progress,
+                OutstandingAuthorityQuestions = pendingAuthority ? ["Specific Phaser version selection for particle performance"] : [],
+                EngineeringPrerequisiteKeys = pendingAuthority ? ["next-implementation"] : []
+            } } };
         f.Runtime.RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
             (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(r.StateKey.Contains("portfolio") ? State(r.StateKey, JsonSerializer.SerializeToElement(Portfolio())) : states.GetValueOrDefault(r.StateKey))));
         f.Runtime.RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,

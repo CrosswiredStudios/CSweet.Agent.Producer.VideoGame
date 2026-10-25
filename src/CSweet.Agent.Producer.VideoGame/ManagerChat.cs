@@ -74,7 +74,7 @@ public sealed partial class SpecialistAgent
                     retained conversation and authoritative project/staffing state. Start from their vision: propose
                     a project and the smallest justified team, attach approved hires, coordinate technical planning,
                     populate the backlog, start execution and continue sprints until delivery is accepted.
-                    A short manager brief is sufficient. A Creative Director and GDD are optional. Independent QA is required for every task and aggregate regression.
+                    New game setup requires a CEO-approved pitch passed through the Director project-foundation coordination. Do not create a project from this chat. Independent QA is required for every task and aggregate regression.
                     For lightweight executable projects use software-developer plus game-technical-director or
                     software-architect. Respect explicit staffing reductions and prior decisions. Existing approved
                     employees must be attached, not hired again. Do not turn an assignment request into a hiring request.
@@ -97,36 +97,20 @@ public sealed partial class SpecialistAgent
                     projects, staffing = staffing.Requests.Where(x => x.RequesterInstallationId.ToString() == context.InstallationId) }, ManagerJson))
             ], new ChatOptions { MaxOutputTokens = Math.Min(ResolveOutputTokens(Settings), 2048) }, cancellationToken);
             var plan = ParseManagerTurn(response.Text.Trim());
-            var selected = SelectManagerProject(projects, plan.ProjectId, plan.ProjectName, plan.SeparateNewProject);
+            if (plan.CreateProject)
+            {
+                await stream.CommitAsync("A new game requires the CEO-approved pitch and the Video Game Director’s project-foundation handoff. I can continue existing projects while that approval is prepared.", cancellationToken);
+                return;
+            }
+            var selected = SelectManagerProject(projects, incoming.WorkContext?.WorkstreamId ?? plan.ProjectId, plan.ProjectName, plan.SeparateNewProject);
             if (plan.ProjectId.HasValue && selected is null)
                 throw new InvalidOperationException("The selected project is not an active project owned by this Producer. Choose an available project before setup continues.");
             if (selected is null && projects.Length > 0 && !plan.SeparateNewProject &&
                 (plan.CreateProject || plan.StartDelivery || plan.TeamRoles is { Count: > 0 }))
                 throw new InvalidOperationException("Choose which existing project this direction belongs to. A revised brief or working title must reuse its project; a separate game requires explicit direction.");
+            if (selected is null && (plan.StartDelivery || plan.TeamRoles is { Count: > 0 }))
+                throw new InvalidOperationException("Choose an approved project before staffing or delivery planning.");
             var results = new List<string>();
-            if (selected is not null && plan.CreateProject)
-                results.Add($"Reusing the approved project {selected.Name} ({selected.Id:D}) for this game.");
-            Guid? pendingProposal = null;
-            if (plan.CreateProject && selected is null && !plan.SeparateNewProject)
-            {
-                var submitted = await context.Platform.ReadOperatingStateAsync<SubmittedProjects>(SubmittedProjectsKey, cancellationToken);
-                foreach (var id in submitted?.Payload.ProposalIds ?? [])
-                {
-                    var reviews = await context.Platform.InvokeAsync<object, JsonElement[]>("platform.project-approval.read.v1", new { proposalId = id }, cancellationToken);
-                    if (reviews.Length != 1 || reviews[0].GetProperty("status").GetString() != "Pending") continue;
-                    if (pendingProposal.HasValue)
-                        throw new InvalidOperationException("More than one project setup is pending. Resolve the existing proposals before requesting another game.");
-                    pendingProposal = id;
-                }
-                if (pendingProposal.HasValue)
-                    results.Add($"Reusing the pending project setup (request {pendingProposal:D}); approval is required before delivery continues.");
-            }
-            if (plan.CreateProject && selected is null && !pendingProposal.HasValue && !string.IsNullOrWhiteSpace(plan.ProjectName) && !string.IsNullOrWhiteSpace(plan.ProjectOutcome))
-            {
-                var result = await ProposeManagerProjectAsync(plan.ProjectName, plan.ProjectOutcome, producer, incoming.TurnId, context, cancellationToken,
-                    string.Join("\n", history.Messages.Where(x => x.SenderOrganizationUserId == manager).Select(x => x.Content).Append(incoming.Message)), plan.SeparateNewProject);
-                results.Add(result.ApprovalId.HasValue ? $"Submitted project setup for approval (request {result.ApprovalId:D})." : "Submitted the project setup proposal.");
-            }
             if (plan.TeamRoles is { Count: > 0 })
             {
                 var existing = staffing.Requests.Where(x => x.RequesterInstallationId.ToString() == context.InstallationId &&
@@ -228,9 +212,9 @@ public sealed partial class SpecialistAgent
         return context.Platform.ProposeResourceChangeAsync(new ResourceChangeProposalRequest(
             Guid.Parse(incoming.ConversationId), incoming.TurnId,
             plan.ProjectOutcome ?? "Deliver the manager's requested game milestone.",
-            "Start with the smallest set of specialist roles justified by the manager's brief.",
+            "Start with the smallest set of specialist roles justified by the accepted project scope.",
             1, roles,
-            ["The initial scope is a lightweight manager brief; details will be refined during work."],
+            ["Staffing must trace to the accepted project scope and delivery backlog."],
             ["Hiring and spending require manager approval.", "Execution waits for staffed roles and readiness evidence."],
             null, $"producer-manager-team:{incoming.TurnId:N}")
         {
@@ -241,45 +225,5 @@ public sealed partial class SpecialistAgent
             TeamName = teamName,
             TeamDescription = plan.ProjectOutcome
         }, token);
-    }
-    private static async Task<MutationResponse> ProposeManagerProjectAsync(
-        string name, string outcome, Guid producerId, Guid turnId,
-        AgentRuntimeContext context, CancellationToken token, string? managerDirection = null, bool separateNewProject = false)
-    {
-        var title = name.Trim();
-        if (title.Length > 160) title = title[..160];
-        var goal = outcome.Trim();
-        if (goal.Length > 4000) goal = goal[..4000];
-        var initialTeamId = Guid.TryParse(context.Identity?.TeamContext?.TeamId, out var teamId)
-            ? teamId : (Guid?)null;
-        var metadata = new VideoGameProjectMetadataV1(
-            title, "To be defined", ["To be defined"], "To be validated",
-            "Technical choice pending", "To be defined",
-            ["Deliver the manager's stated demo outcome"],
-            "To be defined", false, false,
-            ["Readable presentation", "Configurable controls"], []);
-        var authority = new WorkstreamAuthorityEnvelope(
-            0.05m, 14,
-            typeof(VideoGameRoleKeys).GetFields().Where(x => x.IsLiteral)
-                .Select(x => (string)x.GetRawConstantValue()!).Concat(new[] { "software-architect", "software-developer", "software-qa" }).ToList(),
-            ["funding-exception", "material-strategy-change", "legal-commitment",
-             "publication", "launch", "sunset"],
-            ["work-planning", "routine-staffing", "build", "validation",
-             "preview", "evaluation", "gate-submit"], null);
-        var result = await context.Platform.ProposeWorkstreamAsync(new WorkstreamPlanProposalV2Request(
-            title, goal,
-            ["A playable demo demonstrates the manager's requested game loop.",
-             "Visual effects and performance are validated on the agreed target."],
-            VideoGameLifecyclePhases.Concept, producerId, initialTeamId, [],
-            ["game-production", "game-design", "software-delivery", "quality-assurance"],
-            null, null, null, null,
-            "The reporting manager requested a lightweight project start and a small delivery team.",
-            $"producer-manager-project:{turnId:N}",
-            "video-game-manager-brief.v1", 3,
-            JsonSerializer.SerializeToElement(new { metadata.WorkingTitle, managerDirection = managerDirection ?? goal, separateNewProject },
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)),
-            authority, [], []), token);
-        if (result.ApprovalId is { } id) await RememberSubmittedProjectAsync(id, context, token);
-        return result;
     }
 }

@@ -36,10 +36,7 @@ public sealed class ManifestTests
 
         foreach (var name in new[] { "work.item.read", "work.item.comment", "work.orchestration.cancel", "work.sprint.carryover" })
             Assert.Contains(manifest.Requires, x => x.Name == name && x.Scope == "team");
-        var managerProfile = Assert.Single(manifest.WorkstreamProfiles.Provides, x => x.Version == 2);
-        Assert.Equal("video-game-manager-brief.v1", managerProfile.Key);
-        Assert.True(File.Exists(Path.Combine(root,
-            managerProfile.DefinitionResource.Replace('/', Path.DirectorySeparatorChar))));
+        Assert.Empty(manifest.WorkstreamProfiles.Provides);
         Assert.Equal(agent.AgentId, manifest.Id);
         Assert.Equal(agent.Version, manifest.Version);
         Assert.Equal(agent.Version, typeof(SpecialistAgent).Assembly.GetName().Version?.ToString(3));

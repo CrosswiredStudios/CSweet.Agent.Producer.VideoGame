@@ -1,6 +1,11 @@
-# Video Game Producer
+# Producer 6.0.0
 
-Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A short manager brief can start a project proposal and team plan without a Creative Director, pitch, or GDD. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
+Require the Director-approved project handoff. Remove owner escalation and short-brief onboarding. Use SDK supporting-specialist interaction policy for delivery planning; creative authority remains with Naomi.
+
+CEO communication and material business decisions belong to the Video Game Director. Specialists preserve independent discipline evidence; no role may manufacture another role's acceptance.
+
+
+Leads project delivery, boards, sprints, schedules, dependencies, staffing evidence, risks, and status reporting. The Producer follows the actual reporting manager. A new project requires the exact CEO-approved pitch through the Director handoff; delivery planning then requires the reviewed GDD and production brief. The Producer manages delivery but does not make spending or hiring decisions for their respective authorities.
 
 `AdvanceProgressivePlanningAsync` publishes the complete approved scope outline before requesting one bounded Story's executable briefs from the Technical Director. The lightweight planning path negotiates this behavior when no dedicated Designer or active role repair is involved. Frozen container identities and criteria cannot be rewritten by an increment. Existing estimation, staffing, QA readiness and preflight remain required. `StaffWorkflowAsync` uses SDK 5.0.4 `PrepareIncrementAsync` to scope delivery to fully detailed increments; future milestones remain on the board. The durable planning commitment advances only after canonical task completion and completed aggregate delivery acceptance, with idempotent coordination requests and bounded reconnect discovery. No new grants are requested.
 
@@ -31,9 +36,12 @@ validation and sprint-preflight changes.
 
 `ReconcileSprintReadinessAsync` finalizes the selected executable leaves before sprint preflight through `FinalizeSprintDeliveriesAsync`. It preserves the current planning requirements, acceptance criteria, constraints, dependencies, accountable owner and exact stage assignments. Repository selection reuses an existing sprint binding or the approved team's sole repository option with a default branch; ambiguous or incomplete prerequisites remain pending. Existing delivery specifications are preserved. The host still validates authority, approvals and revisions, and the sprint starts only after authoritative preflight passes. Reconnect and retry resume partial finalization without duplicating delivery.
 
-## Direct manager kickoff (2.9.0)
+## Shared portfolio leadership (5.0.0)
 
-The Producer now answers direct Communications turns and finishes each valid turn with a final response. An explicit manager request can generate a lightweight project proposal and a role-specific team proposal through the existing approval paths. Project and hiring approvals remain visible to the manager; a submitted proposal is not an approved project, team, or hire. The Producer package provides its own lightweight game project profile, so project setup does not depend on importing the Creative Director package. The project and team proposals are separate, so an approved project may still need its approved team attached before board execution. The Producer does not require a Creative Director, accepted pitch, or GDD for this path. The older formal creative-handoff flow still applies when that workflow is used.
+One Producer serves all approved games under the Video Game Director. The Director owns CEO concept alignment, exact pitch approval, constraints and CEO reporting preferences. The Creative Director is a peer providing creative direction and GDDs. The Producer owns per-project delivery plans, boards, sprints, dependencies, staffing proposals and risk evidence, with cross-project capacity considered before promising schedules.
+
+Every new game requires the CEO-approved pitch and the Director's project-foundation coordination. Direct chat cannot create a project or bypass this approval. Existing projects remain independently scoped, and ambiguous requests require project selection. Explicit work context takes precedence over model-inferred project IDs. Proposed staffing goes to the Director through governed resource approval. The Director is formal studio-team lead; the Producer is its operational delivery and project-board manager.
+
 ## Kanban model
 
 The Producer deliberately uses two boards without duplicating work:
@@ -46,7 +54,7 @@ The five-minute attention cycle reconciles authoritative state and queues or req
 
 ## Planning and staffing gates
 
-- An accepted, digest-verified Creative Director handoff is sufficient for the Producer to configure the board and publish milestone shells.
+- An accepted, digest-verified Video Game Director handoff is sufficient for the Producer to configure the board and publish milestone shells.
 - Detailed backlog publication requires a Technical Director and accepted creative brief. An available Game Designer contributes design proposals; a dedicated designer is not mandatory.
 - QA readiness evidence is required before executable work moves to `Ready`, but QA does not block initial backlog drafting.
 - A runnable prototype or vertical-slice sprint additionally requires a Game Engineer.
@@ -57,7 +65,19 @@ Ticket assignment uses exact roles as hard boundaries, required skills and capab
 ## Contract
 
 - Package ID: `com.csweet.video-game-producer`
-- Version: `4.0.13`
+- Version: `5.0.0`
+
+Project proposal drafts include descriptive `profileData` so manager-requested genre, platform and
+accessibility corrections can reach the submitted proposal. Revision recovery rereads the exact
+accepted documents. The agent preserves command identity, profile selection, team, evidence,
+budgets, authority and submitted-command idempotency while the manager reviews the corrected plan.
+
+Engineering prerequisites declared by the current Technical Director proposal may receive estimates
+and QA readiness while authority decisions remain pending. Only the declared, provenance-bound
+engineering tasks and research spikes are eligible; dependent implementation stays gated. The
+retained Director 5.0.4 Phaser-pin prerequisite is supported without changing its saved proposal.
+After upgrading through Installed Agents, retry the existing blocked planning task to reconcile
+that declaration and prepare the bounded prerequisite sprint.
 
 Exact owner amendments use a source-bound `scopeAmendment` planning artifact. Install Technical
 Director 5.0.3 before Producer 4.0.13. The Director verifies current planning digests and returns
@@ -244,25 +264,7 @@ Unresolved planning questions are recorded as durable workstream decisions with 
 
 ## Manager-directed delivery
 
-An approved short brief can use profile `video-game-manager-brief.v1` version 2. Gabriel discovers
-his accountable projects, attaches already approved team members, obtains a bounded technical plan
-from the Technical Director or Software Architect, publishes the tickets and sprints, assigns a
-Software Developer and technical reviewer, and starts each increment after authoritative preflight.
-The workflow requires real published test results, independent review, Producer acceptance and a
-governed exact-candidate merge. A dedicated QA employee and formal creative handoff are optional.
-
-The personal delivery commitment survives restarts. Hiring, planning, repository and sprint events
-wake reconciliation; its durable wait provides bounded missed-event recovery. Existing version-1
-projects retain their immutable profile until its governed upgrade is approved. Project/hiring,
-repository and final completion decisions still respect the business's approval policies.
-
-Delivery setup requests `work.project-delivery.prepare.v1`; repository-bound ticket assignment uses
-`work.item.delivery.finalize`. Profile upgrades and final lifecycle changes use
-`platform.workstream.change.propose.v1`. Source provisioning and team repository discovery retain
-platform policy checks, and `git.merge.review.v2` / `git.merge.authorize.v2` are limited to assigned
-work-item evidence and acceptance. These declarations require effective approved installation grants.
-
-The Producer uses its existing work.orchestration.retry capability for one bounded retry per stage and missing-section error. It retains the current assignment revision, host attempt limit, and substantive acceptance gates. Other blockers are not automatically retried.
+The former manager-brief project profile is retired. New games use the Director-owned production profile and exact approved pitch.
 
 ## Correcting mixed planning and implementation work
 

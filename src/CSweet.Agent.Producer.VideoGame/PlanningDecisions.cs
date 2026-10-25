@@ -74,7 +74,7 @@ public sealed partial class SpecialistAgent
                         : "Next action: obtain an authoritative answer to this question, with a rationale tied to the accepted brief.");
             }
         }
-        lines.Add("\nA new accepted brief is needed only if the answer changes accepted scope. This planning gate currently limits sprint preparation to research spikes while any authority question remains; the affected work described above may be narrower. Retry after the evidence or decision changes; unchanged reviews retain this blocker.");
+        lines.Add("\nA new accepted brief is needed only if the answer changes accepted scope. Declared engineering prerequisites and research spikes may proceed through estimates and QA readiness while decision-dependent implementation remains gated. Retry after the evidence or decision changes; unchanged reviews retain this blocker.");
         return string.Join("\n", lines);
     }
 
