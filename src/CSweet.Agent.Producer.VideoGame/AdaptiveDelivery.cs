@@ -13,7 +13,9 @@ public sealed partial class SpecialistAgent
         var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: token);
         var board = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
         board ??= await context.Platform.Work.CreateBoardAsync(new CreateWorkBoardRequest(
-            workstream.Name, $"Producer-managed delivery for {workstream.Outcome}", $"producer-board:{workstream.Id:N}")
+            workstream.Name, $"Producer-managed delivery for project {workstream.Id:D}. " +
+            "Use the accepted production brief and project scope as the authoritative delivery baseline.",
+            $"producer-board:{workstream.Id:N}")
         {
             TeamId = teamId, WorkstreamId = workstream.Id,
             Key = $"VG{workstream.Id:N}"[..12].ToUpperInvariant(), ProfileKey = "video-game-production-board.v2"
