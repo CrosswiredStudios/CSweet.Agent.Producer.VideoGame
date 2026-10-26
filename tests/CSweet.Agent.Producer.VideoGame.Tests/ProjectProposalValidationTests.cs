@@ -6,6 +6,69 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class ProjectProposalValidationTests
 {
+    [Theory]
+    [InlineData("extra")]
+    [InlineData("missing")]
+    [InlineData("wrong-type")]
+    [InlineData("wrong-item")]
+    [InlineData("duplicate")]
+    public async Task InvalidProfileShapeIsCorrectedBeforeItCanPoisonTheProposalCache(string fault)
+    {
+        var f = new Fixture();
+        f.Template = f.Template with { ProfileData = JsonSerializer.SerializeToElement(new {
+            genre = "Arcade", targetPlatforms = new[] { "web" }, onlineMultiplayerExpected = false }) };
+        var bad = fault switch {
+            "extra" => "{\"genre\":\"Arcade\",\"targetPlatforms\":[\"web\"],\"onlineMultiplayerExpected\":false,\"deploymentTargets\":[\"Chromium\"],\"pickupInterpretation\":\"split\"}",
+            "missing" => "{\"genre\":\"Arcade\",\"onlineMultiplayerExpected\":false}",
+            "wrong-type" => "{\"genre\":\"Arcade\",\"targetPlatforms\":\"web\",\"onlineMultiplayerExpected\":false}",
+            "wrong-item" => "{\"genre\":\"Arcade\",\"targetPlatforms\":[42],\"onlineMultiplayerExpected\":false}",
+            _ => "{\"genre\":\"Arcade\",\"genre\":\"Shooter\",\"targetPlatforms\":[\"web\"],\"onlineMultiplayerExpected\":false}"
+        };
+        f.Responses.Enqueue(JsonSerializer.Serialize(f.Template with { ProfileData = JsonDocument.Parse(bad).RootElement.Clone() }, Fixture.Json));
+        f.Responses.Enqueue(f.ValidJson);
+        Assert.Equal("Continue", (await f.RunAsync()).Disposition);
+        Assert.Equal(2, f.ModelCalls);
+        Assert.Equal(f.Template.ProfileData.GetRawText(), Assert.Single(f.Submissions).ProfileData.GetRawText());
+        await f.RunAsync();
+        Assert.Equal(2, f.ModelCalls);
+    }
+
+    [Fact]
+    public async Task PreviouslyCachedSchemaInvalidDraftIsRepairedWithoutChangingValidCommandIdentity()
+    {
+        var f = new Fixture();
+        var invalid = f.Template with { ProfileData = JsonSerializer.SerializeToElement(new { deploymentTargets = new[] { "web" } }) };
+        var oldKey = f.PlanKey + ":accepted-v1";
+        f.Cache[oldKey] = f.State(oldKey, JsonSerializer.SerializeToElement(new { plan = invalid, error = (string?)null }, Fixture.Json));
+        f.Responses.Enqueue(f.ValidJson);
+        Assert.Equal("Continue", (await f.RunAsync()).Disposition);
+        Assert.Equal(1, f.ModelCalls);
+        Assert.Equal("{}", Assert.Single(f.Submissions).ProfileData.GetRawText());
+        await f.RunAsync();
+        Assert.Equal(1, f.ModelCalls);
+        Assert.Equal(f.Submissions[0].IdempotencyKey, f.Submissions[1].IdempotencyKey);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StaffingAuthorityCanBeNarrowedButNeverExpanded(bool expand)
+    {
+        var f = new Fixture();
+        f.Template = f.Template with { AuthorityEnvelope = f.Template.AuthorityEnvelope with {
+            AuthorizedStaffingRoleKeys = ["game-engineer", "game-quality-assurance", "game-networking-engineer"] } };
+        var fields = JsonSerializer.SerializeToElement(f.Template, Fixture.Json).EnumerateObject().ToDictionary(x => x.Name, x => x.Value.Clone());
+        fields["authorizedStaffingRoleKeys"] = JsonSerializer.SerializeToElement(expand ? new[] { "unapproved-role" } : new[] { "game-engineer", "game-quality-assurance" });
+        f.Responses.Enqueue(JsonSerializer.Serialize(fields));
+        if (expand) f.Responses.Enqueue(f.ValidJson);
+        Assert.Equal("Continue", (await f.RunAsync()).Disposition);
+        var plan = Assert.Single(f.Submissions);
+        Assert.Equal(expand ? 2 : 1, f.ModelCalls);
+        Assert.Equal(expand ? 3 : 2, plan.AuthorityEnvelope.AuthorizedStaffingRoleKeys.Count);
+        Assert.Equal(f.Template.AccountableManagerOrganizationUserId, plan.AccountableManagerOrganizationUserId);
+        Assert.Equal(f.Template.AuthorityEnvelope.HumanRequiredActionKeys, plan.AuthorityEnvelope.HumanRequiredActionKeys);
+    }
+
     [Fact]
     public async Task DescriptiveMetadataCorrectionsReachProposalWithoutReplacingAuthorityOrIdentity()
     {

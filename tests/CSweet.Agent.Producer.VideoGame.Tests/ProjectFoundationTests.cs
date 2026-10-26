@@ -51,7 +51,7 @@ public sealed class ProjectFoundationTests
         var producer = Guid.NewGuid(); var manager = Guid.NewGuid(); var oldId = Guid.NewGuid(); var newId = Guid.NewGuid(); var models = 0;
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var plan = new WorkstreamPlanProposalV2Request("Game", "Original outcome", ["Playable"], "Concept", producer, null, [], [],
-            null, null, null, null, "Deliver", "original", "video-game-production.v2", 8, JsonSerializer.SerializeToElement(new { }),
+            null, null, null, null, "Deliver", "original", "video-game-production.v2", 8, JsonSerializer.SerializeToElement(new { genre = "To be confirmed" }),
             new(null, 14, [], ["launch"], ["work-planning"], null), [], [PitchEvidence]);
         var indexKey = "producer-submitted-project-proposals";
         var cache = new Dictionary<string, AgentOperatingStateResponse> { [indexKey] = new(Guid.NewGuid(), indexKey, "test", 1, "Active",
