@@ -126,10 +126,12 @@ public sealed class PitchRefinementTests
 
     internal static string Markdown => string.Join("\n", new[] { "Scope", "Player experience", "Non-goals", "Acceptance criteria", "Deliverables", "Constraints", "Risks", "Open questions" }.Select(x => $"## {x}\nPlanning detail for {x}."));
 
-    [Fact]
-    public async Task QuestionsThenRefinementThenExactApprovalUnlocksPlanningAndRetriesKeepOneDocument()
+    [Theory]
+    [InlineData(30)]
+    [InlineData(12000)]
+    public async Task QuestionsThenRefinementThenExactApprovalUnlocksPlanningAndRetriesKeepOneDocument(int outcomeLength)
     {
-        var fixture = new Fixture();
+        var fixture = new Fixture(new string('x', outcomeLength));
         fixture.SeedModel(1, new(false, ["How many levels are in the MVP?"], "Level count affects workload.", Markdown));
         var first = await new SpecialistAgent().HandleCoordinationTurnAsync(fixture.Request(1), fixture.Context, default);
         Assert.Equal(AgentCoordinationDispositions.Continue, first.Disposition);
@@ -234,6 +236,8 @@ public sealed class PitchRefinementTests
                 (_, _) => Task.FromResult<IReadOnlyList<WorkBoardSummary>>(TeamBoards.ToList()));
             Runtime.RegisterCapability<CreateWorkBoardRequest, WorkBoardSummary>(WorkBoardCapabilities.Create, (r, _) => {
                 Assert.Equal(Team, r.TeamId); Assert.Equal(Workstream, r.WorkstreamId);
+                Assert.InRange(r.Description!.Length, 1, 2048);
+                Assert.Contains(Workstream.ToString("D"), r.Description);
                 Assert.Matches("^[A-Z][A-Z0-9]{1,11}$", r.Key!);
                 var board = new WorkBoardSummary(Guid.NewGuid(), r.Name, r.Description!, false, false, 1, []) {
                     WorkstreamId = Workstream, TeamId = Team };
@@ -253,7 +257,7 @@ public sealed class PitchRefinementTests
                     "Submitted", PackageMembers!, null)));
         }
         public IReadOnlyList<ArtifactPackageMember>? PackageMembers;
-        public Fixture()
+        public Fixture(string outcome = "Ship the accepted game")
         {
             var document = Guid.NewGuid(); var revision = Guid.NewGuid();
             Documents[document] = new(document, "Pitch", "video-game.vision.v1", "Approved", revision, null, revision, null, null,
@@ -276,7 +280,7 @@ public sealed class PitchRefinementTests
                         return Task.FromResult(JsonSerializer.SerializeToElement(new { id = Guid.NewGuid(), chatId = request.GetProperty("chatId").GetGuid(), chatTurnId = Guid.NewGuid() }));
                     })
                 .RegisterCapability<ReadWorkstreamRequest, WorkstreamDetail>(WorkstreamCapabilityNames.ReadV1,
-                    (request, _) => Task.FromResult(new WorkstreamDetail(Workstream, "Game", "Ship the accepted game", [], "concept", "Active",
+                    (request, _) => Task.FromResult(new WorkstreamDetail(Workstream, "Game", outcome, [], "concept", "Active",
                         Producer, null, null, null, "video-game-production.v2", 4, null, "profile-digest", 1)))
                 .RegisterCapability<JsonElement, PersonalTodoDirectory>(PersonalTodoCapabilities.Read,
                     (_, _) => Task.FromResult(new PersonalTodoDirectory([new(Guid.NewGuid(), Producer, "Producer", Director, "Director", 1, Todos)], Producer)))
