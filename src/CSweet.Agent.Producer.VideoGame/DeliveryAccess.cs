@@ -127,6 +127,7 @@ public sealed partial class SpecialistAgent
     }
 
     internal static bool IsStaffingRecoveryCommitment(string? correlationId) =>
+        correlationId?.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) == true ||
         correlationId?.StartsWith(WorkflowRecoveryPrefix, StringComparison.Ordinal) == true ||
         correlationId?.StartsWith(SprintReadinessCommitmentPrefix, StringComparison.Ordinal) == true;
 }

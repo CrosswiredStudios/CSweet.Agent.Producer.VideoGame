@@ -12,6 +12,7 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class DeliveryAccessTests
 {
     [Theory]
+    [InlineData("producer-planning:project:fingerprint", true)]
     [InlineData("producer-workflow-recovery:board:fingerprint", true)]
     [InlineData("producer-readiness:sprint:revision", true)]
     [InlineData("producer-role-repair:ticket", false)]
