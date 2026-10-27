@@ -61,13 +61,19 @@ public sealed class PlanningDecisionTests
     }
 
     [Theory]
-    [InlineData("unchanged", 0)]
-    [InlineData("decision-changed", 1)]
-    [InlineData("missing-decision", 1)]
-    [InlineData("foreign-decision", 0)]
-    [InlineData("changed-scope", 1)]
-    [InlineData("legacy-state", 1)]
-    public async Task ReviewsRetainUnchangedDecisionBlocksAndRecoverOnCurrentEvidence(string scenario, int expectedRequeues)
+    [InlineData("unchanged", 0, false)]
+    [InlineData("decision-changed", 1, false)]
+    [InlineData("missing-decision", 1, false)]
+    [InlineData("foreign-decision", 0, false)]
+    [InlineData("changed-scope", 1, false)]
+    [InlineData("legacy-state", 1, false)]
+    [InlineData("unchanged", 0, true)]
+    [InlineData("decision-changed", 1, true)]
+    [InlineData("missing-decision", 1, true)]
+    [InlineData("foreign-decision", 0, true)]
+    [InlineData("changed-scope", 1, true)]
+    [InlineData("legacy-state", 1, true)]
+    public async Task ReviewsRetainUnchangedDecisionBlocksAndRecoverOnCurrentEvidence(string scenario, int expectedRequeues, bool estimation)
     {
         var stream = Guid.NewGuid(); var team = Guid.NewGuid(); var board = Guid.NewGuid();
         var decision = PlanningDecision(stream, "Confirm external playtest logistics.");
@@ -86,9 +92,9 @@ public sealed class PlanningDecisionTests
         };
         var item = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with {
             Id = Guid.NewGuid(), Revision = 4, Status = PersonalTodoStatuses.Blocked,
-            CorrelationId = "producer-planning:scope",
+            CorrelationId = estimation ? "producer-estimation:scope" : "producer-planning:scope",
             BlockReason = "Repeated issue: " + SpecialistAgent.DescribePlanningBlocker(questions, [decision], stream, "accepted-sha", "Gabriel"),
-            WorkContext = new(WorkstreamId: stream, TeamId: team, SourceFingerprint: "scope")
+            WorkContext = new(WorkstreamId: stream, TeamId: team, SourceFingerprint: estimation ? "reconciled" : "scope")
         };
         IReadOnlyList<DecisionRecord> current = scenario switch {
             "decision-changed" => [decision with { Revision = 3, SelectedOptionId = "continue-current-plan" }],
@@ -115,8 +121,38 @@ public sealed class PlanningDecisionTests
             });
         for (var i = 0; i < 3; i++)
             await SpecialistAgent.EnsureCommitmentAsync(item.CorrelationId!, "Plan", "Plan", "High",
-                item.WorkContext! with { SourceFingerprint = scenario == "changed-scope" ? "new-scope" : "scope" }, runtime.CreateContext(), default);
+                item.WorkContext! with { SourceFingerprint = scenario == "changed-scope" ? "new-scope" : estimation ? "reconciled" : "scope" }, runtime.CreateContext(), default);
         Assert.Equal(expectedRequeues, requeues);
+    }
+
+    [Fact]
+    public void Decision_filtered_planned_work_is_blocked_with_its_ticket_and_exact_decision_not_completed_as_empty()
+    {
+        var stream = Guid.NewGuid(); var board = Guid.NewGuid(); var team = Guid.NewGuid(); var sprintId = Guid.NewGuid();
+        var decision = PlanningDecision(stream, "Select the final visual style from reviewed evidence.");
+        var cycle = new ProducerPlanningCycleState(stream, board, team, "scope", null, null, null, null,
+            "current-technical-artifact", "reconciled", DateTimeOffset.UtcNow) {
+            OutstandingAuthorityQuestions = [decision.Summary], EngineeringPrerequisiteKeys = ["dependency-pin-phaser"]
+        };
+        var sprint = JsonSerializer.Deserialize<WorkSprint>("{}")! with { Id = sprintId, Status = "Planned", Sequence = 2 };
+        var bootstrap = JsonSerializer.Deserialize<WorkItem>("{}")! with {
+            Id = Guid.NewGuid(), Identifier = "GAME-54", Status = "Ready", SprintId = sprintId,
+            ExecutionMode = WorkItemExecutionModes.Executable, TypeKey = "video-game.task.v1",
+            ProposalProvenance = new(Guid.NewGuid(), "current-technical-artifact", "bootstrap")
+        };
+        var pin = bootstrap with { Id = Guid.NewGuid(), Identifier = "GAME-53", Status = "Completed" };
+        var pending = SpecialistAgent.PendingSprintCandidates([pin, bootstrap], [sprint]);
+        Assert.Equal(bootstrap, Assert.Single(pending));
+        Assert.False(SpecialistAgent.CanPrepareWithPlanningDecisions(bootstrap, cycle));
+        var result = SpecialistAgent.EmptySprintCandidateScope(pending, cycle, [decision], "accepted-sha", "Gabriel");
+        var content = (string)typeof(PersonalTodoResult).GetProperty("Content",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(result)!;
+        Assert.Equal(PersonalTodoResult.Blocked(content), result);
+        Assert.Contains("GAME-54", content); Assert.Contains(decision.Id.ToString("D"), content);
+        Assert.Contains("not been dispatched", content); Assert.DoesNotContain("No unscheduled executable", content);
+        Assert.Equal(PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope."),
+            SpecialistAgent.EmptySprintCandidateScope([], cycle, [decision], "accepted-sha", "Gabriel"));
+        Assert.Contains("sprint-v3", SpecialistAgent.SprintEstimationCorrelation(board, "reconciled", 2));
     }
 
     private static DecisionRecord PlanningDecision(Guid stream, string question) => new(

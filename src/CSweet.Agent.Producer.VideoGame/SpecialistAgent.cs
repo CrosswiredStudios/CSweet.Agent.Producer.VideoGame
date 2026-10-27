@@ -341,10 +341,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                          !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest))
                 {
                     var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
-                    var candidateExists = detail.Items.Any(x =>
-                        IsSprintCandidate(x, sprints) &&
-                        HasStaffedExecution(x) && x.ProposalProvenance is not null &&
-                        CanPrepareWithPlanningDecisions(x, planningCycle));
+                    // A pending decision is work to track, not evidence that no work remains.
+                    // The execution callback still enforces the planning-decision gate.
+                    var candidateExists = PendingSprintCandidates(detail.Items, sprints).Any(HasStaffedExecution);
                     if (candidateExists)
                     {
                         var nextSequence = PlanningSprintSequence(sprints);
@@ -559,7 +558,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (correlationId.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) && existing.Status == PersonalTodoStatuses.Blocked))
                 return existing;
             if (existing.Status == PersonalTodoStatuses.Blocked &&
-                correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
+                (correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) ||
+                 correlationId.StartsWith(EstimationCommitmentPrefix, StringComparison.Ordinal)) &&
                 existing.BlockReason?.Contains(PlanningDecisionBlockMarker, StringComparison.Ordinal) == true &&
                 await PlanningDecisionsUnchangedAsync(existing, workContext, context, cancellationToken))
                 return existing;
@@ -932,11 +932,18 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Blocked("The candidate planning evidence changed.");
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
-        var candidates = board.Items.Where(x => IsSprintCandidate(x, planningSprints) &&
+        var pendingCandidates = PendingSprintCandidates(board.Items, planningSprints);
+        var candidates = pendingCandidates.Where(x =>
                 CanPrepareWithPlanningDecisions(x, currentCycle))
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
         if (candidates.Count == 0)
-            return PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope.");
+        {
+            var decisions = pendingCandidates.Count == 0 ? [] : await context.Platform.ReadDecisionsAsync(
+                new ReadDecisionRequest(WorkstreamId: workstreamId), cancellationToken);
+            var digest = planningState.Payload.AcceptedHandoffs.TryGetValue(workstreamId, out var acceptedHandoff)
+                ? acceptedHandoff.RevisionDigest : string.Empty;
+            return EmptySprintCandidateScope(pendingCandidates, currentCycle, decisions, digest, roster.LeadDisplayName);
+        }
         candidates = EligibleCandidateScope(candidates, board.Items).ToList();
         if (candidates.Count == 0)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
