@@ -83,6 +83,9 @@ public sealed record ProducerPlanningCycleState(
     public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
     public IReadOnlyList<string> EngineeringPrerequisiteKeys { get; init; } = [];
     public string? AuthorityDecisionFingerprint { get; init; }
+    // Derived from current board and decision reads at each admission boundary; never durable authority.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlySet<string>? DecisionIndependentProposalKeys { get; init; }
     public ProgressivePlanningProgress? Progressive { get; init; }
 }
 

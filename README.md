@@ -1,4 +1,4 @@
-# Producer 6.0.4
+# Producer 6.0.5
 
 Require the Director-approved project handoff. Remove owner escalation and short-brief onboarding. Use SDK supporting-specialist interaction policy for delivery planning; creative authority remains with Naomi.
 

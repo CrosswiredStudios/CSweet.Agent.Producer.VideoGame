@@ -152,7 +152,7 @@ public sealed class PlanningDecisionTests
         Assert.Contains("not been dispatched", content); Assert.DoesNotContain("No unscheduled executable", content);
         Assert.Equal(PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope."),
             SpecialistAgent.EmptySprintCandidateScope([], cycle, [decision], "accepted-sha", "Gabriel"));
-        Assert.Contains("sprint-v3", SpecialistAgent.SprintEstimationCorrelation(board, "reconciled", 2));
+        Assert.Contains("sprint-v4", SpecialistAgent.SprintEstimationCorrelation(board, "reconciled", 2));
     }
 
     private static DecisionRecord PlanningDecision(Guid stream, string question) => new(

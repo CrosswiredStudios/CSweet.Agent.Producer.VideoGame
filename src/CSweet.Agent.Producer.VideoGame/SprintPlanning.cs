@@ -13,7 +13,7 @@ public sealed partial class SpecialistAgent
 
     // A recovery generation avoids the old completed commitments that reused Sprint 1's result.
     internal static string SprintEstimationCorrelation(Guid board, string digest, int sequence) =>
-        $"{EstimationCommitmentPrefix}{board:N}:{digest}:{sequence}:sprint-v3";
+        $"{EstimationCommitmentPrefix}{board:N}:{digest}:{sequence}:sprint-v4";
 
     internal static IReadOnlyList<WorkItem> PendingSprintCandidates(IReadOnlyList<WorkItem> items, IReadOnlyList<WorkSprint> sprints) =>
         items.Where(item => IsSprintCandidate(item, sprints)).ToArray();

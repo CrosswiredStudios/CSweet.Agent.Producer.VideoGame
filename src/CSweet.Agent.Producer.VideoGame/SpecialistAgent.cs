@@ -854,6 +854,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         await RefreshAmendedDeliveriesAsync(roleRepair, boardId, context, cancellationToken);
         await MarkScopeAppliedAsync(roleRepair, context, cancellationToken);
         var currentBoard = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        priorCycle = await ReadScopedPlanningGatesAsync(priorCycle, operatingState, currentBoard, context, cancellationToken);
         var unassigned = currentBoard.Items.Where(x =>
                 x.ExecutionMode == WorkItemExecutionModes.Executable &&
                 x.ProposalProvenance is not null && MissingDelegations(x).Count > 0)
@@ -933,6 +934,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var pendingCandidates = PendingSprintCandidates(board.Items, planningSprints);
+        currentCycle = await ReadScopedPlanningGatesAsync(currentCycle, planningState.Payload, board, context, cancellationToken);
         var candidates = pendingCandidates.Where(x =>
                 CanPrepareWithPlanningDecisions(x, currentCycle))
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
@@ -1129,6 +1131,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 "Current planning evidence is required before finalizing sprint scope.");
         var current = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        cycle = await ReadScopedPlanningGatesAsync(cycle, state.Payload, current, context, cancellationToken);
         if (current.Items.Any(x => x.SprintId == sprintId && x.ExecutionMode == WorkItemExecutionModes.Executable &&
             !CanPrepareWithPlanningDecisions(x, cycle)))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
