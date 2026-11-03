@@ -99,7 +99,7 @@ public sealed partial class SpecialistAgent
         static bool Text(string? value, int maximum) => !string.IsNullOrWhiteSpace(value) && value.Length <= maximum;
         static bool Same(IReadOnlyList<string>? left, IReadOnlyList<string>? right) =>
             left is not null && right is not null && left.SequenceEqual(right, StringComparer.Ordinal);
-        if (!Text(plan.Outcome, 4000) || !Text(plan.Rationale, 4000) ||
+        if (plan.ExistingProjectId != template.ExistingProjectId || plan.ExpectedProjectRevision != template.ExpectedProjectRevision || !Text(plan.Outcome, 4000) || !Text(plan.Rationale, 4000) ||
             plan.SuccessCriteria is not { Count: > 0 and <= 100 } || plan.SuccessCriteria.Any(x => !Text(x, 4000)) ||
             plan.InitialMilestones is null || plan.InitialMilestones.Count != template.InitialMilestones.Count ||
             plan.ProfileData.ValueKind != JsonValueKind.Object || plan.ProfileData.GetRawText().Length > 128000 ||
