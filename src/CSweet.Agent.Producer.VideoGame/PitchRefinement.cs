@@ -2,6 +2,7 @@ using System.Text.Json;
 using CSweet.Agent.SDK;
 using CrosswiredStudios.VideoGame.PitchCollaboration;
 using Microsoft.Extensions.AI;
+using CrosswiredStudios.VideoGame.ProductionReview;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
@@ -29,11 +30,12 @@ public sealed partial class SpecialistAgent
             return AgentCoordinationTurnResult.Blocked("Pitch refinement requires the exact pitch, accepted GDD, project/team context and Video Game Director manager.");
         var pitch = await PitchProtocol.ReadAcceptedAsync(brief.PitchArtifactId, brief.PitchRevisionId, brief.PitchSha256, context, token);
         var gdd = await PitchProtocol.ReadAcceptedAsync(gddId, gddRevision, brief.Vision.HighLevelGddRevisionSha256!, context, token);
-        var latest = request.Transcript.LastOrDefault(x => x.Artifact is not null)?.Artifact;
+        var latestTurn = request.Transcript.LastOrDefault(x => x.Artifact is not null);
+        var latest = latestTurn?.Artifact;
         var previous = request.Transcript.LastOrDefault(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
             x.Artifact?.Type == PitchProtocol.ReviewType)?.Artifact?.Payload.Deserialize<PitchReview>(PitchProtocol.Json);
         var reply = latest?.Type == PitchProtocol.ReplyType ? latest.Payload.Deserialize<PitchReply>(PitchProtocol.Json) : null;
-        if (reply is not null && (reply.PitchDigest != initial.Key || previous is null || reply.DocumentId != previous.DocumentId ||
+        if (reply is not null && (latestTurn!.SpeakerOrganizationUserId != manager || reply.PitchDigest != initial.Key || previous is null || reply.DocumentId != previous.DocumentId ||
             reply.RevisionId != previous.RevisionId || reply.RevisionSha256 != previous.RevisionSha256))
             return AgentCoordinationTurnResult.Blocked("The Director's reply must match this Producer draft and pitch.");
         if (reply?.Accepted == true)
@@ -60,8 +62,10 @@ public sealed partial class SpecialistAgent
         AgentCoordinationTurnResult StopRefinement() => AgentCoordinationTurnResult.Blocked(
             $"Planning refinement needs a concrete manager answer or a new recorded owner decision. " +
             $"The saved brief {(previous is null ? "" : $"{previous.DocumentId:D}, revision {previous.RevisionId:D}, ")}and unresolved questions are retained. " +
-            "Repeated objections do not authorize more model turns, staffing, spending or scope changes.");
-        if (reviews.Length >= MaximumPitchReviews || reviews.Length >= 2 &&
+            "The bounded refinement allowance is exhausted or questions repeat without resolution. " +
+            "Resolve the retained findings through the manager's project recovery workflow; staffing and scope changes remain unauthorized.");
+        var correction = CanCorrectProductionBrief(request.Transcript, manager, request.Self.OrganizationUserId, previous, reply, decisionStart);
+        if (reviews.Length >= MaximumPitchReviews && !correction || reviews.Length >= 2 &&
             !reviews[^1].Ready && !reviews[^2].Ready && SamePlanningQuestions(reviews[^1].Questions, reviews[^2].Questions))
             return StopRefinement();
         var priorDraft = previous is null ? null : await context.Platform.Artifacts.GetAsync(previous.DocumentId, token);
@@ -91,7 +95,10 @@ public sealed partial class SpecialistAgent
                     Only set ready=true when you have no remaining planning-blocking questions and can explain
                     a sufficient delivery approach. It requires an empty questions array. Missing hires do not block
                     understanding. Avoid manufacturing specialist work. Until ready, ask questions and refine the draft.
-                    Return only the working brief; the system preserves immutable source appendices. The complete Markdown must contain headings: ## Scope, ## Player experience, ## Non-goals,
+                    Return only the working brief; the system retains exact sources separately. Never copy the
+                    pitch or GDD into the brief. Aim for 6,000–10,000 characters, state each requirement once,
+                    and use a compact decision table for resolved questions. Preserve every distinct requirement.
+                    The complete Markdown must contain headings: ## Scope, ## Player experience, ## Non-goals,
                     ## Acceptance criteria, ## Deliverables, ## Constraints, ## Risks, ## Open questions.
                     Include measurable completion criteria, a preliminary delivery sequence and workload drivers.
                     Include every unresolved question in Open questions; state none only when actually resolved.
@@ -100,7 +107,7 @@ public sealed partial class SpecialistAgent
                         ["approved-scope", "resources", "business-constraints"],
                         ["delivery-planning", "capacity", "dependencies", "forecasts"],
                         AgentInteractionResponseContracts.DeliverableOrClarification) { CounterpartRoleKey = "game-director" })),
-                new ChatMessage(ChatRole.User, $"Accepted pitch:\n{pitch.Revision.Content}\nAccepted GDD:\n{gdd.Revision.Content}\nCurrent shared draft:\n{priorContent.Split("\n<!-- accepted-pitch-sources -->", StringSplitOptions.None)[0]}\nLatest manager guidance:\n{reply?.Guidance}\nLatest creative edits:\n{reply?.SuggestedMarkdown}\nRecent conversation (earlier decisions are in the shared draft):\n{JsonSerializer.Serialize(request.Transcript.TakeLast(8).Select(x => new { x.SpeakerOrganizationUserId, Content = x.Content[..Math.Min(x.Content.Length, 4000)] }), PitchProtocol.Json)}")
+                new ChatMessage(ChatRole.User, $"Accepted pitch:\n{pitch.Revision.Content}\nAccepted GDD:\n{gdd.Revision.Content}\nCurrent shared draft:\n{ProductionSources.WorkingBrief(priorContent)}\nLatest manager guidance:\n{reply?.Guidance}\nExact review issues:\n{JsonSerializer.Serialize(reply?.Correction, PitchProtocol.Json)}\nLatest creative edits:\n{reply?.SuggestedMarkdown}\nRecent conversation (earlier decisions are in the shared draft):\n{JsonSerializer.Serialize(request.Transcript.TakeLast(8).Select(x => new { x.SpeakerOrganizationUserId, Content = x.Content[..Math.Min(x.Content.Length, 4000)] }), PitchProtocol.Json)}")
             ], new ChatOptions { MaxOutputTokens = Math.Min(ResolveOutputTokens(Settings), 16_384) }, token);
             var result = PitchProtocol.ParseProducerReview(response.Text);
             if (result is null || result.Questions is null || result.Questions.Count > 12 ||
@@ -113,14 +120,15 @@ public sealed partial class SpecialistAgent
         if (!review.Ready && reviews.LastOrDefault() is { Ready: false } priorReview &&
             SamePlanningQuestions(priorReview.Questions, review.Questions))
             return StopRefinement();
-        const string sourceMarker = "\n<!-- accepted-pitch-sources -->";
-        var draftBody = review.DraftMarkdown.Split(sourceMarker, StringSplitOptions.None)[0];
-        var documentContent = draftBody + sourceMarker +
-            $"\n## Accepted pitch source\nArtifact {brief.PitchArtifactId:D}, revision {brief.PitchRevisionId:D}, SHA-256 {brief.PitchSha256}\n\n{pitch.Revision.Content}" +
-            $"\n## Accepted GDD source\nArtifact {gddId:D}, revision {gddRevision:D}, SHA-256 {brief.Vision.HighLevelGddRevisionSha256}\n\n{gdd.Revision.Content}";
         var documentKey = $"pitch-document:{request.SessionId:N}:{request.TurnOrdinal}";
         var persisted = await PitchProtocol.CachedAsync(documentKey, context, async () =>
         {
+            var sources = await EnsureProductionSourcesAsync(workstream, team, manager,
+                pitch.Document, pitch.Revision, gdd.Document, gdd.Revision, context, token);
+            var documentContent = ProductionSources.WorkingBrief(review.DraftMarkdown) +
+                $"\n<!-- production-sources-reference -->\n## Exact source references\n" +
+                $"Source evidence: {sources.DocumentId:D}, revision {sources.RevisionId:D}, SHA-256 {sources.ContentSha256}.\n" +
+                "The source evidence retains the exact accepted pitch and GDD; it is separate from this working brief.\n";
             ArtifactDocument document;
             ArtifactRevision revision;
             if (previous is null)
@@ -142,7 +150,7 @@ public sealed partial class SpecialistAgent
                 await context.Platform.Artifacts.SubmitAsync(new SubmitArtifactRevision(document.Id, revision.Id,
                     $"pitch-submit:{revision.Id:N}", ReviewerOrganizationUserId: manager), token);
             return new PitchReview(initial.Key, document.Id, revision.Id, revision.ContentSha256,
-                review.Ready, review.Questions, review.Rationale);
+                review.Ready, review.Questions, review.Rationale) { SourceEvidence = sources };
         }, token);
         return AgentCoordinationTurnResult.Continue(
             $"[Shared production brief](/organizations/{context.BusinessId}/documents?artifact={persisted.DocumentId:D}&revision={persisted.RevisionId:D}). " + (review.Ready

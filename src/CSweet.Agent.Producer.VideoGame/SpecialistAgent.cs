@@ -5,6 +5,8 @@ using CrosswiredStudios.VideoGame.Contracts;
 using Microsoft.Extensions.AI;
 using System.Text.Json;
 using System.Reflection;
+using CrosswiredStudios.VideoGame.ProductionReview;
+using CrosswiredStudios.VideoGame.PitchCollaboration;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
@@ -100,12 +102,24 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var artifactId = brief.HighLevelGddArtifactId!.Value;
         var revisionId = brief.HighLevelGddAcceptedRevisionId!.Value;
         var revision = gddDocument.Revisions.Single(x => x.Id == revisionId);
-        // The approved collaborative document contains immutable exact pitch/GDD source appendices.
-        // Package the project-owned document rather than mixing intake and project file authorities.
+        // Legacy briefs contain source appendices. New briefs reference one project-owned source
+        // evidence document, independently verified against the originals by the Director.
         var packageMembers = new List<ArtifactPackageMember>
         {
             new(refinedDocument.Id, 0, refinedDocument.DocumentType, refinedRevision.Id)
         };
+        var acceptedReview = request.Transcript.Last(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
+            x.Artifact?.Type == PitchProtocol.ReviewType).Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        if (acceptedReview.SourceEvidence is { } sourceReference)
+        {
+            var sources = await ProductionSources.ReadAsync(sourceReference, workstreamId, request.WorkContext.TeamId!.Value, context, cancellationToken);
+            if (sources.Revision.Status != "Accepted" || sources.Document.AcceptedRevisionId != sources.Revision.Id ||
+                sources.Sources.Pitch != new ProductionSource(pitchDocument.Id, pitchBrief.PitchRevisionId, pitchBrief.PitchSha256, pitchDocument.DocumentType,
+                    pitchDocument.Revisions.Single(x => x.Id == pitchBrief.PitchRevisionId).Content) ||
+                sources.Sources.Gdd != new ProductionSource(gddDocument.Id, revision.Id, revision.ContentSha256, gddDocument.DocumentType, revision.Content))
+                throw new InvalidOperationException("The exact accepted production sources are required before staffing.");
+            packageMembers.Add(new(sources.Document.Id, 1, ProductionSources.DocumentType, sources.Revision.Id));
+        }
         var planningPackage = await context.Platform.Artifacts.CreatePackageAsync(
             new CreateArtifactPackage("Approved game-production planning inputs",
                 "video-game.production-planning-input.v1",

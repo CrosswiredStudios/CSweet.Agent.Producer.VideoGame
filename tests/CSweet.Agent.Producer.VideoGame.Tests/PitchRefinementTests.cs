@@ -3,11 +3,59 @@ using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 using CrosswiredStudios.VideoGame.Contracts;
 using CrosswiredStudios.VideoGame.PitchCollaboration;
+using CrosswiredStudios.VideoGame.ProductionReview;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class PitchRefinementTests
 {
+    [Fact]
+    public async Task FourReadyDraftsPermitExactCreativeCorrectionAndReplayKeepsOneSourceDocument()
+    {
+        var f = new Fixture();
+        f.SeedModel(1, new(true, [], "Scope supports staffing.", Markdown));
+        var first = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(1), f.Context, default);
+        var review = first.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        for (var i = 0; i < SpecialistAgent.MaximumPitchReviews; i++) f.Add(f.Producer, first.Artifact);
+        var issue = new CreativeIssue("accessibility-flash", "controls-accessibility", "blocking", "open",
+            "Independent flash and motion controls", "Accessibility wording uses either/or", "game-producer", "pre-production", "State both toggles explicitly");
+        f.Add(f.Director, PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, review.DocumentId, review.RevisionId, review.RevisionSha256, false, issue.Change, "")
+                { Correction = ProductionCorrection.Create(review.RevisionSha256, [issue]) }));
+        f.SeedModel(10, new(true, [], "Both controls are explicit.", Markdown + "\nSeparate flash and reduced-motion controls."));
+        var corrected = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(10), f.Context, default);
+        var replay = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(10), f.Context, default);
+        Assert.Equal("Continue", corrected.Disposition);
+        Assert.Equal(corrected.Artifact!.Payload.GetRawText(), replay.Artifact!.Payload.GetRawText());
+        Assert.Equal(1, f.Revises); Assert.Equal(1, f.SourceCreates); Assert.Equal(1, f.SourceSubmits);
+        Assert.Equal(0, f.PackageCreates); Assert.Empty(f.Todos);
+        var current = corrected.Artifact.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        Assert.Equal(review.SourceEvidence, current.SourceEvidence);
+        Assert.DoesNotContain("Accepted game pitch", f.Document(current.DocumentId).Revisions.Last().Content);
+        Assert.Contains("Exact source references", f.Document(current.DocumentId).Revisions.Last().Content);
+        f.Add(f.Producer, corrected.Artifact);
+        f.Accept(current);
+        f.Add(f.Director, PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, current.DocumentId, current.RevisionId, current.RevisionSha256, true, "Accepted exact corrections.", "")));
+        var accepted = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(12), f.Context, default);
+        Assert.Equal("Completed", accepted.Disposition);
+        Assert.Equal(2, f.PackageMembers!.Count);
+        Assert.Contains(f.PackageMembers, x => x.RequiredDocumentType == ProductionSources.DocumentType && x.ArtifactId == current.SourceEvidence!.DocumentId);
+    }
+
+    [Fact]
+    public async Task CompactBriefCannotUnlockStaffingWithoutAcceptedSourceEvidence()
+    {
+        var f = new Fixture(); f.SeedModel(1, new(true, [], "Ready", Markdown));
+        var first = await new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(1), f.Context, default);
+        var review = first.Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        f.Add(f.Producer, first.Artifact); f.Accept(review, sources: false);
+        f.Add(f.Director, PitchProtocol.Artifact(PitchProtocol.ReplyType, f.Digest,
+            new PitchReply(f.Digest, review.DocumentId, review.RevisionId, review.RevisionSha256, true, "Accept", "")));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => new SpecialistAgent().HandleCoordinationTurnAsync(f.Request(3), f.Context, default));
+        Assert.Equal(0, f.PackageCreates); Assert.Empty(f.Todos);
+    }
+
     [Fact]
     public async Task RepeatedObjectionStopsBeforeAnotherDocumentRevisionAndSurvivesReplay()
     {
@@ -218,9 +266,10 @@ public sealed class PitchRefinementTests
         private Guid Session { get; } = Guid.NewGuid(); private Guid Workstream { get; } = Guid.NewGuid(); private Guid Team { get; } = Guid.NewGuid();
         private List<AgentCoordinationTurn> Transcript { get; } = [];
         private Dictionary<Guid, ArtifactDocument> Documents { get; } = [];
+        public ArtifactDocument Document(Guid id) => Documents[id];
         public Dictionary<string, AgentOperatingStateResponse> States { get; } = [];
         public AgentRuntimeContext Context { get; }
-        public int Creates, Revises, Submits, PackageCreates, MessageSends;
+        public int Creates, Revises, Submits, PackageCreates, MessageSends, SourceCreates, SourceSubmits;
         public List<PersonalTodoItem> Todos { get; } = [];
         public List<ResourceChangeProposalRequest> StaffingProposals { get; } = [];
         private Guid? Board => null;
@@ -297,7 +346,7 @@ public sealed class PitchRefinementTests
                 .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
                     (request, _) => { var saved = State(request.StateKey, request.Payload, (request.ExpectedRevision ?? 0) + 1); States[request.StateKey] = saved; return Task.FromResult(saved); })
                 .RegisterCapability<CreateArtifactDocument, ArtifactDocument>(PlatformCapabilities.ArtifactCreate,
-                    (request, _) => { Creates++; var id = Guid.NewGuid(); var rev = new ArtifactRevision(Guid.NewGuid(), 1, null, request.Content, "draft1", "Draft", DateTimeOffset.UtcNow, null, null);
+                    (request, _) => { if (request.DocumentType == ProductionSources.DocumentType) SourceCreates++; else Creates++; var id = Guid.NewGuid(); var rev = new ArtifactRevision(Guid.NewGuid(), 1, null, request.Content, "draft1", "Draft", DateTimeOffset.UtcNow, null, null);
                         var doc = new ArtifactDocument(id, request.Title, request.DocumentType, "Draft", rev.Id, null, null, null, null, [rev]) { WorkstreamId = Workstream, TeamId = Team };
                         Documents[id] = doc; return Task.FromResult(doc); })
                 .RegisterCapability<CreateArtifactRevision, ArtifactRevision>(PlatformCapabilities.ArtifactRevise,
@@ -305,7 +354,7 @@ public sealed class PitchRefinementTests
                         var rev = new ArtifactRevision(Guid.NewGuid(), 2, request.ExpectedBaseRevisionId, request.Content, "draft2", "Draft", DateTimeOffset.UtcNow, null, null);
                         Documents[doc.Id] = doc with { LatestRevisionId = rev.Id, Revisions = [.. doc.Revisions, rev] }; return Task.FromResult(rev); })
                 .RegisterCapability<SubmitArtifactRevision, ArtifactDocument>(PlatformCapabilities.ArtifactSubmit,
-                    (request, _) => { Submits++; var doc = Documents[request.ArtifactId]; Documents[doc.Id] = doc with { Revisions = doc.Revisions.Select(x => x.Id == request.RevisionId ? x with { Status = "Submitted" } : x).ToList() }; return Task.FromResult(Documents[doc.Id]); })
+                    (request, _) => { var doc = Documents[request.ArtifactId]; if (doc.DocumentType == ProductionSources.DocumentType) SourceSubmits++; else Submits++; Documents[doc.Id] = doc with { Revisions = doc.Revisions.Select(x => x.Id == request.RevisionId ? x with { Status = "Submitted" } : x).ToList() }; return Task.FromResult(Documents[doc.Id]); })
                 .RegisterCapability<CreateArtifactPackage, ArtifactPackage>(PlatformCapabilities.ArtifactPackageCreate,
                     (request, _) => { PackageCreates++; PackageMembers = request.Members; return Task.FromResult(new ArtifactPackage(Guid.NewGuid(), request.Name, request.PackageType, 1, "Draft", request.Members, null)); })
                 .RegisterCapability<JsonElement, ArtifactPackage>(PlatformCapabilities.ArtifactPackageSubmit,
@@ -318,8 +367,12 @@ public sealed class PitchRefinementTests
             new(Producer, Guid.NewGuid(), "Producer", "Producer"), new(Director, Guid.NewGuid(), "Director", "Director"), false, Transcript.ToList())
             { WorkContext = new(Guid.NewGuid(), Workstream, Team, Board, null, null, null, Guid.NewGuid(), null, null) };
         public void SeedModel(int turn, ProducerReview review) { var key = $"pitch-producer:{Session:N}:{turn}"; States[key] = State(key, JsonSerializer.SerializeToElement(review), 1); }
-        public void Accept(PitchReview review) { var doc = Documents[review.DocumentId]; Documents[doc.Id] = doc with { AcceptedRevisionId = review.RevisionId,
-            Revisions = doc.Revisions.Select(x => x.Id == review.RevisionId ? x with { Status = "Accepted" } : x).ToList() }; }
+        public void Accept(PitchReview review, bool sources = true) {
+            foreach (var reference in review.DocumentReferences.Where(x => sources || x.DocumentId == review.DocumentId)) {
+                var doc = Documents[reference.DocumentId]; Documents[doc.Id] = doc with { AcceptedRevisionId = reference.RevisionId,
+                    Revisions = doc.Revisions.Select(x => x.Id == reference.RevisionId ? x with { Status = "Accepted" } : x).ToList() };
+            }
+        }
         private static AgentOperatingStateResponse State(string key, JsonElement payload, long revision) => new(Guid.NewGuid(), key,
             "test", 1, "Active", new Dictionary<string, string>(), [], key, [], Guid.NewGuid(), payload, revision, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
     }

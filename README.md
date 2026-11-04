@@ -1,4 +1,10 @@
-# Producer 6.1.0
+# Producer 6.2.0
+
+Production-brief refinement permits at most two additional exact-review corrections after the four ordinary drafts. The second correction requires a changed candidate and evidenced resolution of an earlier blocker. Repeated questions, unchanged blockers, replay and foreign or stale replies cannot reset the allowance. Staffing still requires Producer readiness, independent creative review and exact Director acceptance.
+
+New briefs reference one project-owned `video-game.production-sources.v1` evidence document instead of copying the pitch and GDD into every revision. The Director verifies its identities, hashes and exact contents against both accepted originals. Both the compact brief and source evidence must be accepted before the Producer packages them for downstream planning. Original source paragraphs stay readable. Legacy briefs and completed handoffs retain their original evidence.
+
+Update together with Director 0.4.0 and Creative Director 4.1.0 through published releases and Installed Agents. No new permissions are requested.
 
 Require the Director-approved project handoff. Remove owner escalation and short-brief onboarding. Use SDK supporting-specialist interaction policy for delivery planning; creative authority remains with Naomi.
 
