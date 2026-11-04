@@ -5,6 +5,8 @@ using CrosswiredStudios.VideoGame.Contracts;
 using Microsoft.Extensions.AI;
 using System.Text.Json;
 using System.Reflection;
+using CrosswiredStudios.VideoGame.ProductionReview;
+using CrosswiredStudios.VideoGame.PitchCollaboration;
 
 namespace CSweet.Agent.Producer.VideoGame;
 
@@ -100,12 +102,24 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var artifactId = brief.HighLevelGddArtifactId!.Value;
         var revisionId = brief.HighLevelGddAcceptedRevisionId!.Value;
         var revision = gddDocument.Revisions.Single(x => x.Id == revisionId);
-        // The approved collaborative document contains immutable exact pitch/GDD source appendices.
-        // Package the project-owned document rather than mixing intake and project file authorities.
+        // Legacy briefs contain source appendices. New briefs reference one project-owned source
+        // evidence document, independently verified against the originals by the Director.
         var packageMembers = new List<ArtifactPackageMember>
         {
             new(refinedDocument.Id, 0, refinedDocument.DocumentType, refinedRevision.Id)
         };
+        var acceptedReview = request.Transcript.Last(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
+            x.Artifact?.Type == PitchProtocol.ReviewType).Artifact!.Payload.Deserialize<PitchReview>(PitchProtocol.Json)!;
+        if (acceptedReview.SourceEvidence is { } sourceReference)
+        {
+            var sources = await ProductionSources.ReadAsync(sourceReference, workstreamId, request.WorkContext.TeamId!.Value, context, cancellationToken);
+            if (sources.Revision.Status != "Accepted" || sources.Document.AcceptedRevisionId != sources.Revision.Id ||
+                sources.Sources.Pitch != new ProductionSource(pitchDocument.Id, pitchBrief.PitchRevisionId, pitchBrief.PitchSha256, pitchDocument.DocumentType,
+                    pitchDocument.Revisions.Single(x => x.Id == pitchBrief.PitchRevisionId).Content) ||
+                sources.Sources.Gdd != new ProductionSource(gddDocument.Id, revision.Id, revision.ContentSha256, gddDocument.DocumentType, revision.Content))
+                throw new InvalidOperationException("The exact accepted production sources are required before staffing.");
+            packageMembers.Add(new(sources.Document.Id, 1, ProductionSources.DocumentType, sources.Revision.Id));
+        }
         var planningPackage = await context.Platform.Artifacts.CreatePackageAsync(
             new CreateArtifactPackage("Approved game-production planning inputs",
                 "video-game.production-planning-input.v1",
@@ -341,10 +355,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                          !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest))
                 {
                     var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
-                    var candidateExists = detail.Items.Any(x =>
-                        IsSprintCandidate(x, sprints) &&
-                        HasStaffedExecution(x) && x.ProposalProvenance is not null &&
-                        CanPrepareWithPlanningDecisions(x, planningCycle));
+                    // A pending decision is work to track, not evidence that no work remains.
+                    // The execution callback still enforces the planning-decision gate.
+                    var candidateExists = PendingSprintCandidates(detail.Items, sprints).Any(HasStaffedExecution);
                     if (candidateExists)
                     {
                         var nextSequence = PlanningSprintSequence(sprints);
@@ -559,7 +572,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (correlationId.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) && existing.Status == PersonalTodoStatuses.Blocked))
                 return existing;
             if (existing.Status == PersonalTodoStatuses.Blocked &&
-                correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
+                (correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) ||
+                 correlationId.StartsWith(EstimationCommitmentPrefix, StringComparison.Ordinal)) &&
                 existing.BlockReason?.Contains(PlanningDecisionBlockMarker, StringComparison.Ordinal) == true &&
                 await PlanningDecisionsUnchangedAsync(existing, workContext, context, cancellationToken))
                 return existing;
@@ -854,6 +868,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         await RefreshAmendedDeliveriesAsync(roleRepair, boardId, context, cancellationToken);
         await MarkScopeAppliedAsync(roleRepair, context, cancellationToken);
         var currentBoard = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        priorCycle = await ReadScopedPlanningGatesAsync(priorCycle, operatingState, currentBoard, context, cancellationToken);
         var unassigned = currentBoard.Items.Where(x =>
                 x.ExecutionMode == WorkItemExecutionModes.Executable &&
                 x.ProposalProvenance is not null && MissingDelegations(x).Count > 0)
@@ -932,11 +947,19 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Blocked("The candidate planning evidence changed.");
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
-        var candidates = board.Items.Where(x => IsSprintCandidate(x, planningSprints) &&
+        var pendingCandidates = PendingSprintCandidates(board.Items, planningSprints);
+        currentCycle = await ReadScopedPlanningGatesAsync(currentCycle, planningState.Payload, board, context, cancellationToken);
+        var candidates = pendingCandidates.Where(x =>
                 CanPrepareWithPlanningDecisions(x, currentCycle))
             .OrderBy(x => x.Rank).ThenBy(x => x.Id).ToList();
         if (candidates.Count == 0)
-            return PersonalTodoResult.Completed("No unscheduled executable leaves remain in the reconciled candidate scope.");
+        {
+            var decisions = pendingCandidates.Count == 0 ? [] : await context.Platform.ReadDecisionsAsync(
+                new ReadDecisionRequest(WorkstreamId: workstreamId), cancellationToken);
+            var digest = planningState.Payload.AcceptedHandoffs.TryGetValue(workstreamId, out var acceptedHandoff)
+                ? acceptedHandoff.RevisionDigest : string.Empty;
+            return EmptySprintCandidateScope(pendingCandidates, currentCycle, decisions, digest, roster.LeadDisplayName);
+        }
         candidates = EligibleCandidateScope(candidates, board.Items).ToList();
         if (candidates.Count == 0)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
@@ -1122,6 +1145,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 "Current planning evidence is required before finalizing sprint scope.");
         var current = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
+        cycle = await ReadScopedPlanningGatesAsync(cycle, state.Payload, current, context, cancellationToken);
         if (current.Items.Any(x => x.SprintId == sprintId && x.ExecutionMode == WorkItemExecutionModes.Executable &&
             !CanPrepareWithPlanningDecisions(x, cycle)))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),

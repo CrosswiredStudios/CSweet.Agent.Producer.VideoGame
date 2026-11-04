@@ -39,11 +39,15 @@ public sealed partial class SpecialistAgent
 
     internal static bool CanPrepareWithPlanningDecisions(WorkItem item, ProducerPlanningCycleState cycle) =>
         cycle.OutstandingAuthorityQuestions.Count == 0 ||
+        cycle.DecisionIndependentProposalKeys is { } independent &&
+        item.ProposalProvenance is { } current && current.ArtifactDigest == cycle.TechnicalProposalDigest &&
+        independent.Contains(current.ProposalItemKey) ||
+        cycle.DecisionIndependentProposalKeys is null && (
         item.TypeKey == VideoGameWorkItemTypeKeys.ResearchSpike ||
         item.TypeKey == VideoGameWorkItemTypeKeys.Task &&
         item.ProposalProvenance is { } provenance &&
         provenance.ArtifactDigest == cycle.TechnicalProposalDigest &&
         cycle.EngineeringPrerequisiteKeys.Contains(provenance.ProposalItemKey, StringComparer.Ordinal) &&
         item.Planning?.DelegationRecommendations.Any(x => x.StageKey == "specialist-execution" &&
-            x.RequiredRoleKey == VideoGameRoleKeys.Engineer && x.RequiredCapabilityKeys.Contains("work.execution.run")) == true;
+            x.RequiredRoleKey == VideoGameRoleKeys.Engineer && x.RequiredCapabilityKeys.Contains("work.execution.run")) == true);
 }

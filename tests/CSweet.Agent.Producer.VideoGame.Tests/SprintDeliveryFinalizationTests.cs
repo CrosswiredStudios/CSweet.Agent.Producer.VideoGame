@@ -6,6 +6,17 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class SprintDeliveryFinalizationTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Current_final_style_scope_admits_unaffected_sprint_and_refuses_affected_scope_before_finalization(bool affected)
+    {
+        var fixture = new Journey(); fixture.EnableScopedStyle(affected);
+        await new SpecialistAgent().HandlePersonalTodoAsync(fixture.Commitment, fixture.Context, default);
+        Assert.Equal(affected ? 0 : 1, fixture.Starts);
+        Assert.Equal(affected ? 0 : 2, fixture.Finalizations.Count);
+    }
+
     [Fact]
     public async Task A_new_authority_question_after_readiness_blocks_ordinary_scope_before_finalization()
     {
@@ -109,6 +120,18 @@ public sealed class SprintDeliveryFinalizationTests
         public bool PreflightValid { get; set; } = true;
         public bool PendingAuthority { get; set; }
         public int Starts { get; private set; }
+        private PlanningGateScopeTests.Fixture? _style;
+
+        public void EnableScopedStyle(bool affected)
+        {
+            _style = new();
+            _style.Cycle = _style.Cycle with { WorkstreamId = _projectId, BoardId = _boardId, TeamId = _teamId };
+            _style.Decision = _style.Decision with { WorkstreamId = _projectId };
+            foreach (var item in _style.Items) Items.Add(item.Id, item);
+            foreach (var item in Items.Values.Where(item => item.SprintId == Sprint.Id && item.ExecutionMode == WorkItemExecutionModes.Executable).ToArray())
+                Items[item.Id] = item with { ProposalProvenance = new(Guid.NewGuid(), "technical", item.Id.ToString("N")),
+                    ParentItemId = affected ? _style.FinalArt.Id : null };
+        }
 
         public Journey()
         {
@@ -135,10 +158,15 @@ public sealed class SprintDeliveryFinalizationTests
                     var cycle = new ProducerPlanningCycleState(_projectId, _boardId, _teamId, "cycle", null, null, null, null, null, "reconciled", DateTimeOffset.UtcNow) {
                         OutstandingAuthorityQuestions = PendingAuthority ? ["Changed scope"] : []
                     };
-                    var state = new ProducerOperatingState { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> { [_projectId] = cycle } };
+                    var state = new ProducerOperatingState { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> { [_projectId] = _style?.Cycle ?? cycle },
+                        AcceptedHandoffs = _style is null ? [] : new Dictionary<Guid, ProducerAcceptedHandoff> {
+                            [_projectId] = new(_projectId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow)
+                        } };
                     return Task.FromResult(new AgentOperatingStateReadResponse(new(Guid.NewGuid(), "producer", "producer", 1, "Active", new Dictionary<string, string>(), [], "state", [], Guid.Empty,
                         JsonSerializer.SerializeToElement(state), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
                 })
+                .RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead,
+                    (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>(_style is null ? [] : [_style.Decision]))
                 .RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([Sprint]))
                 .RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(new WorkBoardDetail(
                     new(_boardId, "GAME", "Game board", false, false, 1, []) { WorkstreamId = _projectId, TeamId = _teamId }, [], Items.Values.ToArray())))

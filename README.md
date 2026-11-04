@@ -1,4 +1,10 @@
-# Producer 6.0.3
+# Producer 6.2.0
+
+Production-brief refinement permits at most two additional exact-review corrections after the four ordinary drafts. The second correction requires a changed candidate and evidenced resolution of an earlier blocker. Repeated questions, unchanged blockers, replay and foreign or stale replies cannot reset the allowance. Staffing still requires Producer readiness, independent creative review and exact Director acceptance.
+
+New briefs reference one project-owned `video-game.production-sources.v1` evidence document instead of copying the pitch and GDD into every revision. The Director verifies its identities, hashes and exact contents against both accepted originals. Both the compact brief and source evidence must be accepted before the Producer packages them for downstream planning. Original source paragraphs stay readable. Legacy briefs and completed handoffs retain their original evidence.
+
+Update together with Director 0.4.0 and Creative Director 4.1.0 through published releases and Installed Agents. No new permissions are requested.
 
 Require the Director-approved project handoff. Remove owner escalation and short-brief onboarding. Use SDK supporting-specialist interaction policy for delivery planning; creative authority remains with Naomi.
 
@@ -156,7 +162,7 @@ project/manifest version, runtime identity comes from build metadata, and releas
 the published executable before packing. If a hire reports a different approved version, update
 through Installed Agents and open a fresh hiring review; an old retry retains its reviewed package.
 
-Built with `CSweet.Agent.SDK` 5.0.4 and `CSweet.WorkManagement.Contracts` 5.1.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 5.9.0 and `CSweet.WorkManagement.Contracts` 5.1.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds
@@ -438,3 +444,7 @@ Package dependencies: WorkManagement.Contracts 5.1.0 and SDK 5.0.4. No deadline 
 `ReconcilePendingScopeAmendmentAsync` verifies the saved source message and current reporting chain, board/project/team ownership, exact sprint/stage and unchanged planning revisions. It hands the request to `ApplyScopeAmendmentAsync` and the existing corrected-planning workflow. Changed or revoked authority/scope holds the saved direction for review. Captures and state transitions use expected revisions; replay cannot overwrite an outstanding direction or duplicate its planning commitment. Existing source, attempt history, review and sprint mutation protections remain in force.
 
 Upgrade recovery checks up to 32 recent direct conversations, with up to 200 returned messages each. It recognizes only this Producer's exact historical stopped-boundary refusal paired with the original authorized command and conversation turn, and ignores superseded directions and changed stage boundaries. This recovers the earlier refused request without resending it when those records and authority remain current. Local tests do not modify the running installation; publish this release and update the Producer through Installed Agents.
+
+## Existing project onboarding
+
+Preserve the exact existing-project identity and revision from the Director-authorized project foundation template through model drafting and reviewed setup. Existing pitch, staffing, creative review and execution gates remain required.

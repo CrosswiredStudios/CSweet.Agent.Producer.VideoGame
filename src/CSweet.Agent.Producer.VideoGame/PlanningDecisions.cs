@@ -39,7 +39,8 @@ public sealed partial class SpecialistAgent
         var state = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
             ProjectStateKeys.Portfolio("producer"), token);
         if (state?.Payload.PlanningCycles.TryGetValue(workstreamId, out var cycle) != true || cycle is null ||
-            cycle.PlanningFingerprint != source.SourceFingerprint || cycle.AuthorityDecisionFingerprint is null ||
+            (item.CorrelationId?.StartsWith(EstimationCommitmentPrefix, StringComparison.Ordinal) == true
+                ? cycle.ReconciledDigest : cycle.PlanningFingerprint) != source.SourceFingerprint || cycle.AuthorityDecisionFingerprint is null ||
             !state.Payload.AcceptedHandoffs.TryGetValue(workstreamId, out var handoff))
             return false;
         var decisions = await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: workstreamId), token);
