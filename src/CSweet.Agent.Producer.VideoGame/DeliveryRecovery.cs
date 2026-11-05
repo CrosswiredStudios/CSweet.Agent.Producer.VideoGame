@@ -85,7 +85,8 @@ public sealed partial class SpecialistAgent
                 try
                 {
                     if (await context.Platform.ReadOperatingStateAsync<ProducerDecisionEscalation>(escalation.Key, token) is not null) continue;
-                    await context.Platform.Communication.SendDirectMessageAsync(manager, escalation.Content, escalation.Key, token);
+                    await context.Platform.Communication.SendDirectMessageAsync(manager, escalation.Content, escalation.Key,
+                        DeliveryEscalationContext(board, item.WorkItemId, execution.Id, context.BusinessId), token);
                     await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(escalation.Key,
                         "video-game.producer-decision-escalation.v1", 1, "Active", new Dictionary<string, string>(), [], escalation.Key, [],
                         Guid.NewGuid(), JsonSerializer.SerializeToElement(new ProducerDecisionEscalation(item.ItemIdentifier, stage!.Id,
@@ -98,6 +99,11 @@ public sealed partial class SpecialistAgent
             }
         }
     }
+
+    internal static AgentWorkContext? DeliveryEscalationContext(WorkBoardSummary board, Guid item, Guid execution, string businessId) =>
+        board.WorkstreamId is { } project
+            ? new(Guid.Parse(businessId), project, board.TeamId, board.Id, item, null, null, execution, null, null)
+            : null;
 
     internal static (string Key, string Content)? ReplacementDiscussionEscalation(Guid boardId,
         WorkItemExecutionResponse item, WorkStageExecutionResponse stage, IReadOnlyList<WorkItemComment> comments)
@@ -210,10 +216,8 @@ public sealed partial class SpecialistAgent
 
     internal static RetryWorkStageExecutionRequest? CorrectableDeliveryRetry(Guid boardId, Guid executionId, WorkStageExecutionResponse stage)
     {
-        // Retry structural generation failures, or one legacy MCP-500 Blocked outcome.
-        // New developer packages return retryable runtime.transport instead of this legacy
-        // outcome. One manager-owned retry recovers retained work after their upgrade;
-        // a repeated failure must remain visible for investigation, not loop on this wake.
+        // Retry structural generation failures. Executor-update recovery belongs to the
+        // platform, which can verify the installed version against the actual failed attempt.
         // Never retry missing real-world evidence, authority,
         // failed QA, or unavailable dependencies. The host still enforces current ownership and budget.
         var reason = stage.LatestOutcome?.Summary;
@@ -222,11 +226,6 @@ public sealed partial class SpecialistAgent
             stage.LatestOutcome?.Disposition != WorkExecutionDispositions.Blocked ||
             stage.AssignmentRevision < 1 || stage.AttemptCount < 1 || stage.AttemptCount >= stage.MaximumAttempts ||
             reason is null) return null;
-        if (reason == "The MCP service rejected the request: Internal Server Error")
-            return stage.AttemptCount != 1 ? null : new(boardId, executionId, stage.Id,
-                $"producer-mcp-recovery:{stage.Id:N}:v1",
-                "Resume the retained workspace after the platform service interruption. Re-read the current assignment and source, run required browser and other checks, and retain independent technical review and QA. This is a bounded recovery attempt, not a declaration that the service is repaired.")
-                { ExpectedAssignmentRevision = stage.AssignmentRevision };
         if (!IsCorrectableDeliverableFailure(reason)) return null;
         // Deliberately independent of attempt number: duplicates, reconnects, and a repeated identical
         // formatting defect reuse the host's receipt instead of repeatedly spending attempts.

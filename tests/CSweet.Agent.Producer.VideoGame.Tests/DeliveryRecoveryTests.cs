@@ -6,14 +6,24 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class DeliveryRecoveryTests
 {
     [Fact]
-    public void Legacy_mcp_500_gets_one_revision_bound_retry_then_stays_visible_if_it_repeats()
+    public void Escalation_carries_the_canonical_project_and_ticket_instead_of_an_unscoped_direct_message()
+    {
+        var org = Guid.NewGuid(); var project = Guid.NewGuid(); var team = Guid.NewGuid();
+        var board = new WorkBoardSummary(Guid.NewGuid(), "Sprint", "", false, false, 1, []) {
+            WorkstreamId = project, TeamId = team };
+        var ticket = Guid.NewGuid(); var execution = Guid.NewGuid();
+        var scope = SpecialistAgent.DeliveryEscalationContext(board, ticket, execution, org.ToString())!;
+        Assert.Equal(org, scope.OrganizationId); Assert.Equal(project, scope.WorkstreamId);
+        Assert.Equal(team, scope.TeamId); Assert.Equal(board.Id, scope.BoardId);
+        Assert.Equal(ticket, scope.WorkItemId); Assert.Equal(execution, scope.CorrelationId);
+        Assert.Null(SpecialistAgent.DeliveryEscalationContext(board with { WorkstreamId = null }, ticket, execution, org.ToString()));
+    }
+    [Fact]
+    public void Legacy_mcp_500_waits_for_platform_verified_executor_update_instead_of_spending_a_retry_on_old_code()
     {
         var stage=Blocked(); stage=stage with {LatestOutcome=stage.LatestOutcome! with {Summary="The MCP service rejected the request: Internal Server Error"}};
         var board=Guid.NewGuid();var execution=Guid.NewGuid();
-        var first=SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage)!;
-        Assert.NotNull(first);
-        Assert.Equal(stage.AssignmentRevision,first.ExpectedAssignmentRevision);
-        Assert.Equal(first.IdempotencyKey,SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage)!.IdempotencyKey);
+        Assert.Null(SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage));
         Assert.Null(SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage with {AttemptCount=2}));
         Assert.Null(SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage with {StageKey="quality"}));
         Assert.Null(SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage with {LatestOutcome=stage.LatestOutcome with {Summary="The MCP service rejected the request: Forbidden"}}));

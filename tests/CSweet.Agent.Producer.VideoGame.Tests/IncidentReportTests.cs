@@ -6,6 +6,24 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class IncidentReportTests
 {
     [Fact]
+    public async Task Current_qa_operation_mismatch_corrects_cached_capacity_advice_without_a_model_call()
+    {
+        var f = new Fixture(false);
+        var review = f.Review with { Diagnostics = f.Review.Diagnostics with { CurrentState = f.Review.Diagnostics.CurrentState! with {
+            Facts = [new("WorkStageExecution", Guid.NewGuid(), DateTimeOffset.UtcNow,
+                "quality: Failed. The QA compute operation is unavailable or its generation changed.")]
+        } } };
+        review = review with { Incident = review.Incident with { OwnerReport = ManagerIncidentCoordinator.FactualFallback(review)! with {
+            Title = "Restore the browser environment", RequiresOwnerInput = true } } };
+        var report = await f.Agent.GenerateIncidentOwnerReportAsync(review, f.Context, default);
+        ManagerIncidentCoordinator.ValidateReport(report!);
+        Assert.Contains("tracking mismatch", report!.Title); Assert.False(report.RequiresOwnerInput);
+        Assert.Contains("verdict remains incomplete", report.Summary); Assert.Empty(report.Options); Assert.Equal(0, f.Calls);
+        Assert.Null(SpecialistAgent.QaOperationIncidentReport(review with { Incident = review.Incident with { Status = "Resolved" } }));
+        Assert.Null(SpecialistAgent.QaOperationIncidentReport(review with { Diagnostics = review.Diagnostics with {
+            CurrentState = review.Diagnostics.CurrentState with { Facts = [] } } }));
+    }
+    [Fact]
     public async Task Blocked_mcp_error_gets_an_actionable_owner_without_another_model_call_or_unproved_capacity_claim()
     {
         var f = new Fixture(false);

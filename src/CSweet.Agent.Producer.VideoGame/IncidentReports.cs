@@ -12,6 +12,7 @@ public sealed partial class SpecialistAgent
         if (review.Diagnostics.CurrentState is not { } state) return null;
         // A stopped service call cannot be repaired by passive planning callbacks. This
         // deterministic assessment also corrects old cached model reports for this fault.
+        if (QaOperationIncidentReport(review) is { } qaReport) return qaReport;
         if (TransportIncidentReport(review) is { } transportReport) return transportReport;
         if (review.Incident.OwnerReport is { RequiresOwnerInput: not null } saved && saved.SourceHash == state.Hash)
             return saved;
@@ -82,6 +83,22 @@ public sealed partial class SpecialistAgent
             missingEvidence = Bound(review.Incident.MissingEvidence, 600),
             moreEvidenceExists = state.Facts.Count > 12 || review.Diagnostics.Evidence.Count > 6 || review.Diagnostics.NextOffset.HasValue
         });
+    }
+
+    internal static IncidentOwnerReport? QaOperationIncidentReport(ManagerIncidentContext review)
+    {
+        if (review.Incident.Status is "Resolved" or "Superseded" || review.Diagnostics.CurrentState is not { } state ||
+            !state.Facts.Any(x => x.Kind == "WorkStageExecution" &&
+                (x.Detail.Contains("Failed", StringComparison.Ordinal) || x.Detail.Contains("Blocked", StringComparison.Ordinal)) &&
+                x.Detail.Contains("The QA compute operation is unavailable or its generation changed.", StringComparison.Ordinal))) return null;
+        return ManagerIncidentCoordinator.FactualFallback(review)! with
+        {
+            Title = "QA stopped on an operation tracking mismatch",
+            Summary = "QA could not continue because its saved compute operation was unavailable or belonged to a different environment generation. This error alone does not establish a broken browser environment or a product defect. The independent QA verdict remains incomplete.",
+            Recovery = "Preserve the integrated source and completed technical review. Verify the current QA package and operation before retrying the stopped quality stage.",
+            NextStep = "Producer: verify the QA update is active, then resume the existing quality stage. Recheck outstanding assertions against the exact integrated build.",
+            RequiresOwnerInput = false, OwnerInputReason = null, Options = [], RecommendedOptionId = ""
+        };
     }
 
     internal static IncidentOwnerReport? TransportIncidentReport(ManagerIncidentContext review)
