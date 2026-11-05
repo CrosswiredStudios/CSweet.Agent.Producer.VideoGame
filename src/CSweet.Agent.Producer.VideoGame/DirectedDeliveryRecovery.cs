@@ -52,9 +52,8 @@ public sealed partial class SpecialistAgent
         }
         if (stage is null || item.Status is not ("Blocked" or "Failed") ||
             stage.Status is not ("Blocked" or "Failed") || stage.PrincipalKind != "AgentInstallation" ||
-            stage.AgentInstallationId is null || stage.AssignmentRevision < 1 || stage.AttemptCount < 1 ||
-            stage.AttemptCount >= stage.MaximumAttempts)
-            return $"{item.ItemIdentifier} has no eligible blocked agent stage with remaining attempts. No retry was requested.";
+            stage.AgentInstallationId is null || stage.AssignmentRevision < 1 || stage.AttemptCount < 1)
+            return $"{item.ItemIdentifier} has no eligible current blocked agent stage. No retry was requested.";
         var result = await context.Platform.Work.RetryBlockedStageAsync(new(current.BoardId, current.Id, stage.Id,
             $"producer-directed-retry:{turnId:N}:{stage.Id:N}", reason)
             { ExpectedAssignmentRevision = stage.AssignmentRevision }, token);

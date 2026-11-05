@@ -85,8 +85,7 @@ public sealed partial class SpecialistAgent
                 try
                 {
                     if (await context.Platform.ReadOperatingStateAsync<ProducerDecisionEscalation>(escalation.Key, token) is not null) continue;
-                    await context.Platform.Communication.SendDirectMessageAsync(manager, escalation.Content, escalation.Key,
-                        DeliveryEscalationContext(board, item.WorkItemId, execution.Id, context.BusinessId), token);
+                    await context.Platform.Communication.SendDirectMessageAsync(manager, escalation.Content, escalation.Key, token);
                     await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(escalation.Key,
                         "video-game.producer-decision-escalation.v1", 1, "Active", new Dictionary<string, string>(), [], escalation.Key, [],
                         Guid.NewGuid(), JsonSerializer.SerializeToElement(new ProducerDecisionEscalation(item.ItemIdentifier, stage!.Id,
@@ -100,10 +99,6 @@ public sealed partial class SpecialistAgent
         }
     }
 
-    internal static AgentWorkContext? DeliveryEscalationContext(WorkBoardSummary board, Guid item, Guid execution, string businessId) =>
-        board.WorkstreamId is { } project
-            ? new(Guid.Parse(businessId), project, board.TeamId, board.Id, item, null, null, execution, null, null)
-            : null;
 
     internal static (string Key, string Content)? ReplacementDiscussionEscalation(Guid boardId,
         WorkItemExecutionResponse item, WorkStageExecutionResponse stage, IReadOnlyList<WorkItemComment> comments)
@@ -142,9 +137,7 @@ public sealed partial class SpecialistAgent
             $"{summary}\n\n" +
             $"To change or defer the affected criteria, reply `Amend ticket {id}: <your decision>`. I'll apply it through the normal " +
             "replanning, estimate and readiness flow, keeping completed work and independent QA. " +
-            (stage.AttemptCount < stage.MaximumAttempts
-                ? $"Once the missing environment or direction is available, reply `Retry ticket {id}: <what changed>`."
-                : $"This stage has used its attempt budget, so a plain retry is not available; reply `Replan ticket {id}: <direction>` to carry it into a replanned sprint.");
+            $"Once the cause is addressed, reply `Retry ticket {id}: <what changed>`. An authorized retry preserves the current work; use `Replan ticket {id}: <direction>` only when the plan needs to change.";
         // One escalation per blocked attempt; a new attempt that blocks again is a new decision request.
         return ($"{DecisionEscalationPrefix}{stage.Id:N}:{stage.AttemptCount}", content);
     }
@@ -192,12 +185,9 @@ public sealed partial class SpecialistAgent
         if (reason.Length > 2500) reason = reason[..2497] + "...";
         var id = item.ItemIdentifier;
         var state = stage.Status == "Failed" ? "marked failed" : "blocked";
-        var exhausted = stage.MaximumAttempts > 0 && stage.AttemptCount >= stage.MaximumAttempts;
         var content = $"{id} has been {state} since {stage.UpdatedAt:yyyy-MM-dd HH:mm} UTC, and none of my recovery steps apply, " +
-            $"so the team can't move it forward without a decision.\n\n{reason}\n\n" +
-            (exhausted
-                ? $"This stage has used its attempt budget. Reply `Replan ticket {id}: <direction>` to carry it into a replanned sprint, "
-                : $"Once the cause is addressed, reply `Retry ticket {id}: <what changed>`, ") +
+            $"so the stopped stage needs investigation.\n\n{reason}\n\n" +
+            $"Once the cause is addressed, reply `Retry ticket {id}: <what changed>`. Use `Replan ticket {id}: <direction>` only for a changed plan, " +
             $"or `Amend ticket {id}: <your decision>` to change what the ticket requires.";
         return ($"{DecisionEscalationPrefix}{stage.Id:N}:stalled:{stage.AttemptCount}:{AcceptanceDigest(reason)[..16]}", content);
     }

@@ -54,11 +54,12 @@ public sealed class DecisionEscalationTests
     }
 
     [Fact]
-    public void Exhausted_stages_offer_replanning_instead_of_an_impossible_retry()
+    public void Many_callbacks_do_not_make_an_authorized_retry_impossible()
     {
         var stage = Stage([SpecialistAgent.DecisionRequiredDiagnostic]) with { AttemptCount = 3 };
         var content = SpecialistAgent.DecisionEscalation(Item(stage), stage)!.Value.Content;
-        Assert.DoesNotContain("Retry ticket", content);
+        Assert.Contains("Retry ticket", content);
+        Assert.DoesNotContain("used its attempt budget", content);
         Assert.Contains("Replan ticket VG4CC32F61E0-22:", content);
         Assert.Contains("Amend ticket VG4CC32F61E0-22:", content);
     }
@@ -131,13 +132,14 @@ public sealed class DecisionEscalationTests
     }
 
     [Fact]
-    public void Failed_and_exhausted_tickets_are_offered_replanning()
+    public void Failed_tickets_offer_authorized_retry_without_claiming_compute_wakes_exhausted_the_budget()
     {
         var stage = Stopped("Failed", attempts: 3, maximum: 3);
         var content = SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(stage, "Failed"), stage, DateTimeOffset.UtcNow)!.Value.Content;
         Assert.StartsWith("VG4CC32F61E0-22 has been marked failed since", content);
         Assert.Contains("Replan ticket VG4CC32F61E0-22:", content);
-        Assert.DoesNotContain("Retry ticket", content);
+        Assert.Contains("Retry ticket", content);
+        Assert.DoesNotContain("used its attempt budget", content);
     }
 
     [Fact]

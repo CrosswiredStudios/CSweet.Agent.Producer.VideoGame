@@ -92,7 +92,7 @@ public sealed class DirectedDeliveryRecoveryTests
                 ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid().ToString()), ["llmModel"] = JsonSerializer.SerializeToElement("test")
             }))), context, default);
         await agent.HandleEventAsync(envelope, context, default);
-        if (scenario is "valid" or "ancestor" or "host-denied")
+        if (scenario is "valid" or "ancestor" or "host-denied" or "exhausted")
         {
             var request = Assert.Single(requests);
             Assert.Equal(stage.Id, request.StageExecutionId);
@@ -100,7 +100,7 @@ public sealed class DirectedDeliveryRecoveryTests
             Assert.Equal(execution.Id, request.SprintExecutionId);
             Assert.Equal(board, request.BoardId);
             Assert.Contains("workspace prerequisite", request.Reason);
-            if (scenario is "valid" or "ancestor")
+            if (scenario is "valid" or "ancestor" or "exhausted")
             {
                 await agent.HandleEventAsync(envelope, context, default);
                 Assert.Equal(request.IdempotencyKey, requests[1].IdempotencyKey);
