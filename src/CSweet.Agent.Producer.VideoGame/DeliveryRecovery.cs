@@ -210,14 +210,24 @@ public sealed partial class SpecialistAgent
 
     internal static RetryWorkStageExecutionRequest? CorrectableDeliveryRetry(Guid boardId, Guid executionId, WorkStageExecutionResponse stage)
     {
-        // Retry only structural generation failures, never missing real-world evidence, authority,
+        // Retry structural generation failures, or one legacy MCP-500 Blocked outcome.
+        // New developer packages return retryable runtime.transport instead of this legacy
+        // outcome. One manager-owned retry recovers retained work after their upgrade;
+        // a repeated failure must remain visible for investigation, not loop on this wake.
+        // Never retry missing real-world evidence, authority,
         // failed QA, or unavailable dependencies. The host still enforces current ownership and budget.
         var reason = stage.LatestOutcome?.Summary;
         if (stage.Status != "Blocked" || stage.StageKey != "specialist-execution" ||
             stage.PrincipalKind != "AgentInstallation" || stage.AgentInstallationId is null ||
             stage.LatestOutcome?.Disposition != WorkExecutionDispositions.Blocked ||
             stage.AssignmentRevision < 1 || stage.AttemptCount < 1 || stage.AttemptCount >= stage.MaximumAttempts ||
-            reason is null || !IsCorrectableDeliverableFailure(reason)) return null;
+            reason is null) return null;
+        if (reason == "The MCP service rejected the request: Internal Server Error")
+            return stage.AttemptCount != 1 ? null : new(boardId, executionId, stage.Id,
+                $"producer-mcp-recovery:{stage.Id:N}:v1",
+                "Resume the retained workspace after the platform service interruption. Re-read the current assignment and source, run required browser and other checks, and retain independent technical review and QA. This is a bounded recovery attempt, not a declaration that the service is repaired.")
+                { ExpectedAssignmentRevision = stage.AssignmentRevision };
+        if (!IsCorrectableDeliverableFailure(reason)) return null;
         // Deliberately independent of attempt number: duplicates, reconnects, and a repeated identical
         // formatting defect reuse the host's receipt instead of repeatedly spending attempts.
         var key = $"producer-format-retry:{stage.Id:N}:{AcceptanceDigest(reason)}";

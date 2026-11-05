@@ -10,6 +10,9 @@ public sealed partial class SpecialistAgent
         AgentRuntimeContext context, CancellationToken token)
     {
         if (review.Diagnostics.CurrentState is not { } state) return null;
+        // A stopped service call cannot be repaired by passive planning callbacks. This
+        // deterministic assessment also corrects old cached model reports for this fault.
+        if (TransportIncidentReport(review) is { } transportReport) return transportReport;
         if (review.Incident.OwnerReport is { RequiresOwnerInput: not null } saved && saved.SourceHash == state.Hash)
             return saved;
         var key = $"producer-incident-report:{review.Incident.Id:N}:{state.Hash}";
@@ -79,5 +82,21 @@ public sealed partial class SpecialistAgent
             missingEvidence = Bound(review.Incident.MissingEvidence, 600),
             moreEvidenceExists = state.Facts.Count > 12 || review.Diagnostics.Evidence.Count > 6 || review.Diagnostics.NextOffset.HasValue
         });
+    }
+
+    internal static IncidentOwnerReport? TransportIncidentReport(ManagerIncidentContext review)
+    {
+        if (review.Incident.Status is "Resolved" or "Superseded" || review.Diagnostics.CurrentState is not { } state ||
+            !state.Facts.Any(x => x.Detail.Contains("Blocked", StringComparison.OrdinalIgnoreCase) &&
+                (x.Detail.Contains("MCP service rejected the request", StringComparison.OrdinalIgnoreCase) ||
+                 x.Detail.Contains("runtime.transport", StringComparison.OrdinalIgnoreCase)))) return null;
+        var report = ManagerIncidentCoordinator.FactualFallback(review);
+        return report is null ? null : report with
+        {
+            Title = "Implementation stopped after a platform service error",
+            Recovery = "Source may be checkpointed. The failed operation and service recovery need verification; no repair or restart is confirmed.",
+            NextStep = "Producer: obtain the failed operation's diagnostics from the runtime owner, verify service recovery, then retry the exact stopped stage from its checkpoint.",
+            RequiresOwnerInput = false, OwnerInputReason = null, Options = [], RecommendedOptionId = ""
+        };
     }
 }

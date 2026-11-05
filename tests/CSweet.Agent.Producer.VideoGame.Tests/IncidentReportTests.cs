@@ -5,6 +5,25 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class IncidentReportTests
 {
+    [Fact]
+    public async Task Blocked_mcp_error_gets_an_actionable_owner_without_another_model_call_or_unproved_capacity_claim()
+    {
+        var f = new Fixture(false);
+        var state = f.Review.Diagnostics.CurrentState!;
+        var review = f.Review with { Diagnostics = f.Review.Diagnostics with { CurrentState = state with {
+            Facts = [new("WorkStageExecution", Guid.NewGuid(), DateTimeOffset.UtcNow,
+                "specialist-execution: Blocked. The MCP service rejected the request: Internal Server Error")]
+        } } };
+        var report = await f.Agent.GenerateIncidentOwnerReportAsync(review, f.Context, default);
+        Assert.NotNull(report);
+        ManagerIncidentCoordinator.ValidateReport(report);
+        Assert.Contains("Producer:", report.NextStep);
+        Assert.Contains("exact stopped stage", report.NextStep);
+        Assert.DoesNotContain("certified", report.Recovery);
+        Assert.False(report.RequiresOwnerInput);
+        Assert.Equal(0, f.Calls);
+        Assert.Null(SpecialistAgent.TransportIncidentReport(review with { Incident=review.Incident with {Status="Resolved"} }));
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

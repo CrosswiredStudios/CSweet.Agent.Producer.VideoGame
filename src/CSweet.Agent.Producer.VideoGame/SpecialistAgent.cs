@@ -1020,7 +1020,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             roleProposals.Add((session, author, artifact, proposal));
         }
 
-        if (roleProposals.Count == 0)
+        if (pendingRoles.Count > 0)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 $"Role estimation is pending: {string.Join(", ", pendingRoles)}.");
         foreach (var sourceProposal in roleProposals)

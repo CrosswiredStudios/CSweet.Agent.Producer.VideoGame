@@ -5,6 +5,19 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class DeliveryRecoveryTests
 {
+    [Fact]
+    public void Legacy_mcp_500_gets_one_revision_bound_retry_then_stays_visible_if_it_repeats()
+    {
+        var stage=Blocked(); stage=stage with {LatestOutcome=stage.LatestOutcome! with {Summary="The MCP service rejected the request: Internal Server Error"}};
+        var board=Guid.NewGuid();var execution=Guid.NewGuid();
+        var first=SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage)!;
+        Assert.NotNull(first);
+        Assert.Equal(stage.AssignmentRevision,first.ExpectedAssignmentRevision);
+        Assert.Equal(first.IdempotencyKey,SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage)!.IdempotencyKey);
+        Assert.Null(SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage with {AttemptCount=2}));
+        Assert.Null(SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage with {StageKey="quality"}));
+        Assert.Null(SpecialistAgent.CorrectableDeliveryRetry(board,execution,stage with {LatestOutcome=stage.LatestOutcome with {Summary="The MCP service rejected the request: Forbidden"}}));
+    }
     private static WorkStageExecutionResponse Blocked() => new(Guid.NewGuid(), "specialist-execution", "AgentExecution", 0,
         "Blocked", "AgentInstallation", Guid.NewGuid(), Guid.NewGuid(), null, 1, "blocked", "Current blocker", "Stale infrastructure error", null, DateTimeOffset.UtcNow)
     {

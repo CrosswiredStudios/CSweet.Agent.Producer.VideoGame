@@ -1,4 +1,4 @@
-# Producer 6.2.1
+# Producer 6.2.2
 
 Production-brief refinement permits at most two additional exact-review corrections after the four ordinary drafts. The second correction requires a changed candidate and evidenced resolution of an earlier blocker. Repeated questions, unchanged blockers, replay and foreign or stale replies cannot reset the allowance. Staffing still requires Producer readiness, independent creative review and exact Director acceptance.
 
@@ -456,3 +456,11 @@ Retain the frozen progressive outline and refined tasks when manager direction c
 A completed prerequisite sprint now wakes planning and schedules estimates/readiness for remaining tasks in the same increment. Completion does not bypass independent QA, change accepted scope, or authorize the next Story before aggregate acceptance. Duplicate wakes use a revision-bound continuation receipt.
 
 Install Technical Director 6.0.3 before Producer 6.2.1 through published releases and Installed Agents. No new capabilities, package-contract changes, database migration, or installed-payload edits are required.
+
+## Sprint execution improvements (6.2.2)
+
+- Recover a first legacy MCP-500 blocked implementation once through the normal revision-bound stage retry API. Replays are idempotent; repeated failure, exhausted budgets, denied authority and QA failures remain visible.
+- Report stopped MCP work with an investigation owner and concrete next action, without invented runner-capacity diagnoses or another model call.
+- Wait for every requested role estimate before forming the candidate QA-readiness request, avoiding repeated subset readiness assessments.
+
+Update Engineer 4.1.13, QA 5.4.10 and Technical Director 6.0.4 first; update Producer last to enable retained-stage recovery. New plans use Code-task review stages instead of mandatory review-only siblings. Existing published tickets/history are not silently cancelled by an agent update.
