@@ -94,6 +94,7 @@ public sealed record ProgressivePlanningProgress(string ScopeKey, string Outline
     string? ScheduledArtifactDigest = null)
 {
     public string? ReviewedDirectionsDigest { get; init; }
+    public int? ScheduledSprintSequence { get; init; }
 }
 
 public static class ProducerPhaseResolver

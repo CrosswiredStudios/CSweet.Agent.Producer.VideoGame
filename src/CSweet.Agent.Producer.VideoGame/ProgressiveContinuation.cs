@@ -7,7 +7,10 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal sealed record ProgressiveContinuation(string? Fingerprint);
+    internal sealed record ProgressiveContinuation(string? Fingerprint)
+    {
+        public bool PrerequisiteCompleted { get; init; }
+    }
     internal sealed record PlanningContinuationReceipt(string Fingerprint, long FromRevision);
 
     internal static async Task<ProgressiveContinuation?> ReadProgressiveContinuationAsync(Guid project, Guid board,
@@ -17,6 +20,20 @@ public sealed partial class SpecialistAgent
         if (state?.Payload.PlanningCycles.TryGetValue(project, out var cycle) != true || cycle is null || cycle.Progressive is not { } progress ||
             cycle.BoardId != board || cycle.PlanningFingerprint != planningFingerprint) return null;
         var items = (await context.Platform.Work.ReadBoardAsync(board, ct)).Items;
+        var prerequisites = items.Where(item => item.ProposalProvenance is { } provenance &&
+            provenance.ArtifactDigest == cycle.TechnicalProposalDigest &&
+            cycle.EngineeringPrerequisiteKeys.Contains(provenance.ProposalItemKey, StringComparer.Ordinal)).ToArray();
+        if (prerequisites.Length > 0 && prerequisites.Length == cycle.EngineeringPrerequisiteKeys.Count &&
+            prerequisites.All(x => x.Status is "Done" or "Completed"))
+        {
+            var sprints = await context.Platform.Work.ListSprintsAsync(board, ct);
+            if (!sprints.Any(x => x.Status == "Active") &&
+                prerequisites.All(x => x.SprintId is { } sprint && sprints.Any(s => s.Id == sprint && s.Status == "Completed")) &&
+                items.Any(x => IsSprintCandidate(x, sprints) && x.ProposalProvenance?.ArtifactDigest == cycle.TechnicalProposalDigest))
+                return new(ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+                    policy = "prerequisite-continuation-v1", cycle.PlanningFingerprint, cycle.TechnicalProposalDigest,
+                    completed = prerequisites.OrderBy(x => x.Id).Select(x => new { x.Id, x.Revision, x.SprintId }) }))) { PrerequisiteCompleted = true };
+        }
         var stories = items.Where(item => item.Kind == "Story" && item.ProposalProvenance is { } provenance &&
             progress.DetailedStoryKeys.Contains(provenance.ProposalItemKey, StringComparer.Ordinal)).ToArray();
         if (stories.Length != progress.DetailedStoryKeys.Count || stories.Length == 0 ||

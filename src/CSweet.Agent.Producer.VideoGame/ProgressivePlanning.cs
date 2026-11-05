@@ -10,10 +10,14 @@ namespace CSweet.Agent.Producer.VideoGame;
 public sealed partial class SpecialistAgent
 {
     internal sealed record ProgressiveRequest(string Phase, string DirectionsDigest, string? ScopeKey = null,
-        string? OutlineDigest = null, string? StoryKey = null, IReadOnlyList<string>? DetailedStoryKeys = null);
+        string? OutlineDigest = null, string? StoryKey = null, IReadOnlyList<string>? DetailedStoryKeys = null, string? ReviewDirectionsDigest = null, IReadOnlyList<string>? ManagerDirections = null);
     internal sealed record ProgressiveCoverage(string SourceKey, IReadOnlyList<string> ProposalKeys);
     internal sealed record ProgressiveEvidence(string Phase, string ScopeKey, string OutlineDigest, string DirectionsDigest,
-        IReadOnlyList<string> DetailedStoryKeys, IReadOnlyList<ProgressiveCoverage> ScopeCoverage);
+        IReadOnlyList<string> DetailedStoryKeys, IReadOnlyList<ProgressiveCoverage> ScopeCoverage)
+    {
+        public string? ReviewedDirectionsDigest { get; init; }
+        public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
+    }
     private sealed record ProgressiveScopePlan(IReadOnlyList<GameProposedWorkItemV1> DeliveryItems,
         IReadOnlyList<string> FeasibilityFindings, IReadOnlyList<string> TechnicalConstraints, IReadOnlyList<string> OpenFeasibilityDecisions)
     {
@@ -115,12 +119,19 @@ public sealed partial class SpecialistAgent
         ProgressivePlanningProgress? progress, AgentRuntimeContext context, CancellationToken token)
     {
         var evidence = ReadProgressiveEvidence(outlineArtifact)!;
+        var directionReview = evidence.Phase == "Direction" ? evidence : null;
+        if (directionReview is not null) evidence = evidence with { Phase = "Outline", DetailedStoryKeys = [] };
         progress ??= new(evidence.ScopeKey, evidence.OutlineDigest, evidence.DirectionsDigest, []);
         try
         {
             ValidateProgressiveProposal(outline, evidence, outline, evidence, [], null);
-            IReadOnlyList<string>? reviewedQuestions = null;
-            var needsAuthorityReconciliation = false;
+            if (directionReview is not null && (directionReview.ReviewedDirectionsDigest?.Length != 64 ||
+                directionReview.ReviewedAuthorityQuestions is null || directionReview.ReviewedAuthorityQuestions.Any(x =>
+                    !outline.OpenFeasibilityDecisions.Contains(x, StringComparer.Ordinal))))
+                throw new InvalidOperationException("Direction review has no exact question and direction binding.");
+            IReadOnlyList<string>? reviewedQuestions = evidence.ReviewedAuthorityQuestions;
+            var needsAuthorityReconciliation = directionReview is not null &&
+                progress.ReviewedDirectionsDigest != directionReview.ReviewedDirectionsDigest;
             if (progress.ScopeKey != evidence.ScopeKey || progress.OutlineDigest != evidence.OutlineDigest)
             {
                 if (progress.RefinementSessionId is not { } retainedSessionId || evidence.DirectionsDigest == progress.DirectionsDigest)
@@ -171,6 +182,16 @@ public sealed partial class SpecialistAgent
             var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
             var published = ProgressivePublishedItems(board.Items, current.DeliveryItems.Select(x => x.ProposalKey).ToHashSet(StringComparer.Ordinal));
             var leaves = current.DeliveryItems.Where(x => !IsScopeContainer(x)).ToArray();
+            // A prerequisite sprint can finish while this Story still has unscheduled work.
+            // Reconcile that same immutable proposal; aggregate acceptance only gates the NEXT Story.
+            if (progress.ScheduledSprintSequence.HasValue)
+            {
+                var sprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
+                if (!sprints.Any(x => x.Status == "Active") &&
+                    sprints.Any(x => x.Status == "Completed" && (x.Sequence ?? 0) >= (progress.ScheduledSprintSequence ?? 1)) &&
+                    leaves.Any(x => published.TryGetValue(x.ProposalKey, out var pending) && IsSprintCandidate(pending, sprints)))
+                    return new(progress, currentSession) { ReviewedAuthorityQuestions = reviewedQuestions };
+            }
             if (leaves.Any(x => !published.TryGetValue(x.ProposalKey, out var item) || item.Status is not ("Done" or "Completed")))
                 return new(progress, Waiting: "The current increment is published; estimates, QA readiness and execution remain authoritative. Later Stories retain their approved scope without premature detail.");
             if (leaves.Length > 0 && !HasAcceptedProgressiveIncrements(outline.DeliveryItems, progress.DetailedStoryKeys, board.Items,
@@ -182,7 +203,8 @@ public sealed partial class SpecialistAgent
                 return new(progress, Complete: true);
             var next = NextProgressiveStory(outline.DeliveryItems, progress.DetailedStoryKeys.ToHashSet(), completed)
                 ?? throw new InvalidOperationException("No dependency-ready Story exists. Retained scope was not removed; reconcile its dependency graph.");
-            var request = new ProgressiveRequest("Story", evidence.DirectionsDigest, evidence.ScopeKey, evidence.OutlineDigest, next, progress.DetailedStoryKeys);
+            var request = new ProgressiveRequest("Story", evidence.DirectionsDigest, evidence.ScopeKey, evidence.OutlineDigest, next, progress.DetailedStoryKeys,
+                ReviewDirectionsDigest: progress.ReviewedDirectionsDigest != evidence.DirectionsDigest ? progress.ReviewedDirectionsDigest : null);
             var session = await context.Platform.Communication.StartBoardCoordinationAsync(new(
                 Guid.Parse(technicalDirector.EmployeeId), boardId, "Refine next playable increment: " + next,
                 "Refine only this approved Story into small executable engineering/QA work; preserve the entire published scope outline and completed increments.",

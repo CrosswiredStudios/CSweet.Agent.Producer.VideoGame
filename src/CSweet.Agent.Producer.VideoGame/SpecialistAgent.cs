@@ -22,7 +22,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     public override string AgentId => "com.csweet.video-game-producer";
     private const string PlanningCommitmentPrefix = "producer-planning:";
     internal const string InitialHiringWait = "The initial Technical Director, engineering, and QA coverage proposal is awaiting hiring. Team-board planning starts after technical leadership is hired.";
-    internal const string PlanningRecoveryMarker = "Producer planning recovery generation 2";
+    internal const string PlanningRecoveryMarker = "Producer planning recovery generation 3";
     private const string EstimationCommitmentPrefix = "producer-estimation:";
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
@@ -474,12 +474,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         }
         if (message.EventType is "com.csweet.project-approval.decided.v1" or "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
             "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1" or
-            WorkstreamEventNames.DecisionDecidedV1 or WorkstreamEventNames.SprintChangedV1 or
+            "sprint.completed" or WorkstreamEventNames.DecisionDecidedV1 or WorkstreamEventNames.SprintChangedV1 or
             WorkstreamEventNames.ExecutionChangedV1 or WorkDeliveryCapabilities.Changed or SourceControlEvents.RepositoryProvisioningChanged or ManagementEvents.ResourceChangeDecided or
             "com.csweet.workstream.project-setup.v1")
         {
             await HandleAttentionReviewAsync(new AgentAttentionReviewContext(message.EventId, message.OccurredAt, message.OccurredAt.AddMinutes(5), message.EventType), context, cancellationToken);
-            return;
+            if (message.EventType != "sprint.completed") return;
         }
         if (message.EventType != ManagementEvents.ReviewDue && message.EventType != "sprint.completed" &&
             message.EventType != ManagementEvents.ResourceChangeDecided)
@@ -542,6 +542,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             x.ArchivedAt is null && string.Equals(x.CorrelationId, correlationId, StringComparison.Ordinal));
         if (existing is not null)
         {
+            var prerequisiteCleared = progressiveContinuation is { Fingerprint: not null, PrerequisiteCompleted: true };
             var acceptanceCleared = progressiveContinuation?.Fingerprint is not null &&
                 existing.Status == PersonalTodoStatuses.Running && existing.Wait is { } acceptanceWait &&
                 (acceptanceWait.Reason.StartsWith("The current increment", StringComparison.Ordinal) ||
@@ -553,6 +554,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 if (progressiveContinuation.Fingerprint is not { } acceptedFingerprint ||
                     !await AuthorizeContinuationRecoveryAsync(existing, acceptedFingerprint, context, cancellationToken)) return existing;
             }
+            if (prerequisiteCleared && existing.Status == PersonalTodoStatuses.Blocked &&
+                existing.BlockReason?.Contains(PlanningDecisionBlockMarker, StringComparison.Ordinal) == true &&
+                !await AuthorizeContinuationRecoveryAsync(existing, progressiveContinuation!.Fingerprint!, context, cancellationToken)) return existing;
             // Board notifications are wake hints. They must not erase a recorded
             // retry deadline, even when recovery itself changed the board revision.
             var hiringCleared = hiringDependencyReady &&
@@ -564,7 +568,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existingContext.SourceFingerprint == workContext.SourceFingerprint;
             var amendmentCleared = scopeAmendmentReady && correlationId.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal) &&
                 existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
-            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared && !acceptanceCleared && !amendmentCleared)
+            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared && !acceptanceCleared && !amendmentCleared && !prerequisiteCleared)
                 return existing;
             // A terminal planning conflict must not be requeued on every attention tick.
             // A later recovery generation may reassess it once with new repair logic.
@@ -575,7 +579,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) ||
                  correlationId.StartsWith(EstimationCommitmentPrefix, StringComparison.Ordinal)) &&
                 existing.BlockReason?.Contains(PlanningDecisionBlockMarker, StringComparison.Ordinal) == true &&
-                await PlanningDecisionsUnchangedAsync(existing, workContext, context, cancellationToken))
+                !prerequisiteCleared && await PlanningDecisionsUnchangedAsync(existing, workContext, context, cancellationToken))
                 return existing;
             var waiting = existing.Status == PersonalTodoStatuses.Running && existing.Wait is not null;
             if (existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || waiting)
@@ -751,7 +755,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (roleRepair is null ? RoleBoundary : RoleRepairObjective(roleRepair)),
             "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken,
             roleRepair is null ? null : RoleRepairContext(roleRepair), reusePrior ? priorCycle?.TechnicalDirectorSessionId : null,
-            progressivePlanning: roleRepair is null && designer is null, roleRepair: roleRepair);
+            progressivePlanning: roleRepair is null && designer is null, roleRepair: roleRepair, retainedProgress: priorCycle?.Progressive);
         if (roleRepair is not null && !roleRepairPublished && designer is null)
             technicalSession = await EnsureRoleRepairCorrectionAsync(roleRepair, technicalSession, cycle, memberDigests, managerDirections, context, cancellationToken);
         var designerSession = designer is null ? technicalSession : await EnsurePlanningSessionAsync(designer, boardId, cycle,
@@ -797,7 +801,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Blocked("The completed planning sessions do not contain current, correlated proposal artifacts.");
 
         var progressiveMode = ReadProgressiveEvidence(technicalArtifact!) is not null;
-        var authorityReviewDirectionsDigest = ReadProgressiveEvidence(technicalArtifact!)?.DirectionsDigest;
+        var authorityReviewDirectionsDigest = ReadProgressiveEvidence(technicalArtifact!) is { } reviewEvidence
+            ? reviewEvidence.ReviewedDirectionsDigest ?? reviewEvidence.DirectionsDigest : null;
         IReadOnlyList<string>? reviewedAuthorityQuestions = null;
         if (progressiveMode && roleRepair is null && designer is null)
         {
@@ -906,10 +911,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 await context.Platform.PersonalTodo.RequeueAsync(new(estimation.Id, estimation.Revision,
                     BoundedMutationKey($"scope-readiness-recovered:{estimation.Id:N}:{estimation.Revision}")), cancellationToken);
         }
-        if (progressiveMode && questions.Count == 0 && priorCycle.Progressive is { } progress)
+        if (progressiveMode && priorCycle.Progressive is { } progress)
         {
             await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle with {
-                Progressive = progress with { ScheduledArtifactDigest = technicalArtifact!.Digest }, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken);
+                Progressive = progress with { ScheduledArtifactDigest = technicalArtifact!.Digest,
+                    ScheduledSprintSequence = PlanningSprintSequence(await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken)) }, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken);
+            if (questions.Count > 0) return PersonalTodoResult.Blocked(DescribePlanningBlocker(questions, currentPlanningDecisions,
+                workstreamId, handoff.RevisionDigest, roster.LeadDisplayName));
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 "The detailed increment is published and queued for estimates/readiness. Later Stories remain visible approved scope and will be refined after this increment completes.");
         }
@@ -1180,8 +1188,11 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         IReadOnlyList<string> managerDirections,
         AgentRuntimeContext context,
         CancellationToken cancellationToken, string? additionalContext = null, Guid? existingSessionId = null, bool progressivePlanning = false,
-        RoleRepairRequest? roleRepair = null)
+        RoleRepairRequest? roleRepair = null, ProgressivePlanningProgress? retainedProgress = null)
     {
+        var reviewDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(managerDirections));
+        var directionReview = progressivePlanning && retainedProgress is not null &&
+            retainedProgress.DirectionsDigest != reviewDigest;
         if (!Guid.TryParse(teammate.EmployeeId, out var targetUserId))
             throw new InvalidOperationException($"{subject} target has no authoritative organization-user identity.");
         if (existingSessionId is { } retainedId)
@@ -1195,10 +1206,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 retained.BoardSource?.BoardId == boardId && retainedCycle is not null &&
                 retainedCycle.PlanningFingerprint == cycle.PlanningFingerprint && retainedCycle.ApprovedPackageId == cycle.ApprovedPackageId &&
                 retainedCycle.ApprovedPackageVersion == cycle.ApprovedPackageVersion && retainedCycle.ApprovedPackageDigest == cycle.ApprovedPackageDigest &&
-                (!progressivePlanning || artifact?.Payload.TryGetProperty("progressivePlanning", out _) == true))
+                (!progressivePlanning || artifact?.Payload.TryGetProperty("progressivePlanning", out _) == true) &&
+                (!directionReview || ReadProgressiveEvidence(artifact!) is { Phase: "Direction" } exactReview &&
+                    exactReview.ReviewedDirectionsDigest == reviewDigest && exactReview.ScopeKey == retainedProgress!.ScopeKey))
                 return retained;
         }
-        var message = $"Planning cycle {cycle.PlanningFingerprint}. {objective} Return final artifact type {expectedArtifactType}.";
+        var message = $"Planning cycle {cycle.PlanningFingerprint}. {objective} Return final artifact type {expectedArtifactType}. " +
+            "The exact supplied source package is accepted for planning; historical pending-approval text does not reopen its approval. Delegated design work and future evidence are work, not new approval requirements.";
         if (!string.IsNullOrWhiteSpace(additionalContext)) message += "\n" + additionalContext;
         if (managerDirections.Count > 0)
             message += " Incorporate these recorded Video Game Director decisions into the proposal and close only the questions they resolve: " +
@@ -1221,10 +1235,15 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 ["Proposal binds the exact planning cycle.", "Every leaf has testable acceptance criteria and one accountable role.",
                     "Required and preferred skills are explicit; estimates are not invented."],
                 message, sessionKey, roleRepair is null ? PlanningArtifact(cycle, members) : RoleRepairArtifact(cycle, members, roleRepair));
-        if (progressivePlanning)
+        if (directionReview)
+            start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + ":direction-review-v1"),
+                InitialMessage = "Review the recorded direction against the existing frozen scope. Do not regenerate containers, dependencies, coverage or task briefs. " + start.InitialMessage,
+                Artifact = ProgressiveRequestArtifact(cycle, members, new("Direction", retainedProgress!.DirectionsDigest,
+                    retainedProgress.ScopeKey, retainedProgress.OutlineDigest, DetailedStoryKeys: [], ReviewDirectionsDigest: reviewDigest, ManagerDirections: managerDirections)) };
+        else if (progressivePlanning)
             start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + ":progressive-v1"),
                 InitialMessage = "Publish the complete approved scope as an outline first. Do not detail the entire game. " + start.InitialMessage,
-                Artifact = ProgressiveRequestArtifact(cycle, members, new("Outline", ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(managerDirections)))) };
+                Artifact = ProgressiveRequestArtifact(cycle, members, new("Outline", reviewDigest)) };
         var session = await StartAsync(start);
         if (NeedsPlanningContextRecovery(session))
             session = await StartAsync(

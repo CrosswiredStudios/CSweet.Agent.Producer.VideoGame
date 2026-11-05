@@ -1,4 +1,4 @@
-# Producer 6.2.0
+# Producer 6.2.1
 
 Production-brief refinement permits at most two additional exact-review corrections after the four ordinary drafts. The second correction requires a changed candidate and evidenced resolution of an earlier blocker. Repeated questions, unchanged blockers, replay and foreign or stale replies cannot reset the allowance. Staffing still requires Producer readiness, independent creative review and exact Director acceptance.
 
@@ -448,3 +448,11 @@ Upgrade recovery checks up to 32 recent direct conversations, with up to 200 ret
 ## Existing project onboarding
 
 Preserve the exact existing-project identity and revision from the Director-authorized project foundation template through model drafting and reviewed setup. Existing pitch, staffing, creative review and execution gates remain required.
+
+## Planning and runner flow (6.2.1)
+
+Retain the frozen progressive outline and refined tasks when manager direction changes. Ask the Technical Director for a candidate-bound direction assessment instead of another whole-game outline. Recover the prior generation-2 planning block once through ordinary attention discovery; repeated current-generation failures stay parked.
+
+A completed prerequisite sprint now wakes planning and schedules estimates/readiness for remaining tasks in the same increment. Completion does not bypass independent QA, change accepted scope, or authorize the next Story before aggregate acceptance. Duplicate wakes use a revision-bound continuation receipt.
+
+Install Technical Director 6.0.3 before Producer 6.2.1 through published releases and Installed Agents. No new capabilities, package-contract changes, database migration, or installed-payload edits are required.

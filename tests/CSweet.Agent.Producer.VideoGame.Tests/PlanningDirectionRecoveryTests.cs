@@ -7,6 +7,33 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class PlanningDirectionRecoveryTests
 {
     [Fact]
+    public async Task Changed_direction_requests_one_bound_assessment_of_the_retained_outline()
+    {
+        var cycle = new GameProductionPlanningCycleV1(Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(), "profile",
+            Guid.NewGuid(), 1, "package", "concept", "vision", new string('a', 64));
+        var target = Guid.NewGuid(); var installation = Guid.NewGuid();
+        var member = new AgentTeammate(target.ToString(), "Victor", "Agent", null, null, "Peer", "Online") { AgentInstallationId = installation };
+        var progress = new ProgressivePlanningProgress("technical-progressive:" + new string('a', 64), new string('b', 64), new string('c', 64), ["retained-story"]);
+        var requests = new List<StartBoardCoordinationRequest>(); var person = new AgentCoordinationParticipant(target, installation, "Victor", "Technical Director");
+        var runtime = new AgentTestRuntime().RegisterCapability<StartBoardCoordinationRequest, AgentCoordinationSession>(
+            CommunicationCapabilities.CoordinationStartBoard, (r, _) => {
+                requests.Add(r); return Task.FromResult(new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty,
+                    Guid.Empty, person, person, "Direction", "Assess", [], "Active", 1, 1, target, false, null,
+                    DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, [])); });
+        for (var i = 0; i < 2; i++) await SpecialistAgent.EnsurePlanningSessionAsync(member, cycle.BoardId, cycle, "Direction", "Assess direction",
+            "video-game.production.technical-delivery-proposal.v1", [], ["Keep idle calm within approved scope."], runtime.CreateContext(), default,
+            progressivePlanning: true, retainedProgress: progress);
+        Assert.Equal(requests[0].IdempotencyKey, requests[1].IdempotencyKey);
+        var request = requests[0].Artifact!.Payload.GetProperty("progressivePlanning");
+        Assert.Equal("Direction", request.GetProperty("phase").GetString());
+        Assert.Equal(progress.ScopeKey, request.GetProperty("scopeKey").GetString());
+        Assert.Equal(progress.OutlineDigest, request.GetProperty("outlineDigest").GetString());
+        Assert.Equal(progress.DirectionsDigest, request.GetProperty("directionsDigest").GetString());
+        Assert.Equal(64, request.GetProperty("reviewDirectionsDigest").GetString()!.Length);
+        Assert.DoesNotContain("Publish the complete", requests[0].InitialMessage);
+    }
+
+    [Fact]
     public async Task RetainedExactCompletedProposalIsReusedWithoutStartingAnotherSession()
     {
         var target = Guid.NewGuid(); var board = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
