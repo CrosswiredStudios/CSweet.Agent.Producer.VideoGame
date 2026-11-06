@@ -107,8 +107,8 @@ public sealed partial class SpecialistAgent
                         ["approved-scope", "resources", "business-constraints"],
                         ["delivery-planning", "capacity", "dependencies", "forecasts"],
                         AgentInteractionResponseContracts.DeliverableOrClarification) { CounterpartRoleKey = "game-director" })),
-                new ChatMessage(ChatRole.User, $"Accepted pitch:\n{pitch.Revision.Content}\nAccepted GDD:\n{gdd.Revision.Content}\nCurrent shared draft:\n{ProductionSources.WorkingBrief(priorContent)}\nLatest manager guidance:\n{reply?.Guidance}\nExact review issues:\n{JsonSerializer.Serialize(reply?.Correction, PitchProtocol.Json)}\nLatest creative edits:\n{reply?.SuggestedMarkdown}\nRecent conversation (earlier decisions are in the shared draft):\n{JsonSerializer.Serialize(request.Transcript.TakeLast(8).Select(x => new { x.SpeakerOrganizationUserId, Content = x.Content[..Math.Min(x.Content.Length, 4000)] }), PitchProtocol.Json)}")
-            ], new ChatOptions { MaxOutputTokens = Math.Min(ResolveOutputTokens(Settings), 16_384) }, token);
+                new ChatMessage(ChatRole.User, $"Accepted pitch:\n{pitch.Revision.Content}\nAccepted GDD:\n{gdd.Revision.Content}\nCurrent shared draft:\n{ProductionSources.WorkingBrief(priorContent)}\nLatest manager guidance:\n{reply?.Guidance}\nExact review issues:\n{JsonSerializer.Serialize(reply?.Correction, PitchProtocol.Json)}\nLatest creative edits:\n{reply?.SuggestedMarkdown}\nConversation:\n{JsonSerializer.Serialize(request.Transcript.Select(x => new { x.SpeakerOrganizationUserId, x.Content }), PitchProtocol.Json)}")
+            ], new ChatOptions { MaxOutputTokens = ResolveOutputTokens(Settings) }, token);
             var result = PitchProtocol.ParseProducerReview(response.Text);
             if (result is null || result.Questions is null || result.Questions.Count > 12 ||
                 result.Questions.Any(string.IsNullOrWhiteSpace) || string.IsNullOrWhiteSpace(result.Rationale) ||

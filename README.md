@@ -1,4 +1,4 @@
-# Producer 6.3.2
+# Producer 6.3.3
 
 Project-proposal resumes retain the first submission ordinal and freeze the exact command before dispatch. Later collaboration turns and cold restarts reuse its original idempotency key, accepted scope and manager/team bindings, including when a successful submission's response was lost. Explicit manager revision decisions retain separate proposal identities.
 
@@ -42,7 +42,7 @@ evidence and follow bounded retry or management escalation. No new permissions
 or event subscriptions are requested. Deploy with the matching platform recovery
 validation and sprint-preflight changes.
 
-`HandleManagerMessageAsync` acknowledges authenticated teammate check-ins and reconciles authoritative readiness without model inference. Manager setup decisions remain restricted to reporting authority. Manager responses use a 2048-token ceiling; full planning documents keep their configured budget. `RefinePitchAsync` supplies conversation text, the latest creative edits and the working brief while retaining accepted-source evidence in the saved document. Platform planning-cycle wakes and reconnect recovery release deferred commitments without waiting for the five-minute attention review.
+`HandleManagerMessageAsync` acknowledges authenticated teammate check-ins and reconciles authoritative readiness without model inference. Manager setup decisions remain restricted to reporting authority. All responses use the installation's configured model capacity; manager chat and pitch refinement have no smaller task token ceiling. `RefinePitchAsync` supplies conversation text, the latest creative edits and the working brief while retaining accepted-source evidence in the saved document. Platform planning-cycle wakes and reconnect recovery release deferred commitments without waiting for the five-minute attention review.
 
 `ReconcileSprintReadinessAsync` finalizes the selected executable leaves before sprint preflight through `FinalizeSprintDeliveriesAsync`. It preserves the current planning requirements, acceptance criteria, constraints, dependencies, accountable owner and exact stage assignments. Repository selection reuses an existing sprint binding or the approved team's sole repository option with a default branch; ambiguous or incomplete prerequisites remain pending. Existing delivery specifications are preserved. The host still validates authority, approvals and revisions, and the sprint starts only after authoritative preflight passes. Reconnect and retry resume partial finalization without duplicating delivery.
 
@@ -150,8 +150,8 @@ The installation settings **Maximum context-window tokens** (`maxContextWindowTo
 planning ceiling and per-response output budget for pitch refinement, delivery review, and
 specialist work. The output budget includes model reasoning and must remain below the context
 ceiling. The agent imposes no fixed maximum, so both values can match the selected model. These
-settings do not enlarge the model's actual context window or override the provider profile's
-authoritative execution ceiling.
+settings must match the model's actual serving capacity. The matching platform ignores legacy
+per-task output hints and provider-profile output defaults, retaining the saved installation capacity.
 
 ## Install
 

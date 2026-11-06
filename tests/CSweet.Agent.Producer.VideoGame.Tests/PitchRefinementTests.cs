@@ -10,6 +10,36 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class PitchRefinementTests
 {
     [Fact]
+    public async Task Refinement_retains_early_guidance_and_long_message_tails_without_a_task_output_cap()
+    {
+        var f = new Fixture();
+        const string first = "Early direction must remain available";
+        const string tail = "Critical direction beyond the old 4000 character cutoff";
+        f.Runtime.RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (request, _) =>
+        {
+            Assert.Equal(JsonValueKind.Null, request.GetProperty("maxOutputTokens").ValueKind);
+            var prompt = request.GetProperty("messages")[1].GetProperty("text").GetString()!;
+            Assert.Contains(first, prompt);
+            Assert.Contains(tail, prompt);
+            return Task.FromResult(JsonSerializer.SerializeToElement(new { role = "assistant",
+                text = JsonSerializer.Serialize(new ProducerReview(true, [], "Full scope considered.", Markdown), PitchProtocol.Json) }));
+        });
+        var initial = f.Request(1);
+        var history = Enumerable.Range(0, 12).Select(i => new AgentCoordinationTurn(Guid.NewGuid(), i + 1,
+            f.Director, "Continue", i == 0 ? first + new string('x', 5000) + tail : "Later clarification " + i,
+            DateTimeOffset.UtcNow, null)).ToArray();
+        var agent = new SpecialistAgent();
+        var configured = await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(), AgentConfigurationCapabilities.Update,
+            JsonSerializer.SerializeToElement(new UpdateAgentConfigurationRequest(new Dictionary<string, JsonElement> {
+                ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid()),
+                ["llmModel"] = JsonSerializer.SerializeToElement("test-model") }))), f.Context, default);
+        Assert.True(configured.Succeeded, configured.Error);
+        var result = await agent.HandleCoordinationTurnAsync(initial with { Transcript = [..initial.Transcript, ..history] }, f.Context, default);
+        Assert.Equal("Continue", result.Disposition);
+        Assert.NotNull(result.Artifact);
+    }
+
+    [Fact]
     public async Task FourReadyDraftsPermitExactCreativeCorrectionAndReplayKeepsOneSourceDocument()
     {
         var f = new Fixture();
@@ -273,7 +303,7 @@ public sealed class PitchRefinementTests
         public List<PersonalTodoItem> Todos { get; } = [];
         public List<ResourceChangeProposalRequest> StaffingProposals { get; } = [];
         private Guid? Board => null;
-        private AgentTestRuntime Runtime { get; set; } = null!;
+        public AgentTestRuntime Runtime { get; private set; } = null!;
         private bool TechnicalDirectorHired;
         private Guid TechnicalDirector { get; } = Guid.NewGuid();
         public List<WorkBoardSummary> TeamBoards { get; } = [];

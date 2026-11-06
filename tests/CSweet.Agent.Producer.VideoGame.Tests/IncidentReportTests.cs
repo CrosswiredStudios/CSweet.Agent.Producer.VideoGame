@@ -45,7 +45,7 @@ public sealed class IncidentReportTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Shared_reporting_is_bounded_tool_free_and_does_not_cache_failed_execution_promises(bool invalid)
+    public async Task Shared_reporting_retains_full_evidence_without_tools_or_cached_execution_promises(bool invalid)
     {
         var f = new Fixture(invalid);
         var first = await f.Agent.GenerateIncidentOwnerReportAsync(f.Review, f.Context, default);
@@ -53,9 +53,12 @@ public sealed class IncidentReportTests
         ManagerIncidentCoordinator.ValidateReport(first);
         if (!invalid) Assert.Equal("Planning needs task detail", first.Title);
         var request = Assert.Single(f.Requests);
-        Assert.Equal(32768, request.GetProperty("maxOutputTokens").GetInt32());
+        Assert.Equal(JsonValueKind.Null, request.GetProperty("maxOutputTokens").ValueKind);
         Assert.True(!request.TryGetProperty("tools", out var tools) || tools.ValueKind == JsonValueKind.Null || tools.GetArrayLength() == 0);
-        Assert.True(request.GetProperty("messages").EnumerateArray().Sum(x => x.GetProperty("text").GetString()!.Length) < 20_000);
+        var evidence = request.GetProperty("messages")[1].GetProperty("text").GetString()!;
+        Assert.Contains("critical-fact-24", evidence);
+        Assert.Contains("critical-limitation-tail", evidence);
+        Assert.Equal(25, JsonDocument.Parse(evidence).RootElement.GetProperty("current").GetArrayLength());
         Assert.Empty(f.States);
         await f.Agent.GenerateIncidentOwnerReportAsync(f.Review, f.Context, default);
         Assert.Equal(2, f.Calls);
@@ -99,9 +102,9 @@ public sealed class IncidentReportTests
             var now = DateTimeOffset.UtcNow;
             var incident = new ManagementIncident(Guid.NewGuid(), Guid.NewGuid(), self, self, "Open", "Planning interrupted", null,
                 now, now, now.AddMinutes(15), 3, "Recorded failure", "Unknown", "Recovery unconfirmed", "Check planning", []);
-            var evidence = Enumerable.Range(0, 100).Select(i => new ProjectDiagnosticEvidence("CurrentCollaboration", Guid.NewGuid(), now,
-                "Planning: Active. " + new string('x', 100_000))).ToArray();
-            Review = new(incident, new(evidence, 100, [new string('x', 100_000)]) {
+            var evidence = Enumerable.Range(0, 25).Select(i => new ProjectDiagnosticEvidence("CurrentCollaboration", Guid.NewGuid(), now,
+                "Planning: Active. " + new string('x', 2000) + "critical-fact-" + i)).ToArray();
+            Review = new(incident, new(evidence, 100, [new string('x', 2000) + "critical-limitation-tail"]) {
                 CurrentState = new(new string('A', 64), "Game", evidence, []) }, "stable-action");
             var runtime = new AgentTestRuntime()
                 .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
