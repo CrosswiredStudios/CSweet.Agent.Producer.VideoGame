@@ -1,4 +1,6 @@
-# Producer 6.2.4
+# Producer 6.3.0
+
+SDK 5.11.0 advances durable corrective work before status reporting. Retained delivery findings produce manager-owned handoffs; an unambiguous single-repository correction creates scoped engineering work, a separate repair sprint and a new acceptance graph with technical review before QA. Ambiguous ownership, missing grants and failed preflight retain explicit planning waits. The shared reporting-only path replaces the role-local 1,600-token call and fallback cache. No completed repair is claimed without independent QA and fresh acceptance.
 
 Production-brief refinement permits at most two additional exact-review corrections after the four ordinary drafts. The second correction requires a changed candidate and evidenced resolution of an earlier blocker. Repeated questions, unchanged blockers, replay and foreign or stale replies cannot reset the allowance. Staffing still requires Producer readiness, independent creative review and exact Director acceptance.
 
@@ -162,7 +164,7 @@ project/manifest version, runtime identity comes from build metadata, and releas
 the published executable before packing. If a hire reports a different approved version, update
 through Installed Agents and open a fresh hiring review; an old retry retains its reviewed package.
 
-Built with `CSweet.Agent.SDK` 5.9.0 and `CSweet.WorkManagement.Contracts` 5.1.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 5.11.0 and `CSweet.WorkManagement.Contracts` 5.3.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds

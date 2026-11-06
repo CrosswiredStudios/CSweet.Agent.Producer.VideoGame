@@ -45,7 +45,7 @@ public sealed class IncidentReportTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ReportIsOneBoundedCallPerEvidenceHashAcrossRestartIncludingInvalidOutput(bool invalid)
+    public async Task Shared_reporting_is_bounded_tool_free_and_does_not_cache_failed_execution_promises(bool invalid)
     {
         var f = new Fixture(invalid);
         var first = await f.Agent.GenerateIncidentOwnerReportAsync(f.Review, f.Context, default);
@@ -53,21 +53,13 @@ public sealed class IncidentReportTests
         ManagerIncidentCoordinator.ValidateReport(first);
         if (!invalid) Assert.Equal("Planning needs task detail", first.Title);
         var request = Assert.Single(f.Requests);
-        Assert.Equal(1600, request.GetProperty("maxOutputTokens").GetInt32());
+        Assert.Equal(32768, request.GetProperty("maxOutputTokens").GetInt32());
         Assert.True(!request.TryGetProperty("tools", out var tools) || tools.ValueKind == JsonValueKind.Null || tools.GetArrayLength() == 0);
         Assert.True(request.GetProperty("messages").EnumerateArray().Sum(x => x.GetProperty("text").GetString()!.Length) < 20_000);
-        var restarted = new SpecialistAgent(); // No provider: persisted result must be reusable.
-        var repeated = await restarted.GenerateIncidentOwnerReportAsync(f.Review with {
-            Incident = f.Review.Incident with { Revision = 99, ReportRevision = 40 }
-        }, f.Context, default);
-        Assert.Equal(JsonSerializer.Serialize(first), JsonSerializer.Serialize(repeated));
-        Assert.Equal(1, f.Calls);
-        Assert.Single(f.States);
-        await f.Agent.GenerateIncidentOwnerReportAsync(f.Review with {
-            Diagnostics = f.Review.Diagnostics with { CurrentState = f.Review.Diagnostics.CurrentState! with { Hash = new string('B', 64) } }
-        }, f.Context, default);
+        Assert.Empty(f.States);
+        await f.Agent.GenerateIncidentOwnerReportAsync(f.Review, f.Context, default);
         Assert.Equal(2, f.Calls);
-        Assert.Equal(2, f.States.Count);
+        Assert.Empty(f.States);
     }
 
     [Fact]

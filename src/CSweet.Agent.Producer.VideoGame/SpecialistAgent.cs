@@ -248,6 +248,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         foreach (var entry in portfolio.Workstreams)
         {
             var workstream = entry.Workstream;
+            if (workstream.AccountableManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId && !RecoveryProjects(context).Contains(workstream.Id))
+                await DeliveryCorrectionCoordinator.ReconcileProjectAsync(workstream.Id, context, cancellationToken);
             var recoveryBoard = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
             if (recoveryBoard is not null)
                 await QueueWorkflowRecoveryAsync(recoveryBoard, workstream.ProfileDefinitionDigest ?? "", context, cancellationToken);

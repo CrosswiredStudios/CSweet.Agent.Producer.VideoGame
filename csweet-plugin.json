@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.2.4",
+  "version": "6.3.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -854,6 +854,12 @@
       "name": "platform.management.incident.resolution.read.v1",
       "scope": "organization",
       "purpose": "Read the authenticated human recovery choice bound to this manager and its durable conversation turn.",
+      "modelVisible": false
+    },
+    {
+      "name": "work.delivery.correction.coordinate.v1",
+      "scope": "organization",
+      "purpose": "Bind authorized corrective engineering and follow-up validation to retained delivery findings independently of reporting.",
       "modelVisible": false
     }
   ],

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <Version>6.2.4</Version>
+    <Version>6.3.0</Version>
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
   <ItemGroup>
@@ -14,9 +14,9 @@
     <Error Condition="'$(AgentManifestVersion)' != '$(Version)'" Text="Agent manifest version $(AgentManifestVersion) does not match build version $(Version). Synchronize csweet-plugin.json and the project version before building, publishing, or packing." />
   </Target>
   <ItemGroup>
-    <PackageReference Include="CSweet.WorkManagement.Contracts" Version="5.2.0" Condition="'$(UseLocalCSweetWorkManagementContracts)' != 'true'" />
+    <PackageReference Include="CSweet.WorkManagement.Contracts" Version="5.3.0" Condition="'$(UseLocalCSweetWorkManagementContracts)' != 'true'" />
     <ProjectReference Include="$(CSweetWorkManagementContractsRepositoryRoot)\src\CSweet.WorkManagement.Contracts\CSweet.WorkManagement.Contracts.csproj" Condition="'$(UseLocalCSweetWorkManagementContracts)' == 'true'" />
-    <PackageReference Include="CSweet.Agent.SDK" Version="5.9.0" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
+    <PackageReference Include="CSweet.Agent.SDK" Version="5.11.0" Condition="'$(UseLocalCSweetAgentSdk)' != 'true'" />
     <ProjectReference Include="$(CSweetAgentSdkRepositoryRoot)\\src\\CSweet.Agent.SDK\\CSweet.Agent.SDK.csproj" Condition="'$(UseLocalCSweetAgentSdk)' == 'true'" />
   </ItemGroup>
   <ItemGroup>
