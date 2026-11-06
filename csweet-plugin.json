@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.3.3",
+  "version": "6.4.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -861,6 +861,18 @@
       "scope": "organization",
       "purpose": "Bind authorized corrective engineering and follow-up validation to retained delivery findings independently of reporting.",
       "modelVisible": false
+    },
+    {
+      "name": "platform.resource.read.v1",
+      "scope": "organization",
+      "purpose": "Request, review or observe durable manager-approved project resource fulfillment.",
+      "modelVisible": false
+    },
+    {
+      "name": "platform.resource.decide.v1",
+      "scope": "organization",
+      "purpose": "Request, review or observe durable manager-approved project resource fulfillment.",
+      "modelVisible": false
     }
   ],
   "events": {
@@ -891,7 +903,8 @@
       "com.csweet.project-approval.decided.v1",
       "com.csweet.work.delegation.received.v1",
       "com.csweet.work.tracking.changed.v1",
-      "com.csweet.management.incident.owner-report-requested.v1"
+      "com.csweet.management.incident.owner-report-requested.v1",
+      "com.csweet.resource.changed.v1"
     ]
   },
   "configuration": [

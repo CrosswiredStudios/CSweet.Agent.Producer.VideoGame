@@ -474,7 +474,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             await HandleOnboardedAsync(message, context, cancellationToken);
             return;
         }
-        if (message.EventType is "com.csweet.project-approval.decided.v1" or "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
+        if (message.EventType is ResourceCapabilities.Changed or "com.csweet.project-approval.decided.v1" or "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
             "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1" or
             "sprint.completed" or WorkstreamEventNames.DecisionDecidedV1 or WorkstreamEventNames.SprintChangedV1 or
             WorkstreamEventNames.ExecutionChangedV1 or WorkDeliveryCapabilities.Changed or SourceControlEvents.RepositoryProvisioningChanged or ManagementEvents.ResourceChangeDecided or

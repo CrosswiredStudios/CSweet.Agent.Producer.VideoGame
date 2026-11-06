@@ -1,4 +1,4 @@
-# Producer 6.3.3
+# Producer 6.4.0
 
 Project-proposal resumes retain the first submission ordinal and freeze the exact command before dispatch. Later collaboration turns and cold restarts reuse its original idempotency key, accepted scope and manager/team bindings, including when a successful submission's response was lost. Explicit manager revision decisions retain separate proposal identities.
 
@@ -468,3 +468,9 @@ Install Technical Director 6.0.3 before Producer 6.2.1 through published release
 - Wait for every requested role estimate before forming the candidate QA-readiness request, avoiding repeated subset readiness assessments.
 
 Update Engineer 4.1.13, QA 5.4.10 and Technical Director 6.0.4 first; update Producer last to enable retained-stage recovery. New plans use Code-task review stages instead of mandatory review-only siblings. Existing published tickets/history are not silently cancelled by an agent update.
+
+Project build capacity uses durable resource fulfillment. The Director delegates the requirement
+to technical leadership; the Technical Director requests a project-scoped exact plan; the Producer
+reviews it within current authority. Published provider installation and real certification run
+as host-owned work. Resource-change events wake continuation; attention reads recover missed wakes.
+An approval is not a completed installation or a passing build.
