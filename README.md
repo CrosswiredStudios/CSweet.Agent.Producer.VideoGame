@@ -1,6 +1,6 @@
-# Producer 6.3.0
+# Producer 6.3.1
 
-SDK 5.11.0 advances durable corrective work before status reporting. Retained delivery findings produce manager-owned handoffs; an unambiguous single-repository correction creates scoped engineering work, a separate repair sprint and a new acceptance graph with technical review before QA. Ambiguous ownership, missing grants and failed preflight retain explicit planning waits. The shared reporting-only path replaces the role-local 1,600-token call and fallback cache. No completed repair is claimed without independent QA and fresh acceptance.
+SDK 5.12.0 advances durable corrective work before status reporting. Producer now supplies its configured model for bounded source selection when several completed implementation inputs exist. The SDK requires complete finding coverage and distinctive accepted scope evidence, saves the selection before creating work, then resumes the separate corrective sprint and acceptance graph. Genuinely ambiguous evidence, missing grants and failed preflight retain explicit planning waits. No completed repair is claimed without independent QA and fresh acceptance.
 
 Production-brief refinement permits at most two additional exact-review corrections after the four ordinary drafts. The second correction requires a changed candidate and evidenced resolution of an earlier blocker. Repeated questions, unchanged blockers, replay and foreign or stale replies cannot reset the allowance. Staffing still requires Producer readiness, independent creative review and exact Director acceptance.
 
@@ -164,7 +164,7 @@ project/manifest version, runtime identity comes from build metadata, and releas
 the published executable before packing. If a hire reports a different approved version, update
 through Installed Agents and open a fresh hiring review; an old retry retains its reviewed package.
 
-Built with `CSweet.Agent.SDK` 5.11.0 and `CSweet.WorkManagement.Contracts` 5.3.0, plus the bundled video-game extension source.
+Built with `CSweet.Agent.SDK` 5.12.0 and `CSweet.WorkManagement.Contracts` 5.3.0, plus the bundled video-game extension source.
 
 
 ## Extension ownership and isolated builds

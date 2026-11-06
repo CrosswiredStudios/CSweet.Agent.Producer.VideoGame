@@ -13,6 +13,10 @@ public sealed partial class SpecialistAgent
     protected override async Task HandleManagerRecoveryAsync(AgentRuntimeContext context, CancellationToken token)
     {
         foreach (var project in RecoveryProjects(context))
-            await DeliveryCorrectionCoordinator.ReconcileProjectAsync(project, context, token);
+            await ReconcileDeliveryCorrectionAsync(project, context, token);
     }
+
+    private Task ReconcileDeliveryCorrectionAsync(Guid project, AgentRuntimeContext context, CancellationToken token) =>
+        DeliveryCorrectionCoordinator.ReconcileProjectAsync(project, context,
+            () => CreateDelegationChatClient(context, null, "delivery-correction-source"), token);
 }
