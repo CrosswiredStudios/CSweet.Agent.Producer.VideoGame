@@ -109,6 +109,8 @@ public sealed class ProjectFoundationTests
     [InlineData("inferred")]
     [InlineData("mismatched")]
     [InlineData("malformed")]
+    [InlineData("resumed")]
+    [InlineData("lost-response")]
     public async Task ProducerOwnsSubmissionAndModelCannotReplaceAuthorityIdentityOrEvidence(string identityBinding)
     {
         var inferredIdentity = identityBinding != "legacy";
@@ -130,7 +132,9 @@ public sealed class ProjectFoundationTests
                     Name = "Invented game name", AccountableManagerOrganizationUserId = Guid.NewGuid(), InitialTeamId = null, ProfileKey = "invented", Outcome = "Refined delivery scope",
                     AuthorityEnvelope = new(null, null, [], [], ["launch"], null) }, json), role = "assistant" })); })
             .RegisterCapability<WorkstreamPlanProposalV2Request, MutationResponse>("platform.workstream.plan.propose.v2", (r, _) => {
-                submitted.Add(r); return Task.FromResult(new MutationResponse(false, 0, proposalId, "Pending")); });
+                submitted.Add(r);
+                if (identityBinding == "lost-response" && submitted.Count == 1) throw new HttpRequestException("Committed proposal; response lost");
+                return Task.FromResult(new MutationResponse(false, 0, proposalId, "Pending")); });
         var context = runtime.CreateContext(identity: new(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
         var agent = new SpecialistAgent();
         var configured = await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(), AgentConfigurationCapabilities.Update,
@@ -149,7 +153,13 @@ public sealed class ProjectFoundationTests
             new(producer, Guid.NewGuid(), "Producer", "Producer"), new(manager, Guid.NewGuid(), "Director", "Director"), false,
             [new(Guid.NewGuid(), 0, manager, "Continue", "Prepare proposal", DateTimeOffset.UtcNow,
                 new("video-game.project-foundation.request.v1", "1.0", "vision-digest", 1, true, payload, "digest"))]);
-        var first = await agent.HandleCoordinationTurnAsync(request, context, default);
+        var resumed = request with { TurnOrdinal = 3, ExpectedRevision = 4, Transcript = [..request.Transcript,
+            new(Guid.NewGuid(), 1, producer, "Blocked", "Proposal response was unavailable", DateTimeOffset.UtcNow),
+            new(Guid.NewGuid(), 2, manager, "Continue", "Resume the retained command", DateTimeOffset.UtcNow)] };
+        if (identityBinding == "lost-response")
+            await Assert.ThrowsAsync<HttpRequestException>(() => agent.HandleCoordinationTurnAsync(request, context, default));
+        var first = identityBinding == "lost-response" ? await new SpecialistAgent().HandleCoordinationTurnAsync(resumed, context, default) :
+            await agent.HandleCoordinationTurnAsync(request, context, default);
         var replay = await agent.HandleCoordinationTurnAsync(request, context, default);
         Assert.Equal(1, models);
         if (identityBinding is "mismatched" or "malformed")
@@ -159,7 +169,10 @@ public sealed class ProjectFoundationTests
             Assert.Equal("Blocked", replay.Disposition);
             return;
         }
-        Assert.Equal(2, submitted.Count);
+        if (identityBinding == "resumed") await new SpecialistAgent().HandleCoordinationTurnAsync(resumed, context, default);
+        Assert.Equal(identityBinding is "resumed" or "lost-response" ? 3 : 2, submitted.Count);
+        Assert.Single(submitted.Select(s => s.IdempotencyKey).Distinct());
+        Assert.Single(submitted.Select(s => JsonSerializer.Serialize(s, json)).Distinct());
         Assert.Equal(submitted[0].IdempotencyKey, submitted[1].IdempotencyKey);
         Assert.All(submitted, x => { Assert.Equal(producer, x.AccountableManagerOrganizationUserId); Assert.Equal(team, x.InitialTeamId);
             Assert.Equal(template.Name, x.Name);

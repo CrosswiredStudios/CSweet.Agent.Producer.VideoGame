@@ -1,4 +1,6 @@
-# Producer 6.3.1
+# Producer 6.3.2
+
+Project-proposal resumes retain the first submission ordinal and freeze the exact command before dispatch. Later collaboration turns and cold restarts reuse its original idempotency key, accepted scope and manager/team bindings, including when a successful submission's response was lost. Explicit manager revision decisions retain separate proposal identities.
 
 SDK 5.12.0 advances durable corrective work before status reporting. Producer now supplies its configured model for bounded source selection when several completed implementation inputs exist. The SDK requires complete finding coverage and distinctive accepted scope evidence, saves the selection before creating work, then resumes the separate corrective sprint and acceptance graph. Genuinely ambiguous evidence, missing grants and failed preflight retain explicit planning waits. No completed repair is claimed without independent QA and fresh acceptance.
 

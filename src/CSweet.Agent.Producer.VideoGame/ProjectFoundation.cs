@@ -72,8 +72,12 @@ public sealed partial class SpecialistAgent
         if (feedback is not null && feedback.Payload.GetProperty("decisionKind").GetString() != "RequestRevision")
             return AgentCoordinationTurnResult.Completed("The project review is recorded; production waits for the authoritative created project.");
         if (request.IsFinalization) return AgentCoordinationTurnResult.Blocked("Project review remains incomplete; no project creation is assumed.");
-        var cacheKey = $"project-foundation-plan:{request.SessionId:N}:{request.TurnOrdinal}";
-        var commandKey = $"producer-project-foundation:{request.SessionId:N}:{request.TurnOrdinal}";
+        // A resumed semantic turn is still the same initial proposal. Retain the
+        // first Producer ordinal (including legacy receipts) after a blocked reply.
+        var submissionOrdinal = request.Transcript.Where(t => t.SpeakerOrganizationUserId == request.Self.OrganizationUserId)
+            .Select(t => t.Ordinal).DefaultIfEmpty(request.TurnOrdinal).Min();
+        var cacheKey = $"project-foundation-plan:{request.SessionId:N}:{submissionOrdinal}";
+        var commandKey = $"producer-project-foundation:{request.SessionId:N}:{submissionOrdinal}";
         string? revisionFeedback = null;
         if (feedback is not null)
         {
@@ -117,6 +121,11 @@ public sealed partial class SpecialistAgent
                 return AgentCoordinationTurnResult.Blocked("The inferred project identity must match the manager's project template.");
             plan = plan with { Name = template.Name, Outcome = template.Outcome };
         }
+        // Freeze the exact command before dispatch. If the platform commits but its
+        // reply is lost, later ordinals replay this command and domain key unchanged.
+        plan = await CrosswiredStudios.VideoGame.PitchCollaboration.PitchProtocol.CachedAsync(
+            $"project-foundation-command:{request.SessionId:N}:{(feedback is null ? "initial" : feedback.Payload.GetProperty("proposalId").GetGuid().ToString("N"))}",
+            context, () => Task.FromResult(plan), token);
         MutationResponse result;
         try
         {
