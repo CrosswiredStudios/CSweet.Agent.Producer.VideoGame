@@ -1,4 +1,4 @@
-# Producer 6.4.0
+# Producer 6.4.1
 
 Project-proposal resumes retain the first submission ordinal and freeze the exact command before dispatch. Later collaboration turns and cold restarts reuse its original idempotency key, accepted scope and manager/team bindings, including when a successful submission's response was lost. Explicit manager revision decisions retain separate proposal identities.
 
