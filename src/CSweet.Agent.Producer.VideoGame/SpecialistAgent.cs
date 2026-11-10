@@ -1162,7 +1162,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 "Sprint scope includes implementation that still depends on an unresolved planning decision.");
         var deliveryWait = await FinalizeSprintDeliveriesAsync(item, boardId, sprintId, context, cancellationToken);
         if (deliveryWait is not null)
-            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), deliveryWait);
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(StaffingRecheckDelay(deliveryWait, CoordinationReviewDelay)), deliveryWait);
         var start = new StartWorkSprintExecutionRequest(boardId, sprintId, sprint.Revision,
             $"producer-readiness:{sprintId:N}:{sprint.Revision}");
         var preflight = await context.Platform.Work.PreflightSprintAsync(start, cancellationToken);

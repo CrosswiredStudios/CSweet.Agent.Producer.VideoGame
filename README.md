@@ -1,4 +1,6 @@
-# Producer 6.4.3
+# Producer 6.5.0
+
+A planned sprint no longer waits forever when the platform rejects its delivery plan. The Producer uses SDK 5.16.0, which keeps generated plan names within the platform's limit. If the platform still rejects the plan, the Producer tells its manager once, with the platform's reason and the `Retry staffing: <what changed>` reply, and rechecks hourly instead of every few minutes.
 
 A newly approved project no longer fails every Producer review before its board exists. Delivery-correction reconciliation treats a denied delivery-plan read as "nothing to reconcile", so the review continues to board creation, which is what grants the Producer delivery access.
 

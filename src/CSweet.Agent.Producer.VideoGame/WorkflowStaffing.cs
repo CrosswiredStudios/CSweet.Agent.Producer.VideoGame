@@ -88,7 +88,10 @@ public sealed partial class SpecialistAgent
                     t.Status is not ("Done" or "Completed" or "Cancelled"))
                     .SelectMany(t => t.Planning?.DelegationRecommendations ?? []).ToArray();
                 await ProposeCoverageAsync(project, board.Id, roster, missing, context, token);
-                return gap.Message;
+                if (!gap.RejectedByPlatform) return gap.Message;
+                // Retrying the same rejected plan on a timer can never succeed; say so once and back off.
+                await EscalateDeliveryRejectionAsync(board, gap.Message, context, token);
+                return PlatformRejectionGapPrefix + gap.Message;
             }
         }
         var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, token);
@@ -200,7 +203,7 @@ public sealed partial class SpecialistAgent
         }
         var current = await context.Platform.Work.ReadBoardAsync(boardId, token);
         if (gap is not null || current.Items.Any(t => t.Status is "Blocked" or "Failed"))
-            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(UnhandledBlockerGrace),
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(StaffingRecheckDelay(gap, UnhandledBlockerGrace)),
                 gap is null ? "Remaining blockers require their recorded retry or management decision; recovery will recheck current state."
                     : "Workflow staffing needs attention: " + gap);
         return PersonalTodoResult.Completed("Workflow assignments reconciled; completed work preserved and stopped stages reviewed.");
