@@ -16,7 +16,20 @@ public sealed partial class SpecialistAgent
             await ReconcileDeliveryCorrectionAsync(project, context, token);
     }
 
-    private Task ReconcileDeliveryCorrectionAsync(Guid project, AgentRuntimeContext context, CancellationToken token) =>
-        DeliveryCorrectionCoordinator.ReconcileProjectAsync(project, context,
-            () => CreateDelegationChatClient(context, null, "delivery-correction-source"), token);
+    // A newly approved project has no delivery access until its board exists, and it cannot hold
+    // delivery plans or corrections before then. A denied plan read therefore means there is nothing
+    // to reconcile. It must not fail the review that goes on to create the board and its access.
+    private async Task ReconcileDeliveryCorrectionAsync(Guid project, AgentRuntimeContext context, CancellationToken token)
+    {
+        try
+        {
+            await DeliveryCorrectionCoordinator.ReconcileProjectAsync(project, context,
+                () => CreateDelegationChatClient(context, null, "delivery-correction-source"), token);
+        }
+        catch (PlatformCapabilityException ex) when (ex.Code == PlatformCapabilityErrorCode.Denied &&
+            (ex.Capability == "work.delivery.read.v1" ||
+             ex.Message.Contains("work.delivery.read.v1", StringComparison.Ordinal)))
+        {
+        }
+    }
 }

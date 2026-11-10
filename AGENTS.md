@@ -18,6 +18,10 @@ This repository contains one standalone C-Sweet protocol-v2 agent. Its purpose i
 - Agent work is delivered at least once. Honor cancellation and use stable domain idempotency keys
   for external mutations.
 - Unknown capabilities and events must fail or be ignored safely without leaking sensitive data.
+- The model never returns values code can compute or copy. Proposal authority, identity, milestone
+  stages, dates, evidence and reviewers come from the Director template in code. A platform
+  validation rejection is returned to the model once; a draft is not accepted until the platform
+  accepts it. See `csweet/docs/implementation/agent-model-output-contracts.md`.
 
 ## Verification
 

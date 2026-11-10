@@ -1,4 +1,6 @@
-# Producer 6.4.2
+# Producer 6.4.3
+
+A newly approved project no longer fails every Producer review before its board exists. Delivery-correction reconciliation treats a denied delivery-plan read as "nothing to reconcile", so the review continues to board creation, which is what grants the Producer delivery access.
 
 Project proposals keep the Director-approved staffing authority exactly as supplied. The model no longer returns or narrows `authorizedStaffingRoleKeys`, because the platform requires every active profile staffing role in the envelope. The model names each milestone only; stages, dates, evidence types and reviewers are merged from the template in code. A platform validation failure is returned to the model once for a bounded correction under separate draft and command keys, and drafts or commands cached by earlier releases have the template authority restored before dispatch.
 
