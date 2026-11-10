@@ -52,21 +52,51 @@ public sealed class ProjectProposalValidationTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task StaffingAuthorityCanBeNarrowedButNeverExpanded(bool expand)
+    public async Task ModelCannotNarrowOrExpandStaffingAuthority(bool expand)
     {
         var f = new Fixture();
         f.Template = f.Template with { AuthorityEnvelope = f.Template.AuthorityEnvelope with {
-            AuthorizedStaffingRoleKeys = ["game-engineer", "game-quality-assurance", "game-networking-engineer"] } };
+            AuthorizedStaffingRoleKeys = ["game-producer", "game-engineer", "game-quality-assurance"] } };
         var fields = JsonSerializer.SerializeToElement(f.Template, Fixture.Json).EnumerateObject().ToDictionary(x => x.Name, x => x.Value.Clone());
+        // Qwen Games 2026-11-09: the model dropped game-producer and the platform rejected the proposal.
         fields["authorizedStaffingRoleKeys"] = JsonSerializer.SerializeToElement(expand ? new[] { "unapproved-role" } : new[] { "game-engineer", "game-quality-assurance" });
         f.Responses.Enqueue(JsonSerializer.Serialize(fields));
-        if (expand) f.Responses.Enqueue(f.ValidJson);
         Assert.Equal("Continue", (await f.RunAsync()).Disposition);
         var plan = Assert.Single(f.Submissions);
-        Assert.Equal(expand ? 2 : 1, f.ModelCalls);
-        Assert.Equal(expand ? 3 : 2, plan.AuthorityEnvelope.AuthorizedStaffingRoleKeys.Count);
+        Assert.Equal(1, f.ModelCalls);
+        Assert.Equal(new[] { "game-producer", "game-engineer", "game-quality-assurance" }, plan.AuthorityEnvelope.AuthorizedStaffingRoleKeys.ToArray());
         Assert.Equal(f.Template.AccountableManagerOrganizationUserId, plan.AccountableManagerOrganizationUserId);
         Assert.Equal(f.Template.AuthorityEnvelope.HumanRequiredActionKeys, plan.AuthorityEnvelope.HumanRequiredActionKeys);
+    }
+
+    [Fact]
+    public async Task CachedNarrowedStaffingAuthorityIsRestoredBeforeDispatch()
+    {
+        var f = new Fixture();
+        f.Template = f.Template with { AuthorityEnvelope = f.Template.AuthorityEnvelope with {
+            AuthorizedStaffingRoleKeys = ["game-producer", "game-engineer"] } };
+        var narrowed = f.Template with { AuthorityEnvelope = f.Template.AuthorityEnvelope with { AuthorizedStaffingRoleKeys = ["game-engineer"] } };
+        var draftKey = f.PlanKey + ":accepted-v2";
+        f.Cache[draftKey] = f.State(draftKey, JsonSerializer.SerializeToElement(new { plan = narrowed, error = (string?)null }, Fixture.Json));
+        var commandKey = $"project-foundation-command:{f.Session:N}:initial";
+        f.Cache[commandKey] = f.State(commandKey, JsonSerializer.SerializeToElement(narrowed, Fixture.Json));
+        Assert.Equal("Continue", (await f.RunAsync()).Disposition);
+        Assert.Equal(0, f.ModelCalls);
+        Assert.Equal(new[] { "game-producer", "game-engineer" }, Assert.Single(f.Submissions).AuthorityEnvelope.AuthorizedStaffingRoleKeys.ToArray());
+    }
+
+    [Fact]
+    public async Task PlatformRejectionIsReturnedToTheModelOnceAndTheCorrectedProposalIsSubmitted()
+    {
+        var f = new Fixture { RejectFirstSubmissions = 1 };
+        f.Responses.Enqueue(f.ValidJson); f.Responses.Enqueue(f.ValidJson);
+        Assert.Equal("Continue", (await f.RunAsync()).Disposition);
+        Assert.Equal(2, f.ModelCalls);
+        Assert.Single(f.Submissions);
+        Assert.Contains("Profile is invalid.", f.ModelRequests[1]);
+        await f.RunAsync();
+        Assert.Equal(2, f.ModelCalls);
+        Assert.Equal(f.Submissions[0].IdempotencyKey, f.Submissions[1].IdempotencyKey);
     }
 
     [Fact]
@@ -190,19 +220,26 @@ public sealed class ProjectProposalValidationTests
         var f = new Fixture();
         f.Template = f.Template with { InitialMilestones = [new("launch", "Launch review", "Concept", null, ["release"], ["owner"])] };
         f.Responses.Enqueue(JsonSerializer.Serialize(f.Template with { InitialMilestones = [new("launch", "Launch", "Concept", null, [], [])] }, Fixture.Json));
-        f.Responses.Enqueue(f.ValidJson);
         await f.RunAsync();
-        Assert.Equal(2, f.ModelCalls);
-        Assert.Contains("owner", Assert.Single(Assert.Single(f.Submissions).InitialMilestones).RequiredReviewerRoleKeys);
+        // The model contributes the name only; evidence and reviewers are merged from the template in code.
+        Assert.Equal(1, f.ModelCalls);
+        var milestone = Assert.Single(Assert.Single(f.Submissions).InitialMilestones);
+        Assert.Equal("Launch", milestone.Name);
+        Assert.Contains("release", milestone.RequiredEvidenceTypeKeys);
+        Assert.Contains("owner", milestone.RequiredReviewerRoleKeys);
     }
 
     [Fact]
     public async Task PlatformValidationFailureBecomesAnActionableCollaborationBlocker()
     {
-        var f = new Fixture { RejectSubmission = true }; f.Responses.Enqueue(f.ValidJson);
+        var f = new Fixture { RejectSubmission = true }; f.Responses.Enqueue(f.ValidJson); f.Responses.Enqueue(f.ValidJson);
         var result = await f.RunAsync();
         Assert.Equal("Blocked", result.Disposition);
         Assert.Contains("platform rejected", result.Content);
+        Assert.Contains("Profile is invalid.", result.Content);
+        // Exactly one corrective generation, then a terminal blocker.
+        Assert.Equal(2, f.ModelCalls);
+        Assert.Empty(f.Submissions);
         Assert.DoesNotContain("producer-submitted-project-proposals", f.Cache.Keys);
     }
 
@@ -237,6 +274,8 @@ public sealed class ProjectProposalValidationTests
         public List<WorkstreamPlanProposalV2Request> Submissions { get; } = [];
         public int ModelCalls { get; private set; }
         public bool RejectSubmission { get; init; }
+        public int RejectFirstSubmissions { get; set; }
+        public List<string> ModelRequests { get; } = [];
         public string ModelName { get; set; } = "test";
         private readonly SpecialistAgent agent = new();
         private readonly AgentRuntimeContext context;
@@ -253,10 +292,10 @@ public sealed class ProjectProposalValidationTests
                     (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(Cache.GetValueOrDefault(r.StateKey))))
                 .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
                     (r, _) => Task.FromResult(Cache[r.StateKey] = State(r.StateKey, r.Payload)))
-                .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (_, _) => {
-                    ModelCalls++; return Task.FromResult(JsonSerializer.SerializeToElement(new { text = Responses.Dequeue(), role = "assistant" })); })
+                .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (r, _) => {
+                    ModelCalls++; ModelRequests.Add(r.GetRawText()); return Task.FromResult(JsonSerializer.SerializeToElement(new { text = Responses.Dequeue(), role = "assistant" })); })
                 .RegisterCapability<WorkstreamPlanProposalV2Request, MutationResponse>("platform.workstream.plan.propose.v2", (r, _) => {
-                    if (RejectSubmission) throw new PlatformCapabilityException("platform.workstream.plan.propose.v2", PlatformCapabilityErrorCode.ValidationFailed,
+                    if (RejectSubmission || RejectFirstSubmissions-- > 0) throw new PlatformCapabilityException("platform.workstream.plan.propose.v2", PlatformCapabilityErrorCode.ValidationFailed,
                         "Profile is invalid.", failureCode: "platform.capability.validation_failed");
                     Submissions.Add(r); return Task.FromResult(new MutationResponse(false, 0, ProposalId, "Pending")); });
             context = runtime.CreateContext(identity: new(Producer.ToString(), "Producer", null, "Producer", null, [], null, Manager.ToString(), "Director"));

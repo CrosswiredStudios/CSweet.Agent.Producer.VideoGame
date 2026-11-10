@@ -103,41 +103,56 @@ public sealed partial class SpecialistAgent
             if (accepted.Document.DocumentType != evidence.TypeKey) throw new InvalidOperationException("Approved evidence type mismatch.");
             source.Add(accepted.Revision.Content);
         }
-        var prepared = await PrepareProjectDraftAsync(
-            cacheKey, template with { IdempotencyKey = commandKey },
-            new { source, feedback = revisionFeedback }, "producer-project-proposal", context, token,
-            request.Transcript.Any(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
-                x.Disposition == AgentCoordinationDispositions.Blocked) ? $"{request.SessionId:N}:{request.TurnOrdinal}" : "initial");
-        if (prepared.Plan is null) return AgentCoordinationTurnResult.Blocked(prepared.Error!);
-        var plan = prepared.Plan;
-        // New Director handoffs bind the inferred product identity separately from delivery planning.
-        // Legacy handoffs and explicit manager revisions retain their existing proposal behavior.
-        if (feedback is null && original.Payload.TryGetProperty("projectIdentity", out var identity))
+        var recoveryEpoch = request.Transcript.Any(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId &&
+            x.Disposition == AgentCoordinationDispositions.Blocked) ? $"{request.SessionId:N}:{request.TurnOrdinal}" : "initial";
+        var commandScope = feedback is null ? "initial" : feedback.Payload.GetProperty("proposalId").GetGuid().ToString("N");
+        string? platformRejection = null;
+        MutationResponse? result = null;
+        // One bounded correction. A platform validation failure is returned to the model once under
+        // separate draft and command keys, so a rejected draft is never replayed as the accepted command.
+        for (var submission = 0; submission < 2 && result is null; submission++)
         {
-            if (identity.ValueKind != JsonValueKind.Object ||
-                !identity.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String ||
-                !identity.TryGetProperty("description", out var description) || description.ValueKind != JsonValueKind.String ||
-                title.GetString() != template.Name || description.GetString() != template.Outcome)
-                return AgentCoordinationTurnResult.Blocked("The inferred project identity must match the manager's project template.");
-            plan = plan with { Name = template.Name, Outcome = template.Outcome };
+            var corrected = platformRejection is not null;
+            var prepared = await PrepareProjectDraftAsync(
+                corrected ? $"{cacheKey}:platform-corrected" : cacheKey, template with { IdempotencyKey = commandKey },
+                new { source, feedback = revisionFeedback, platformRejection }, "producer-project-proposal", context, token,
+                corrected ? $"platform-corrected:{recoveryEpoch}" : recoveryEpoch);
+            if (prepared.Plan is null) return AgentCoordinationTurnResult.Blocked(prepared.Error!);
+            var plan = prepared.Plan;
+            // New Director handoffs bind the inferred product identity separately from delivery planning.
+            // Legacy handoffs and explicit manager revisions retain their existing proposal behavior.
+            if (feedback is null && original.Payload.TryGetProperty("projectIdentity", out var identity))
+            {
+                if (identity.ValueKind != JsonValueKind.Object ||
+                    !identity.TryGetProperty("title", out var title) || title.ValueKind != JsonValueKind.String ||
+                    !identity.TryGetProperty("description", out var description) || description.ValueKind != JsonValueKind.String ||
+                    title.GetString() != template.Name || description.GetString() != template.Outcome)
+                    return AgentCoordinationTurnResult.Blocked("The inferred project identity must match the manager's project template.");
+                plan = plan with { Name = template.Name, Outcome = template.Outcome };
+            }
+            // Freeze the exact command before dispatch. If the platform commits but its
+            // reply is lost, later ordinals replay this command and domain key unchanged.
+            plan = await CrosswiredStudios.VideoGame.PitchCollaboration.PitchProtocol.CachedAsync(
+                $"project-foundation-command:{request.SessionId:N}:{commandScope}{(corrected ? ":platform-corrected" : "")}",
+                context, () => Task.FromResult(plan), token);
+            // Commands frozen by earlier releases may carry model-narrowed staffing authority, which the
+            // platform rejects. The template ceiling is authoritative and is restored before dispatch.
+            plan = plan with { AuthorityEnvelope = template.AuthorityEnvelope };
+            try
+            {
+                result = await context.Platform.ProposeWorkstreamAsync(plan, token);
+            }
+            catch (PlatformCapabilityException ex) when (ex.Code == PlatformCapabilityErrorCode.ValidationFailed)
+            {
+                if (corrected)
+                    return AgentCoordinationTurnResult.Blocked(
+                        "The platform rejected the Producer project proposal request again after one correction attempt. " +
+                        "No project proposal was submitted. This needs a Producer model or package correction before " +
+                        "the collaboration is retried. Platform validation: " + ex.Message);
+                platformRejection = ex.Message;
+            }
         }
-        // Freeze the exact command before dispatch. If the platform commits but its
-        // reply is lost, later ordinals replay this command and domain key unchanged.
-        plan = await CrosswiredStudios.VideoGame.PitchCollaboration.PitchProtocol.CachedAsync(
-            $"project-foundation-command:{request.SessionId:N}:{(feedback is null ? "initial" : feedback.Payload.GetProperty("proposalId").GetGuid().ToString("N"))}",
-            context, () => Task.FromResult(plan), token);
-        MutationResponse result;
-        try
-        {
-            result = await context.Platform.ProposeWorkstreamAsync(plan, token);
-        }
-        catch (PlatformCapabilityException ex) when (ex.Code == PlatformCapabilityErrorCode.ValidationFailed)
-        {
-            return AgentCoordinationTurnResult.Blocked(
-                "The platform rejected the Producer project proposal request. " +
-                "The manager must check existing approvals and this validation error before retrying collaboration: " + ex.Message);
-        }
-        if (result.ApprovalId is not { } proposalId) return AgentCoordinationTurnResult.Blocked("Project proposal did not return an approval ID.");
+        if (result?.ApprovalId is not { } proposalId) return AgentCoordinationTurnResult.Blocked("Project proposal did not return an approval ID.");
         await RememberSubmittedProjectAsync(proposalId, context, token);
         return AgentCoordinationTurnResult.Continue("Submitted the project proposal for manager review.",
             new AgentCoordinationArtifactSubmission("video-game.project-foundation.proposal.v1", "1.0", original!.Key, 1, true,

@@ -1,4 +1,6 @@
-# Producer 6.4.1
+# Producer 6.4.2
+
+Project proposals keep the Director-approved staffing authority exactly as supplied. The model no longer returns or narrows `authorizedStaffingRoleKeys`, because the platform requires every active profile staffing role in the envelope. The model names each milestone only; stages, dates, evidence types and reviewers are merged from the template in code. A platform validation failure is returned to the model once for a bounded correction under separate draft and command keys, and drafts or commands cached by earlier releases have the template authority restored before dispatch.
 
 Project-proposal resumes retain the first submission ordinal and freeze the exact command before dispatch. Later collaboration turns and cold restarts reuse its original idempotency key, accepted scope and manager/team bindings, including when a successful submission's response was lost. Explicit manager revision decisions retain separate proposal identities.
 
