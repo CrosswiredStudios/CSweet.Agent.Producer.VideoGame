@@ -1,4 +1,8 @@
-# Producer 6.6.2
+# Producer 6.6.3
+
+Fixes the 6.6.2 build (missing namespace import); otherwise identical to 6.6.2, which was never released.
+
+## Producer 6.6.2
 
 Delivery acceptance, the production brief and scope amendments are read with the SDK's `AgentModelJson`: what follows from the model's judgment is derived, and anything code cannot settle goes back to the same model call with the exact problem instead of failing or waiting.
 
