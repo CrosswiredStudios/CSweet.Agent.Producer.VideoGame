@@ -1,4 +1,8 @@
-# Producer 6.6.1
+# Producer 6.6.2
+
+Delivery acceptance, the production brief and scope amendments are read with the SDK's `AgentModelJson`: what follows from the model's judgment is derived, and anything code cannot settle goes back to the same model call with the exact problem instead of failing or waiting.
+
+## Producer 6.6.1
 
 Uses the optional `CSweet.Agent.SDK.VideoGame.Contracts` 1.0.0 NuGet package for the shared video-game contracts instead of compiling its own `extensions/video-game/VideoGameContracts.cs` copy.
 

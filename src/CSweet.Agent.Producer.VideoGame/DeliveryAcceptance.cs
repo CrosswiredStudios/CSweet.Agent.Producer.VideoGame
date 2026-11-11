@@ -64,7 +64,7 @@ public sealed partial class SpecialistAgent
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the Producer review provider.");
             var model = Settings.GetString("llmModel");
             if (string.IsNullOrWhiteSpace(model)) throw new InvalidOperationException("Configure the Producer review model.");
-            var response = await context.CreateChatClient(new AgentLlmSelection(provider, model)).GetResponseAsync([
+            return await AgentModelJson.ReadAsync(context.CreateChatClient(new AgentLlmSelection(provider, model)), [
                 new ChatMessage(ChatRole.System, """
                     Review delivery against the supplied ticket's accepted requirements and acceptance criteria.
                     Use the actual document revision content or exact-candidate technical review and independent QA
@@ -86,8 +86,12 @@ public sealed partial class SpecialistAgent
                     an ordinary infrastructure error as a role conflict. Otherwise requiresRoleReplanning:false.
                     """),
                 new ChatMessage(ChatRole.User, JsonSerializer.Serialize(input, AcceptanceJson))
-            ], ResponseOptions(), ct);
-            return ModelJson.Deserialize<DeliveryAcceptanceDecision>(response.Text, AcceptanceJson, "Producer review");
+            ], new AgentModelJsonRequest<DeliveryAcceptanceDecision>("Producer review")
+            {
+                SerializerOptions = AcceptanceJson,
+                Options = ResponseOptions(),
+                Normalize = decision => NormalizeAcceptance(decision, input.Item.Planning?.AcceptanceCriteria ?? [])
+            }, ct);
         }
     }
 

@@ -52,7 +52,7 @@ public sealed partial class SpecialistAgent
             {
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure a planning provider.");
             var client = context.CreateChatClient(new AgentLlmSelection(provider, Settings.GetString("llmModel")));
-            var response = await client.GetResponseAsync([
+            edits = (await AgentModelJson.ReadAsync(client, [
                 new(ChatRole.System, """
                     Translate the authenticated owner's explicit scope correction into exact text replacements in
                     existing unfinished ticket planning. Be concise where possible, but preserve all detail needed
@@ -69,9 +69,12 @@ public sealed partial class SpecialistAgent
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { direction, anchorItemId = item.WorkItemId,
                     items = board.Items.Select(x => new { x.Id, x.Identifier, x.Status, x.Title, x.Planning }) }, AcceptanceJson))
-            ], ResponseOptions(), token);
-            edits = ModelJson.Deserialize<ScopeAmendmentPlan>(response.Text, AcceptanceJson, "Scope amendment").Replacements
-                ?? throw new InvalidOperationException("Scope amendment returned no exact replacements; no planning was changed.");
+            ], new AgentModelJsonRequest<ScopeAmendmentPlan>("scope amendment")
+            {
+                SerializerOptions = AcceptanceJson,
+                Options = ResponseOptions(),
+                Normalize = plan => NormalizeScopeAmendment(plan, board.Items)
+            }, token)).Replacements;
             }
             var sprints = await context.Platform.Work.ListSprintsAsync(execution.BoardId, token);
             saved = new(execution.BoardId, project, team, execution.SprintId, stage.Id, item.WorkItemId,

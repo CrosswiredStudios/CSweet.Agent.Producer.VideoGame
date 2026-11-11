@@ -75,7 +75,7 @@ public sealed partial class SpecialistAgent
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the Producer LLM provider.");
             var client = context.CreateChatClient(new AgentLlmSelection(provider, Settings.GetString("llmModel"),
                 new AgentLlmInvocationContext(null, null, "producer-pitch-refinement")));
-            var response = await client.GetResponseAsync([
+            return await AgentModelJson.ReadAsync(client, [
                 new ChatMessage(ChatRole.System, AgentInteractionInstructions.Compose("""
                     You are the Producer collaborating with the Video Game Director before proposing any hires.
                     Read the actual accepted pitch and GDD. Ask focused questions whose answers materially affect
@@ -108,14 +108,12 @@ public sealed partial class SpecialistAgent
                         ["delivery-planning", "capacity", "dependencies", "forecasts"],
                         AgentInteractionResponseContracts.DeliverableOrClarification) { CounterpartRoleKey = "game-director" })),
                 new ChatMessage(ChatRole.User, $"Accepted pitch:\n{pitch.Revision.Content}\nAccepted GDD:\n{gdd.Revision.Content}\nCurrent shared draft:\n{ProductionSources.WorkingBrief(priorContent)}\nLatest manager guidance:\n{reply?.Guidance}\nExact review issues:\n{JsonSerializer.Serialize(reply?.Correction, PitchProtocol.Json)}\nLatest creative edits:\n{reply?.SuggestedMarkdown}\nConversation:\n{JsonSerializer.Serialize(request.Transcript.Select(x => new { x.SpeakerOrganizationUserId, x.Content }), PitchProtocol.Json)}")
-            ], new ChatOptions { MaxOutputTokens = ResolveOutputTokens(Settings) }, token);
-            var result = PitchProtocol.ParseProducerReview(response.Text);
-            if (result is null || result.Questions is null || result.Questions.Count > 12 ||
-                result.Questions.Any(string.IsNullOrWhiteSpace) || string.IsNullOrWhiteSpace(result.Rationale) ||
-                !PitchProtocol.ValidDocument(result.DraftMarkdown) || result.DraftMarkdown.Length > 48000 || result.Ready && !PitchProtocol.CanPlan(result) ||
-                !result.Ready && result.Questions.Count == 0)
-                throw new InvalidOperationException("The Producer must return a substantive brief and either concrete questions or justified readiness.");
-            return result;
+            ], new AgentModelJsonRequest<ProducerReview>("production brief")
+            {
+                SerializerOptions = PitchProtocol.Json,
+                Options = new ChatOptions { MaxOutputTokens = ResolveOutputTokens(Settings) },
+                Normalize = NormalizeProducerReview
+            }, token);
         }, token);
         if (!review.Ready && reviews.LastOrDefault() is { Ready: false } priorReview &&
             SamePlanningQuestions(priorReview.Questions, review.Questions))
