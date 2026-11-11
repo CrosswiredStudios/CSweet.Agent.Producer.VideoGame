@@ -1,5 +1,5 @@
 using CSweet.Agent.SDK;
-using CrosswiredStudios.VideoGame.Contracts;
+using CSweet.Agent.SDK.VideoGame.Contracts;
 using System.Text.Json;
 
 namespace CSweet.Agent.Producer.VideoGame;

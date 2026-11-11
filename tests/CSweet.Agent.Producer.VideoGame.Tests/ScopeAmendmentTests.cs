@@ -1,6 +1,6 @@
 using System.Text.Json;
 using CSweet.WorkManagement.Contracts;
-using CrosswiredStudios.VideoGame.Contracts;
+using CSweet.Agent.SDK.VideoGame.Contracts;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
 

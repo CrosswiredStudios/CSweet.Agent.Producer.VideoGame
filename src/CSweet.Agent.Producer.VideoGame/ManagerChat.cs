@@ -1,5 +1,5 @@
 using System.Text.Json;
-using CrosswiredStudios.VideoGame.Contracts;
+using CSweet.Agent.SDK.VideoGame.Contracts;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 using Microsoft.Extensions.AI;

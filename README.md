@@ -1,4 +1,8 @@
-# Producer 6.6.0
+# Producer 6.6.1
+
+Uses the optional `CSweet.Agent.SDK.VideoGame.Contracts` 1.0.0 NuGet package for the shared video-game contracts instead of compiling its own `extensions/video-game/VideoGameContracts.cs` copy.
+
+## Producer 6.6.0
 
 Each new ticket records the plan's browser choice as `Verifications` on its planning spec, so the engineer, the technical reviewer and QA apply one rule.
 

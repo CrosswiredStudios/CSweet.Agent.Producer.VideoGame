@@ -9,13 +9,13 @@ public sealed class PlanningReplyTests
     [Fact]
     public void PlanningArtifactSharesExactAcceptedMemberAndPreservesCycle()
     {
-        var cycle = new CrosswiredStudios.VideoGame.Contracts.GameProductionPlanningCycleV1(
+        var cycle = new CSweet.Agent.SDK.VideoGame.Contracts.GameProductionPlanningCycleV1(
             Guid.NewGuid(), Guid.NewGuid(), 3, Guid.NewGuid(), "profile", Guid.NewGuid(), 1,
             "package-digest", "concept", "vision-approved", "fingerprint");
         var member = new CSweet.WorkManagement.Contracts.ArtifactPackageMemberDigest(
             Guid.NewGuid(), Guid.NewGuid(), "brief", new string('a', 64));
         var artifact = SpecialistAgent.PlanningArtifact(cycle, [member]);
-        Assert.Equal(cycle, artifact.Payload.Deserialize<CrosswiredStudios.VideoGame.Contracts.GameProductionPlanningCycleV1>());
+        Assert.Equal(cycle, artifact.Payload.Deserialize<CSweet.Agent.SDK.VideoGame.Contracts.GameProductionPlanningCycleV1>());
         var reference = Assert.Single(artifact.Payload.GetProperty("documentReferences")
             .Deserialize<CollaborationDocumentReference[]>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!);
         Assert.Equal(member.ArtifactId, reference.DocumentId);

@@ -1,4 +1,4 @@
-using CrosswiredStudios.VideoGame.Contracts;
+using CSweet.Agent.SDK.VideoGame.Contracts;
 using CSweet.WorkManagement.Contracts;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
