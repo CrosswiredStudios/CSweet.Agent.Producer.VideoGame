@@ -1492,7 +1492,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                             }]
                             : [],
                         ArchitectureArtifactDigest = technicalArtifact.Digest,
-                        ArtifactPackageDigest = package
+                        ArtifactPackageDigest = package,
+                        Verifications = executable ? TicketVerification.FromProposal(proposal.BrowserVerification) : null
                     },
                     StageAssignments = assignments,
                     ProposalProvenance = new WorkItemProposalProvenance(sourceSession.Id, sourceArtifact.Digest,

@@ -1,4 +1,8 @@
-# Producer 6.5.0
+# Producer 6.6.0
+
+Each new ticket records the plan's browser choice as `Verifications` on its planning spec, so the engineer, the technical reviewer and QA apply one rule.
+
+## 6.5.0
 
 A planned sprint no longer waits forever when the platform rejects its delivery plan. The Producer uses SDK 5.16.0, which keeps generated plan names within the platform's limit. If the platform still rejects the plan, the Producer tells its manager once, with the platform's reason and the `Retry staffing: <what changed>` reply, and rechecks hourly instead of every few minutes.
 
