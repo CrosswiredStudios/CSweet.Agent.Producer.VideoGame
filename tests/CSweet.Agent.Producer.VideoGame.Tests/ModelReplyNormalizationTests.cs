@@ -1,6 +1,7 @@
 using System.Text.Json;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
+using CrosswiredStudios.VideoGame.PitchCollaboration;
 
 namespace CSweet.Agent.Producer.VideoGame.Tests;
 
