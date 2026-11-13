@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.8.0",
+  "version": "6.9.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -592,6 +592,11 @@
       "name": "platform.management.status-report.v1",
       "scope": "organization",
       "purpose": "Publish management and weekly project reports."
+    },
+    {
+      "name": "platform.approval.propose.v1",
+      "scope": "organization",
+      "purpose": "Submit a specific experiment expenditure for independent approval."
     },
     {
       "name": "platform.management.resource-change.propose.v1",

@@ -66,20 +66,21 @@ public sealed partial class SpecialistAgent
                 item.Revision, $"producer-draft-scope:{sprint.Id:N}:{item.Id:N}"), token);
     }
 
-    private static async Task ProposeCoverageAsync(Guid workstreamId, Guid? boardId, AgentTeamContext roster,
+    private static async Task<ResourceChangeRequestResponse?> ProposeCoverageAsync(Guid workstreamId, Guid? boardId, AgentTeamContext roster,
         IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null)
     {
         var missing = requirements.Where(r => RoleTaxonomy.SelectAssignment(roster.Members,
                 new WorkAssignmentRequirements(r.RequiredRoleKey, r.RequiredSpecializationKeys,
                     r.PreferredSpecializationKeys, r.RequiredCapabilityKeys)) is null)
             .GroupBy(x => x.RequiredRoleKey, StringComparer.Ordinal).ToList();
-        if (missing.Count == 0) return;
+        if (missing.Count == 0) return null;
         if (!Guid.TryParse(context.Identity?.EmployeeId, out var producerId) ||
             !Guid.TryParse(context.Identity?.ManagerEmployeeId, out var directorId))
             throw new InvalidOperationException("Staffing proposals require an accountable Producer and manager.");
         var requests = (await context.Platform.ReadResourceChangesAsync(new ResourceChangeReadRequest(), token)).Requests
             .Where(x => x.TeamId == Guid.Parse(roster.TeamId)).OrderByDescending(x => x.CreatedAt).ToList();
-        if (requests.Any(x => x.RequesterOrganizationUserId == producerId && x.Status == "Pending")) return;
+        if (requests.FirstOrDefault(x => x.RequesterOrganizationUserId == producerId && x.Status == "Pending") is { } pending)
+            return pending.WorkstreamId == workstreamId && missing.All(g => pending.Roles.Any(r => r.RoleKey == g.Key)) ? pending : null;
         var approved = requests.FirstOrDefault(x => x.Status == "Approved");
         var roles = approved?.Roles.ToList() ?? [];
         var proposed = false;
@@ -98,7 +99,7 @@ public sealed partial class SpecialistAgent
             });
             proposed = true;
         }
-        if (!proposed) return;
+        if (!proposed) return approved;
         var evidenceRevision = boardId.HasValue
             ? (await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(boardId.Value)
                 { WorkstreamId = workstreamId, TeamId = Guid.Parse(roster.TeamId) }, token)).SourceRevision
@@ -123,7 +124,7 @@ public sealed partial class SpecialistAgent
             AlternativesConsidered = ["Reuse qualified team installations.", "Sequence work before adding parallel capacity.", "Defer optional specialist work."],
             ExpectedEffect = "Unblock the named planning or backlog responsibilities; continue all independently ready work."
         };
-        await SubmitCoverageAsync(proposal, boardId, context.Platform.ProposeResourceChangeAsync, token,
+        return await SubmitCoverageAsync(proposal, boardId, context.Platform.ProposeResourceChangeAsync, token,
             boardId is { } evidenceBoard ? async ct => (await context.Platform.Work.ReadFlowMetricsAsync(
                 new ReadWorkFlowMetricsRequest(evidenceBoard) { WorkstreamId = workstreamId,
                     TeamId = Guid.Parse(roster.TeamId) }, ct)).SourceRevision : null);

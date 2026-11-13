@@ -44,9 +44,51 @@ public sealed partial class SpecialistAgent
             .Select(item => item.ProposalProvenance!.ProposalItemKey).ToHashSet(StringComparer.Ordinal) };
     }
 
+    internal static IReadOnlySet<Guid> ConfirmedCeoHolds(ProducerPlanningCycleState cycle, IReadOnlyList<WorkItem> items,
+        IReadOnlyList<DecisionRecord> decisions, ProducerAcceptedHandoff handoff)
+    {
+        var held = new HashSet<Guid>();
+        foreach (var receipt in decisions.Where(d => d.AuthorityRuleKey == "material-strategy-change" &&
+            (d.Status == DecisionStatuses.Pending || d.Status == DecisionStatuses.Decided && d.SelectedOptionId == "pause-affected-work") &&
+            d.SupersededByDecisionId == null && IsPlanningDirection(d, cycle.WorkstreamId, handoff.RevisionDigest)))
+        {
+            // Only Marcus's explicit escalation of this exact Producer proposal can hold tickets.
+            var parent = decisions.SingleOrDefault(d => d.Id == receipt.SupersedesDecisionId && d.WorkstreamId == cycle.WorkstreamId &&
+                d.AuthorityRuleKey == "work-planning" && d.TypeKey == receipt.TypeKey);
+            if (parent?.TypeData is not { ValueKind: System.Text.Json.JsonValueKind.Object } original ||
+                receipt.TypeData is not { ValueKind: System.Text.Json.JsonValueKind.Object } data ||
+                !original.TryGetProperty("kind", out var originalKind) || originalKind.ToString() != "ceo-hold" ||
+                !original.TryGetProperty("boardId", out var proposedBoard) || !Guid.TryParse(proposedBoard.ToString(), out var sourceBoard) ||
+                sourceBoard != cycle.BoardId ||
+                !data.TryGetProperty("kind", out var kind) || kind.ToString() != "ceo-hold" ||
+                !data.TryGetProperty("boardId", out var board) || !Guid.TryParse(board.ToString(), out var targetBoard) || targetBoard != cycle.BoardId ||
+                !original.TryGetProperty("adaptiveReview", out var originalReview) || !data.TryGetProperty("adaptiveReview", out var review) ||
+                originalReview.ToString() != review.ToString() || !original.TryGetProperty("itemIds", out var proposed) ||
+                proposed.ValueKind != System.Text.Json.JsonValueKind.Array || !data.TryGetProperty("itemIds", out var confirmed) ||
+                confirmed.ValueKind != System.Text.Json.JsonValueKind.Array) continue;
+            var allowed = proposed.EnumerateArray().Select(x => x.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            foreach (var value in confirmed.EnumerateArray())
+                if (Guid.TryParse(value.ToString(), out var id) && allowed.Contains(id.ToString()) && items.Any(i => i.Id == id && i.ExecutionMode == WorkItemExecutionModes.Executable)) held.Add(id);
+        }
+        // Dependency closure prevents a ready consumer starting while its required ticket is held.
+        bool added;
+        do
+        {
+            added = false;
+            foreach (var i in items.Where(i => i.ParentItemId is Guid parent && held.Contains(parent) || i.Planning?.DependencyItemIds.Any(held.Contains) == true))
+                added |= held.Add(i.Id);
+        } while (added);
+        return held;
+    }
+
     private static async Task<ProducerPlanningCycleState> ReadScopedPlanningGatesAsync(ProducerPlanningCycleState cycle,
         ProducerOperatingState portfolio, WorkBoardDetail board, AgentRuntimeContext context, CancellationToken token)
     {
+        if (cycle.AdaptivePlanning && portfolio.AcceptedHandoffs.TryGetValue(cycle.WorkstreamId, out var adaptiveHandoff))
+        {
+            var current = await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: cycle.WorkstreamId), token);
+            cycle = cycle with { ConfirmedHoldItems = ConfirmedCeoHolds(cycle, board.Items, current, adaptiveHandoff) };
+        }
         if (cycle.OutstandingAuthorityQuestions.Count == 0 ||
             cycle.OutstandingAuthorityQuestions.Any(question => question.Trim() != FinalVisualStyleQuestion) ||
             !portfolio.AcceptedHandoffs.TryGetValue(cycle.WorkstreamId, out var handoff) ||

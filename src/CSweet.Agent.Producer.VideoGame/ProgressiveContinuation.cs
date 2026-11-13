@@ -44,7 +44,7 @@ public sealed partial class SpecialistAgent
         var epics = stories.Select(item => item.ParentItemId!.Value).ToHashSet();
         var plans = (await context.Platform.Work.ReadDeliveryPlansAsync(new(project), ct))
             .Where(plan => plan.Status == "Completed" && plan.EpicItemIds.Any(epics.Contains)).ToArray();
-        if (!epics.IsSubsetOf(plans.SelectMany(plan => plan.EpicItemIds).ToHashSet())) return new(null);
+        if (cycle.AdaptivePlanning ? !stories.All(s => plans.SelectMany(StoryScopeIds).Contains(s.Id)) : !epics.IsSubsetOf(plans.SelectMany(plan => plan.EpicItemIds).ToHashSet())) return new(null);
         return new(ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
             policy = "progressive-continuation-v1", progress.ScopeKey, progress.OutlineDigest,
             stories = stories.Select(item => item.Id).Order(), plans = plans.Select(plan => plan.Id).Order() })));

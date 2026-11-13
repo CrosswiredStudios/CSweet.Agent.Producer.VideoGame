@@ -52,6 +52,26 @@ public sealed class PlanningGateScopeTests
         Assert.False(SpecialistAgent.CanPrepareWithPlanningDecisions(f.Bootstrap, scoped));
     }
 
+    [Fact]
+    public void Ceo_hold_requires_correlated_escalation_and_releases_after_direction()
+    {
+        var f = new Fixture();
+        var handoff = new ProducerAcceptedHandoff(f.Cycle.WorkstreamId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff",
+            Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
+        var data = JsonSerializer.SerializeToElement(new { kind = "ceo-hold", boardId = f.Cycle.BoardId,
+            adaptiveReview = "review", itemIds = new[] { f.FinalArt.Id } });
+        var proposal = f.Decision with { Status = DecisionStatuses.Pending, TypeData = data };
+        var manager = proposal with { Id = Guid.NewGuid(), AuthorityRuleKey = "material-strategy-change", SupersedesDecisionId = proposal.Id };
+        Assert.Empty(SpecialistAgent.ConfirmedCeoHolds(f.Cycle, f.Items, [proposal], handoff));
+        Assert.Empty(SpecialistAgent.ConfirmedCeoHolds(f.Cycle, f.Items, [manager], handoff));
+        var held = SpecialistAgent.ConfirmedCeoHolds(f.Cycle, f.Items, [proposal, manager], handoff);
+        Assert.Contains(f.FinalArt.Id, held);
+        Assert.Contains(f.NestedConsumer.Id, held);
+        Assert.DoesNotContain(f.Bootstrap.Id, held);
+        Assert.Empty(SpecialistAgent.ConfirmedCeoHolds(f.Cycle, f.Items, [proposal,
+            manager with { Status = DecisionStatuses.Decided, SelectedOptionId = "provide-direction" }], handoff));
+    }
+
     internal sealed class Fixture
     {
         internal ProducerPlanningCycleState Cycle;

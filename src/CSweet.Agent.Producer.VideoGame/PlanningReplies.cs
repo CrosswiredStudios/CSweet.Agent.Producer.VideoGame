@@ -74,6 +74,8 @@ public sealed partial class SpecialistAgent
         var byKey = proposal.DeliveryItems.ToDictionary(x => x.ProposalKey, StringComparer.Ordinal);
         var stories = new HashSet<string>([VideoGameWorkItemTypeKeys.Feature, VideoGameWorkItemTypeKeys.Content],
             StringComparer.Ordinal);
+        if (ReadProgressiveEvidence(artifact) is { Adaptive: true, Phase: "Outline" or "Direction" } &&
+            proposal.DeliveryItems.All(x => x.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone)) return false;
         return !proposal.DeliveryItems.Any(x => stories.Contains(x.WorkItemTypeKey)) ||
             proposal.DeliveryItems.Any(x => x.WorkItemTypeKey switch
             {
@@ -90,6 +92,8 @@ public sealed partial class SpecialistAgent
     {
         "video-game.production.planning-cycle.v1" =>
             ["video-game.production.technical-delivery-proposal.v1", "video-game.production.designer-backlog-proposal.v1"],
+        "video-game.sprint.review.v1" => ["video-game.sprint.review-received.v1"],
+        "video-game.design.consult.v1" => ["video-game.design.advice.v1"],
         "video-game.production.role-estimate-request.v1" =>
             ["video-game.production.role-estimate-capacity-proposal.v1"],
         "video-game.production.qa-readiness-request.v1" =>

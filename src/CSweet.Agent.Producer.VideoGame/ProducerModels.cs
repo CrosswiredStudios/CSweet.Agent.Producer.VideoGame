@@ -64,7 +64,7 @@ public sealed record ProducerAcceptedHandoff(
     Guid CoordinationSessionId,
     Guid PlanningPackageId,
     int PlanningPackageVersion,
-    DateTimeOffset AcceptedAt);
+    DateTimeOffset AcceptedAt) { public DateTimeOffset? BriefReadyAt { get; init; } }
 
 public sealed record ProducerPlanningCycleState(
     Guid WorkstreamId,
@@ -79,6 +79,12 @@ public sealed record ProducerPlanningCycleState(
     string? ReconciledDigest,
     DateTimeOffset UpdatedAt)
 {
+    [System.Text.Json.Serialization.JsonIgnore]
+    public IReadOnlySet<Guid> ConfirmedHoldItems { get; init; } = new HashSet<Guid>();
+    public bool AdaptivePlanning { get; init; }
+    public DateTimeOffset? BriefReadyAt { get; init; }
+    public DateTimeOffset? PackageAcceptedAt { get; init; }
+    public DateTimeOffset? FirstExecutableTicketAt { get; init; }
     public string? PlanningDirectionsDigest { get; init; }
     public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
     public IReadOnlyList<string> EngineeringPrerequisiteKeys { get; init; } = [];
@@ -94,8 +100,18 @@ public sealed record ProgressivePlanningProgress(string ScopeKey, string Outline
     string? ScheduledArtifactDigest = null)
 {
     public string? ReviewedDirectionsDigest { get; init; }
+    public IReadOnlyDictionary<string,string> AcceptedBases { get; init; } = new Dictionary<string,string>();
+    public Guid? LastPublishedSessionId { get; init; }
+    public string? AdmissionReviewBasis { get; init; }
+    public Guid? DraftSessionId { get; init; }
+    public string? DraftStoryKey { get; init; }
+    public string? DraftBasis { get; init; }
+    public string? DraftDirection { get; init; }
+    public IReadOnlyDictionary<string, ProvisionalStory> AdditionalDrafts { get; init; } = new Dictionary<string, ProvisionalStory>();
     public int? ScheduledSprintSequence { get; init; }
 }
+
+public sealed record ProvisionalStory(Guid SessionId, string Basis, string Direction, string ParentRevision);
 
 public static class ProducerPhaseResolver
 {

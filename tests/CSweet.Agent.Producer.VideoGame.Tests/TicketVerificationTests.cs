@@ -31,6 +31,16 @@ public sealed class TicketVerificationTests
         Assert.Null(TicketVerification.FromProposal("unexpected"));
     }
 
+    [Fact]
+    public void Reordered_bound_criteria_keep_the_same_behavior_and_reject_weakened_wording()
+    {
+        var task = Proposal(GameBrowserVerification.Canvas, [1]) with {
+            AcceptanceCriteria = ["Ball breaks a brick", "Scene renders"],
+            CriterionBindings = [new("scene", "loop", "Scene renders", false), new("collision", "loop", "Ball breaks a brick", true)] };
+        Assert.Equal([0], TicketVerification.FromProposal(task)!.Single(v => v.Kind == WorkItemVerificationKinds.BrowserInteraction).CriterionIndexes);
+        Assert.Throws<InvalidOperationException>(() => TicketVerification.FromProposal(task with { AcceptanceCriteria = ["Paddle renders", "Scene renders"] }));
+    }
+
     private static GameProposedWorkItemV1 Proposal(string verification, IReadOnlyList<int>? interaction) =>
         new("task", VideoGameWorkItemTypeKeys.Task, "Task", "Do it.", ["Scene renders", "Ball breaks a brick"], VideoGameRoleKeys.Engineer,
             [], [], ["work.execution.run"], []) { BrowserVerification = verification, InteractionCriteria = interaction };

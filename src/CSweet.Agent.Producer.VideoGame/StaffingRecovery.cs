@@ -4,7 +4,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal static async Task SubmitCoverageAsync(ResourceChangeProposalRequest proposal, Guid? boardId,
+    internal static async Task<ResourceChangeRequestResponse> SubmitCoverageAsync(ResourceChangeProposalRequest proposal, Guid? boardId,
         Func<ResourceChangeProposalRequest, CancellationToken, Task<ResourceChangeRequestResponse>> submit,
         CancellationToken token,
         Func<CancellationToken, Task<string>>? readEvidenceRevision = null)
@@ -24,17 +24,18 @@ public sealed partial class SpecialistAgent
                     ? e with { SourceRevision = revision } : e).ToArray();
                 var fingerprint = ProducerPolicyFingerprint.Digest(System.Text.Json.JsonSerializer.Serialize(new
                     { proposal.IdempotencyKey, revision }));
-                await submit(proposal with { Evidence = evidence,
+                return await submit(proposal with { Evidence = evidence,
                     IdempotencyKey = "producer-coverage-refresh:" + fingerprint }, token);
             }
-            return;
+            return response;
         }
         if (boardId.HasValue && response.Status == "RevisionRequested" && response.DecisionComment ==
             "Initial staffing requires the Producer's confident review and the Director's exact accepted production brief.")
         {
             // Reassess this legacy board-discovery rejection once. The Director still
             // validates the new proposal; repeating the call replays the same request.
-            await submit(proposal with { IdempotencyKey = proposal.IdempotencyKey + ":board-review-v1" }, token);
+            return await submit(proposal with { IdempotencyKey = proposal.IdempotencyKey + ":board-review-v1" }, token);
         }
+        return response;
     }
 }

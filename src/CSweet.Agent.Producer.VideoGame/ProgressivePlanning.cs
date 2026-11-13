@@ -10,11 +10,14 @@ namespace CSweet.Agent.Producer.VideoGame;
 public sealed partial class SpecialistAgent
 {
     internal sealed record ProgressiveRequest(string Phase, string DirectionsDigest, string? ScopeKey = null,
-        string? OutlineDigest = null, string? StoryKey = null, IReadOnlyList<string>? DetailedStoryKeys = null, string? ReviewDirectionsDigest = null, IReadOnlyList<string>? ManagerDirections = null);
+        string? OutlineDigest = null, string? StoryKey = null, IReadOnlyList<string>? DetailedStoryKeys = null, string? ReviewDirectionsDigest = null, IReadOnlyList<string>? ManagerDirections = null, bool Adaptive = false, string? DraftBasis = null, IReadOnlyDictionary<string,string>? AcceptedBases = null,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        Guid? PreviousDraft = null);
     internal sealed record ProgressiveCoverage(string SourceKey, IReadOnlyList<string> ProposalKeys);
     internal sealed record ProgressiveEvidence(string Phase, string ScopeKey, string OutlineDigest, string DirectionsDigest,
         IReadOnlyList<string> DetailedStoryKeys, IReadOnlyList<ProgressiveCoverage> ScopeCoverage)
     {
+        public bool Adaptive { get; init; }
         public string? ReviewedDirectionsDigest { get; init; }
         public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
     }
@@ -57,25 +60,30 @@ public sealed partial class SpecialistAgent
     {
         if (original.Phase != "Outline" || original.DetailedStoryKeys.Count != 0 || original.OutlineDigest.Length != 64 ||
             outline.DeliveryItems.Any(x => !IsScopeContainer(x)) ||
-            original.ScopeKey != ProgressiveScopeKey(outline.Cycle, original.DirectionsDigest))
+            original.ScopeKey != (original.Adaptive ? "adaptive:" : "") + ProgressiveScopeKey(outline.Cycle, original.DirectionsDigest))
             throw new InvalidOperationException("Progressive planning requires an exact accepted full-scope outline, without executable leaves.");
         var canonical = new { Plan = new ProgressiveScopePlan(outline.DeliveryItems, outline.FeasibilityFindings,
             outline.TechnicalConstraints, outline.OpenFeasibilityDecisions), Coverage = original.ScopeCoverage };
         if (Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(canonical))) != original.OutlineDigest)
             throw new InvalidOperationException("The delivered outline does not match its retained scope digest.");
         if (proposal.Cycle.PlanningFingerprint != outline.Cycle.PlanningFingerprint || proposal.Cycle.ApprovedPackageDigest != outline.Cycle.ApprovedPackageDigest ||
-            current.ScopeKey != original.ScopeKey || current.OutlineDigest != original.OutlineDigest || current.DirectionsDigest != original.DirectionsDigest)
+            current.Adaptive != original.Adaptive || current.ScopeKey != original.ScopeKey || current.OutlineDigest != original.OutlineDigest || current.DirectionsDigest != original.DirectionsDigest)
             throw new InvalidOperationException("The increment belongs to different accepted inputs or scope.");
         var containers = proposal.DeliveryItems.Where(IsScopeContainer).ToArray();
-        if (JsonSerializer.Serialize(containers) != JsonSerializer.Serialize(outline.DeliveryItems))
+        if (JsonSerializer.Serialize(original.Adaptive ? containers.Where(x => x.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone).ToArray() : containers) != JsonSerializer.Serialize(outline.DeliveryItems))
             throw new InvalidOperationException("An increment cannot rename, remove or rewrite the accepted full-scope outline.");
+        if (original.Adaptive && containers.Any(x => x.WorkItemTypeKey != VideoGameWorkItemTypeKeys.Milestone &&
+            !outline.DeliveryItems.Any(e => e.ProposalKey == x.ParentProposalKey)))
+            throw new InvalidOperationException("An approaching Story must belong to its approved Epic.");
         var expected = priorStories.Concat(requestedStory is null ? [] : new[] { requestedStory }).ToHashSet();
         if (current.DetailedStoryKeys.Count != expected.Count || !current.DetailedStoryKeys.ToHashSet().SetEquals(expected))
             throw new InvalidOperationException("The increment lost prior detail or introduced unrequested future Stories.");
         var leaves = proposal.DeliveryItems.Where(x => !IsScopeContainer(x)).ToArray();
         if (leaves.Select(x => x.ProposalKey).Distinct().Count() != leaves.Length || leaves.Any(x => x.ParentProposalKey is null || !expected.Contains(x.ParentProposalKey)))
             throw new InvalidOperationException("Only validated detailed Stories may publish executable tasks.");
-        foreach (var story in outline.DeliveryItems.Where(x => expected.Contains(x.ProposalKey)))
+        if (!expected.IsSubsetOf(containers.Select(x => x.ProposalKey).ToHashSet()))
+            throw new InvalidOperationException("A selected Story has no definition.");
+        foreach (var story in containers.Where(x => expected.Contains(x.ProposalKey)))
         {
             var tasks = leaves.Where(x => x.ParentProposalKey == story.ProposalKey).ToArray();
             if (tasks.Length == 0 || story.AcceptanceCriteria.Any(criterion => !tasks.Any(task => task.AcceptanceCriteria.Contains(criterion, StringComparer.Ordinal))))
@@ -105,18 +113,48 @@ public sealed partial class SpecialistAgent
         .Select(epic => epic.Id).ToArray();
 
     internal static bool HasAcceptedProgressiveIncrements(IReadOnlyList<GameProposedWorkItemV1> outline,
-        IReadOnlyList<string> detailed, IReadOnlyList<WorkItem> items, IReadOnlyList<WorkDeliveryPlanResponse> plans)
+        IReadOnlyList<string> detailed, IReadOnlyList<WorkItem> items, IReadOnlyList<WorkDeliveryPlanResponse> plans, bool adaptive = false)
     {
+        if (adaptive)
+        {
+            var stories = ProgressivePublishedItems(items, detailed.ToHashSet());
+            var acceptedStories = plans.Where(p => p.Status == "Completed").SelectMany(StoryScopeIds).ToHashSet();
+            return detailed.All(key => stories.TryGetValue(key, out var story) && story.Kind == "Story" && acceptedStories.Contains(story.Id));
+        }
         var accepted = plans.Where(plan => plan.Status == "Completed").SelectMany(plan => plan.EpicItemIds).ToHashSet();
         var publishedItems = ProgressivePublishedItems(items, outline.Select(item => item.ProposalKey).ToHashSet(StringComparer.Ordinal));
         return detailed.All(key => outline.SingleOrDefault(story => story.ProposalKey == key)?.ParentProposalKey is { } epic &&
             publishedItems.TryGetValue(epic, out var published) && accepted.Contains(published.Id));
     }
 
+    internal static IEnumerable<Guid> StoryScopeIds(WorkDeliveryPlanResponse plan) =>
+        (plan.Scopes ?? []).Where(s => s.Scope == WorkExecutionScopes.Story && s.ItemId.HasValue).Select(s => s.ItemId!.Value);
+
+    internal static IReadOnlyList<GameProposedWorkItemV1> SuccessorCandidates(IReadOnlyList<GameProposedWorkItemV1> items, IReadOnlySet<string> assumed)
+    {
+        var epics = items.Where(x => x.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone).ToArray();
+        var done = assumed.ToHashSet();
+        foreach (var epic in epics)
+        {
+            var children = items.Where(x => x.ParentProposalKey == epic.ProposalKey && IsScopeContainer(x)).ToArray();
+            if (children.Length > 0 && children.All(s => assumed.Contains(s.ProposalKey))) done.Add(epic.ProposalKey);
+        }
+        var choices = new List<GameProposedWorkItemV1>();
+        foreach (var epic in epics.Where(e => !done.Contains(e.ProposalKey) && e.DependencyProposalKeys.All(done.Contains)))
+        {
+            var children = items.Where(x => x.ParentProposalKey == epic.ProposalKey && IsScopeContainer(x)).ToArray();
+            if (children.Length == 0) choices.Add(epic with { ProposalKey = epic.ProposalKey + ".story-1", ParentProposalKey = epic.ProposalKey });
+            else choices.AddRange(children.Where(x => !done.Contains(x.ProposalKey) && x.DependencyProposalKeys.All(done.Contains)));
+        }
+        return choices;
+    }
+
     internal static async Task<ProgressiveAdvance> AdvanceProgressivePlanningAsync(Guid boardId, AgentTeamContext roster,
         GameProductionPlanningCycleV1 cycle, IReadOnlyList<ArtifactPackageMemberDigest> members, AgentTeammate technicalDirector,
         AgentCoordinationSession outlineSession, AgentCoordinationArtifact outlineArtifact, GameTechnicalDeliveryProposalV1 outline,
-        ProgressivePlanningProgress? progress, AgentRuntimeContext context, CancellationToken token)
+        ProgressivePlanningProgress? progress, AgentRuntimeContext context, CancellationToken token,
+        Func<ProgressivePlanningProgress, IReadOnlyList<GameProposedWorkItemV1>, WorkBoardDetail, IReadOnlyList<WorkDeliveryPlanResponse>,
+            IReadOnlyList<WorkSprint>, Task<ReviewEffects>>? review = null)
     {
         var evidence = ReadProgressiveEvidence(outlineArtifact)!;
         var directionReview = evidence.Phase == "Direction" ? evidence : null;
@@ -169,7 +207,26 @@ public sealed partial class SpecialistAgent
                 current = currentArtifact.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
                 var currentEvidence = ReadProgressiveEvidence(currentArtifact) ?? throw new InvalidOperationException("The refinement omitted progressive scope evidence.");
                 ValidateProgressiveProposal(outline, evidence, current, currentEvidence, progress.DetailedStoryKeys, progress.PendingStoryKey);
-                progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null };
+                if (evidence.Adaptive && progress.PendingStoryKey is string pending && review != null)
+                {
+                    var prior = progress.DetailedStoryKeys.ToHashSet();
+                    var priorPlan = current.DeliveryItems.Where(i => IsScopeContainer(i) || i.ParentProposalKey != pending).ToArray();
+                    var existingStories = priorPlan.Where(i => prior.Contains(i.ProposalKey)).Select(i => i.ParentProposalKey).ToHashSet();
+                    var eligible = SuccessorCandidates(priorPlan.Where(i => i.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone ||
+                        existingStories.Contains(i.ParentProposalKey)).ToArray(), prior);
+                    var liveBoard = await context.Platform.Work.ReadBoardAsync(boardId, token);
+                    var livePlans = await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token);
+                    var liveSprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
+                    var decision = await review(progress, eligible, liveBoard, livePlans, liveSprints);
+                    if (prior.Count > 0 && !HasAcceptedProgressiveIncrements(priorPlan, prior.ToArray(), liveBoard.Items, livePlans, true))
+                        return new(progress, Waiting: "The provisional Story still needs its prerequisite acceptance.");
+                    if (decision.Story != pending || !decision.KeepDraft && progress.AdmissionReviewBasis is { } reviewed && reviewed != decision.Basis)
+                        return new(progress with { RefinementSessionId = progress.LastPublishedSessionId, PendingStoryKey = null,
+                            DraftSessionId = currentSession.Id, DraftStoryKey = pending, DraftBasis = progress.AcceptedBases.GetValueOrDefault(pending),
+                            DraftDirection = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest },
+                            Waiting: "Current evidence changed the next Story. The provisional refinement is retained outside the board.");
+                }
+                progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null, AdmissionReviewBasis = null };
                 if (progress.ScheduledArtifactDigest != currentArtifact.Digest || needsAuthorityReconciliation)
                     return new(progress, currentSession) { ReviewedAuthorityQuestions = reviewedQuestions };
             }
@@ -184,35 +241,84 @@ public sealed partial class SpecialistAgent
             var leaves = current.DeliveryItems.Where(x => !IsScopeContainer(x)).ToArray();
             // A prerequisite sprint can finish while this Story still has unscheduled work.
             // Reconcile that same immutable proposal; aggregate acceptance only gates the NEXT Story.
+            var plans = evidence.Adaptive ? await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token) : [];
+            var sprints = evidence.Adaptive || progress.ScheduledSprintSequence.HasValue ? await context.Platform.Work.ListSprintsAsync(boardId, token) : [];
+            var detailed = progress.DetailedStoryKeys.ToHashSet();
+            var candidates = evidence.Adaptive ? SuccessorCandidates(current.DeliveryItems, detailed) : [];
+            var assessment = evidence.Adaptive && review != null ? await review(progress, candidates, board, plans, sprints) : null;
             if (progress.ScheduledSprintSequence.HasValue)
             {
-                var sprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
                 if (!sprints.Any(x => x.Status == "Active") &&
                     sprints.Any(x => x.Status == "Completed" && (x.Sequence ?? 0) >= (progress.ScheduledSprintSequence ?? 1)) &&
                     leaves.Any(x => published.TryGetValue(x.ProposalKey, out var pending) && IsSprintCandidate(pending, sprints)))
                     return new(progress, currentSession) { ReviewedAuthorityQuestions = reviewedQuestions };
             }
-            if (leaves.Any(x => !published.TryGetValue(x.ProposalKey, out var item) || item.Status is not ("Done" or "Completed")))
-                return new(progress, Waiting: "The current increment is published; estimates, QA readiness and execution remain authoritative. Later Stories retain their approved scope without premature detail.");
-            if (leaves.Length > 0 && !HasAcceptedProgressiveIncrements(outline.DeliveryItems, progress.DetailedStoryKeys, board.Items,
-                await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token)))
-                return new(progress, Waiting: "The current increment awaits independent aggregate delivery acceptance before the next Story can be refined.");
-            var completed = progress.DetailedStoryKeys.Where(story => leaves.Any(x => x.ParentProposalKey == story) &&
-                leaves.Where(x => x.ParentProposalKey == story).All(x => published.TryGetValue(x.ProposalKey, out var item) && item.Status is "Done" or "Completed")).ToHashSet();
-            if (completed.Count == outline.DeliveryItems.Count(x => x.WorkItemTypeKey != VideoGameWorkItemTypeKeys.Milestone))
+            var tasksDone = leaves.All(x => published.TryGetValue(x.ProposalKey, out var item) && item.Status is "Done" or "Completed");
+            var accepted = tasksDone && (leaves.Length == 0 || HasAcceptedProgressiveIncrements(current.DeliveryItems, progress.DetailedStoryKeys, board.Items,
+                evidence.Adaptive ? plans : await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token), evidence.Adaptive));
+            if (!accepted && !evidence.Adaptive)
+                return new(progress, Waiting: "The increment awaits execution and independent aggregate acceptance.");
+            if (!accepted && assessment?.DraftAhead == false) return new(progress, Waiting: "The Producer deferred speculative planning until the current uncertainty is resolved.");
+            var next = evidence.Adaptive ? assessment?.Story ?? candidates.FirstOrDefault()?.ProposalKey : NextProgressiveStory(outline.DeliveryItems, detailed, detailed);
+            if (next is null)
+            {
+                if (!accepted) return new(progress, Waiting: "The final planned increment awaits independent acceptance.");
+                if (!evidence.Adaptive && detailed.Count != outline.DeliveryItems.Count(x => x.WorkItemTypeKey != VideoGameWorkItemTypeKeys.Milestone))
+                    throw new InvalidOperationException("The remaining approved Stories have unresolved dependencies.");
                 return new(progress, Complete: true);
-            var next = NextProgressiveStory(outline.DeliveryItems, progress.DetailedStoryKeys.ToHashSet(), completed)
-                ?? throw new InvalidOperationException("No dependency-ready Story exists. Retained scope was not removed; reconcile its dependency graph.");
-            var request = new ProgressiveRequest("Story", evidence.DirectionsDigest, evidence.ScopeKey, evidence.OutlineDigest, next, progress.DetailedStoryKeys,
-                ReviewDirectionsDigest: progress.ReviewedDirectionsDigest != evidence.DirectionsDigest ? progress.ReviewedDirectionsDigest : null);
-            var session = await context.Platform.Communication.StartBoardCoordinationAsync(new(
-                Guid.Parse(technicalDirector.EmployeeId), boardId, "Refine next playable increment: " + next,
-                "Refine only this approved Story into small executable engineering/QA work; preserve the entire published scope outline and completed increments.",
-                ["The exact frozen scope outline is preserved.", "Only the requested Story is detailed.", "Every original criterion survives in execution/QA tasks."],
-                "Refine Story " + next + " within the existing approved scope. Other Stories stay planned; no new creative approval or completed work is inferred.",
-                BoundedMutationKey("progressive-story:" + evidence.ScopeKey + ":" + evidence.OutlineDigest + ":" + next),
-                ProgressiveRequestArtifact(cycle, members, request)), token);
-            return new(progress with { RefinementSessionId = session.Id, PendingStoryKey = next }, Waiting:
+            }
+            var direction = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest;
+            async Task<AgentCoordinationSession> RequestStoryAsync(string storyKey, string draftBasis)
+            {
+                var request = new ProgressiveRequest("Story", evidence.DirectionsDigest, evidence.ScopeKey, evidence.OutlineDigest, storyKey, progress.DetailedStoryKeys,
+                    ReviewDirectionsDigest: progress.ReviewedDirectionsDigest != evidence.DirectionsDigest ? progress.ReviewedDirectionsDigest : null, Adaptive: evidence.Adaptive, DraftBasis: evidence.Adaptive ? draftBasis : null, AcceptedBases: progress.AcceptedBases,
+                    PreviousDraft: evidence.Adaptive && progress.DraftStoryKey == storyKey ? progress.DraftSessionId : null);
+                return await context.Platform.Communication.StartBoardCoordinationAsync(new(
+                    Guid.Parse(technicalDirector.EmployeeId), boardId, "Refine next increment: " + storyKey,
+                    "Refine this increment against the approved Epic. State assumptions about pending prerequisites and how to verify them. This request grants no execution authority.",
+                    ["The exact frozen scope outline is preserved.", "Only the requested Story is detailed.", "Every original criterion survives in execution/QA tasks."],
+                    "Refine Story " + storyKey + " within the existing approved scope. Other Stories stay planned; no new creative approval or completed work is inferred. " + assessment?.Guidance,
+                    BoundedMutationKey("progressive-story:" + evidence.ScopeKey + ":" + evidence.OutlineDigest + ":" + storyKey + (evidence.Adaptive ? ":" + draftBasis + ":" + current.ProposalDigest : "")),
+                    ProgressiveRequestArtifact(cycle, members, request)), token);
+            }
+            string BasisFor(string storyKey) => ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+                evidence.OutlineDigest, current.ProposalDigest, review = assessment?.Basis, direction, next = storyKey }));
+            var extras = new Dictionary<string, ProvisionalStory>(progress.AdditionalDrafts);
+            if (progress.DraftStoryKey is string former && former != next && progress.DraftSessionId is Guid previous &&
+                progress.DraftDirection is string previousDirection && progress.DraftBasis is string previousBasis)
+                extras[former] = new(previous, previousBasis, previousDirection, current.ProposalDigest);
+            if (!accepted && assessment is { DraftAhead: true })
+            {
+                foreach (var other in assessment.AdditionalDrafts)
+                {
+                    var extraBasis = BasisFor(other);
+                    if (extras.TryGetValue(other, out var saved) && saved.Basis == extraBasis) continue;
+                    var extra = await RequestStoryAsync(other, extraBasis);
+                    extras[other] = new(extra.Id, extraBasis, direction, current.ProposalDigest);
+                }
+            }
+            progress = progress with { AdditionalDrafts = extras };
+            if (extras.TryGetValue(next, out var promoted) && promoted.Direction == direction && assessment?.KeepDraft == true &&
+                progress.DraftStoryKey != next)
+            {
+                // Recompose cumulative work if another Story was accepted since the speculative draft.
+                var promotedSessionId = promoted.ParentRevision == current.ProposalDigest ? promoted.SessionId :
+                    (await RequestStoryAsync(next, promoted.Basis)).Id;
+                progress = progress with { DraftSessionId = promotedSessionId, DraftStoryKey = next, DraftBasis = promoted.Basis, DraftDirection = direction };
+            }
+            var basis = BasisFor(next);
+            if (progress.DraftSessionId is Guid draft && progress.DraftStoryKey == next && progress.DraftDirection == direction &&
+                (progress.DraftBasis == basis || assessment?.KeepDraft == true && progress.DraftBasis != null))
+            {
+                if (!accepted) return new(progress, Waiting: "The next Story is provisional while the current increment is running.");
+                return new(progress with { RefinementSessionId = draft, PendingStoryKey = next, AdmissionReviewBasis = assessment?.Basis, DraftStoryKey = null,
+                    DraftBasis = null, DraftSessionId = null, AcceptedBases = new Dictionary<string,string>(progress.AcceptedBases) { [next] = progress.DraftBasis! } }, Waiting: "Prerequisites have independent acceptance. Recheck the provisional proposal before publishing.");
+            }
+            var session = await RequestStoryAsync(next, basis);
+            if (!accepted)
+                return new(progress with { DraftStoryKey = next, DraftBasis = basis, DraftDirection = direction, DraftSessionId = session.Id },
+                    Waiting: "The next Story is being drafted against the current increment. It has no scheduled or executable work.");
+            return new(progress with { RefinementSessionId = session.Id, PendingStoryKey = next, AdmissionReviewBasis = assessment?.Basis, AcceptedBases = evidence.Adaptive ? new Dictionary<string,string>(progress.AcceptedBases) { [next] = basis } : progress.AcceptedBases }, Waiting:
                 "The complete scope outline is published. The next dependency-ready Story has a durable refinement request.");
         }
         catch (Exception error) when (error is InvalidOperationException or JsonException)
@@ -234,7 +340,8 @@ public sealed partial class SpecialistAgent
             reviewedEvidence.DirectionsDigest == retainedEvidence.DirectionsDigest ||
             !reviewedEvidence.ScopeCoverage.Select(x => x.SourceKey).Order().SequenceEqual(retainedEvidence.ScopeCoverage.Select(x => x.SourceKey).Order()))
             throw new InvalidOperationException("Planning direction cannot replace changed accepted inputs or an unrelated retained scope.");
-        var containers = retained.DeliveryItems.Where(IsScopeContainer).ToArray();
+        var containers = retained.DeliveryItems.Where(x => retainedEvidence.Adaptive
+            ? x.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone : IsScopeContainer(x)).ToArray();
         var incoming = reviewed.DeliveryItems.ToDictionary(x => x.ProposalKey, StringComparer.Ordinal);
         if (containers.Length != incoming.Count || containers.Any(x => !incoming.TryGetValue(x.ProposalKey, out var other) ||
             x.WorkItemTypeKey != other.WorkItemTypeKey || x.ParentProposalKey != other.ParentProposalKey ||

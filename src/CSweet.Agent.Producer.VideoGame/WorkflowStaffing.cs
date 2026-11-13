@@ -62,6 +62,19 @@ public sealed partial class SpecialistAgent
                 if (portfolio?.Payload.PlanningCycles.TryGetValue(project, out var cycle) == true && cycle.Progressive is not null)
                 {
                     var plans = await context.Platform.Work.ReadDeliveryPlansAsync(new(project), token);
+                    if (cycle.AdaptivePlanning)
+                    {
+                        var pinned = plans.Where(p => p.Status is "Active" or "Paused" or "Draft").ToArray();
+                        if (pinned.Length > 1) return "Reconcile the multiple pending delivery plans.";
+                        var completed = plans.Where(p => p.Status == "Completed").SelectMany(StoryScopeIds).ToHashSet();
+                        var ids = pinned.Length == 1 ? StoryScopeIds(pinned[0]).ToArray() : detail.Items.Where(s =>
+                            s.Kind == "Story" && s.ProposalProvenance is { } provenance && cycle.Progressive.DetailedStoryKeys.Contains(provenance.ProposalItemKey) &&
+                            !completed.Contains(s.Id) && detail.Items.Any(t => t.ParentItemId == s.Id && t.ExecutionMode == WorkItemExecutionModes.Executable && t.Status != "Cancelled")).Select(s => s.Id).ToArray();
+                        if (ids.Length == 0) return "The next selected Story awaits executable detail.";
+                        await HierarchicalProjectDelivery.PrepareStoryIncrementAsync(project, board.Id, manager, roster,
+                            repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, ids, context, token, completeFullyDefinedEpics: true);
+                        return null;
+                    }
                     var accepted = plans.Where(plan => plan.Status == "Completed").SelectMany(plan => plan.EpicItemIds).ToHashSet();
                     // Reconcile the pinned active increment, including while aggregate acceptance
                     // runs after sprint completion. Deferred release work is a separate scope.

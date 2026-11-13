@@ -164,6 +164,63 @@ public sealed partial class ProgressivePlanningTests
         Assert.Equal("remaining", SpecialistAgent.NextProgressiveStory(f.Outline.DeliveryItems, new HashSet<string> { "playable" }, new HashSet<string> { "playable" }));
     }
 
+    [Fact]
+    public async Task Breakout_draft_survives_collision_and_restart_without_publishing_scoring()
+    {
+        var f = new Fixture(adaptive: true);
+        var kickoff = await f.Review(null);
+        Assert.Null(kickoff.Blocker);
+        Assert.All(f.Items, item => Assert.Equal("Epic", item.Kind));
+        Assert.Equal("prototype.story-1", kickoff.Progress.PendingStoryKey);
+        f.CompleteRefinement();
+        var first = await f.Review(kickoff.Progress);
+        Assert.NotNull(first.Session);
+        await SpecialistAgent.PublishCanonicalBacklogAsync(f.Cycle.BoardId, f.Roster, f.Cycle, [], f.Refinement!, f.DetailArtifact!,
+            new(f.Cycle, [], [], [], "accepted"), f.Refinement!, f.DetailArtifact!, f.Detail!, f.Runtime.CreateContext(), default);
+        var progress = first.Progress with { ScheduledArtifactDigest = f.DetailArtifact!.Digest, LastPublishedSessionId = first.Session!.Id };
+        var draft = await f.Review(progress);
+        Assert.Equal("final.story-1", draft.Progress.DraftStoryKey);
+        var interrupted = await f.Review(draft.Progress, draft: false);
+        Assert.Equal(draft.Progress.DraftSessionId, interrupted.Progress.DraftSessionId);
+        Assert.DoesNotContain(f.Items, i => i.ProposalProvenance?.ProposalItemKey == "final.story-1");
+        Assert.Equal(2, f.Starts.Count);
+        for (var i = 0; i < f.Items.Count; i++)
+            if (f.Items[i].Kind == "Task") f.Items[i] = f.Items[i] with { Status = "Done" };
+        var story = Assert.Single(f.Items, i => i.Kind == "Story");
+        var plan = JsonSerializer.Deserialize<WorkDeliveryPlanResponse>("{}")! with {
+            Id = Guid.NewGuid(), Status = "Completed", UpdatedAt = DateTimeOffset.UtcNow, Scopes = [
+                new(WorkExecutionScopes.Story, story.Id, f.Cycle.BoardId, 1, [], null!, [])] };
+        f.Plans.Add(plan);
+        var restarted = JsonSerializer.Deserialize<ProgressivePlanningProgress>(JsonSerializer.Serialize(interrupted.Progress));
+        var admitted = await f.Review(restarted);
+        Assert.Equal("final.story-1", admitted.Progress.PendingStoryKey);
+        Assert.Equal(draft.Progress.DraftSessionId, admitted.Progress.RefinementSessionId);
+        Assert.Equal(2, f.Starts.Count);
+        var coverage = SpecialistAgent.OutcomeCoverage(f.Evidence.ScopeCoverage, f.Items, f.Plans, null);
+        Assert.Equal(plan.Id, Assert.Single(coverage.Single(o => o.Source == "brief/rebound").AcceptancePlans));
+        Assert.True(coverage[0].Verified);
+        Assert.False(coverage[1].Verified);
+        Assert.False(SpecialistAgent.OutcomeCoverage(f.Evidence.ScopeCoverage, f.Items, f.Plans, plan.UpdatedAt.AddSeconds(-1))[0].Verified);
+    }
+
+    [Fact]
+    public async Task Management_change_before_admission_reopens_stale_detail_for_the_same_story()
+    {
+        var f = new Fixture(adaptive: true);
+        var kickoff = await f.Review(null);
+        f.CompleteRefinement();
+        var changed = await f.Review(kickoff.Progress, draft: false, keep: false);
+        Assert.Null(changed.Session);
+        Assert.Null(changed.Progress.PendingStoryKey);
+        Assert.Equal(kickoff.Progress.RefinementSessionId, changed.Progress.DraftSessionId);
+        Assert.All(f.Items, item => Assert.Equal("Epic", item.Kind));
+        var replacement = await f.Review(changed.Progress, draft: false, keep: false);
+        Assert.Equal(kickoff.Progress.PendingStoryKey, replacement.Progress.PendingStoryKey);
+        Assert.NotEqual(kickoff.Progress.RefinementSessionId, replacement.Progress.RefinementSessionId);
+        Assert.Equal(kickoff.Progress.RefinementSessionId, f.Starts.Last().Artifact!.Payload
+            .GetProperty("progressivePlanning").GetProperty("previousDraft").GetGuid());
+    }
+
     private sealed class Fixture
     {
         public readonly GameProductionPlanningCycleV1 Cycle;
@@ -180,8 +237,9 @@ public sealed partial class ProgressivePlanningTests
         public readonly List<WorkItem> Items = [];
         public readonly List<WorkDeliveryPlanResponse> Plans = [];
         public readonly List<StartBoardCoordinationRequest> Starts = [];
+        private readonly Dictionary<Guid, AgentCoordinationSession> sessions = [];
         public readonly AgentTestRuntime Runtime;
-        public Fixture()
+        public Fixture(bool adaptive = false)
         {
             Cycle = new(Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(), new string('a',64), Guid.NewGuid(), 1, new string('b',64), "concept", "vision", new string('c',64));
             Member = new(Person.OrganizationUserId.ToString(), "Victor", "Agent", null, null, "Peer", "Online") { AgentInstallationId = Person.AgentInstallationId };
@@ -191,9 +249,14 @@ public sealed partial class ProgressivePlanningTests
             Outline = new(Cycle, [Item("prototype", VideoGameWorkItemTypeKeys.Milestone, null, []), Item("playable", VideoGameWorkItemTypeKeys.Feature, "prototype", []),
                 Item("final", VideoGameWorkItemTypeKeys.Milestone, null, ["prototype"]), Item("remaining", VideoGameWorkItemTypeKeys.Content, "final", [])], [], [], [], "outline");
             SpecialistAgent.ProgressiveCoverage[] coverage = [new("document-0:paragraph-0", ["playable"]), new("document-0:paragraph-1", ["remaining"])];
+            if (adaptive)
+            {
+                Outline = Outline with { DeliveryItems = Outline.DeliveryItems.Where(i => i.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone).ToArray() };
+                coverage = [new("brief/rebound", ["prototype"]), new("brief/scoring", ["final"])];
+            }
             var canonical = new { Plan = new { Outline.DeliveryItems, Outline.FeasibilityFindings, Outline.TechnicalConstraints, Outline.OpenFeasibilityDecisions, DependencyPins = Array.Empty<object>() }, Coverage = coverage };
             var directions = new string('d',64);
-            Evidence = new("Outline", SpecialistAgent.ProgressiveScopeKey(Cycle, directions), Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(canonical))), directions, [], coverage);
+            Evidence = new("Outline", (adaptive ? "adaptive:" : "") + SpecialistAgent.ProgressiveScopeKey(Cycle, directions), Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(canonical))), directions, [], coverage) { Adaptive = adaptive };
             Artifact = Wrap(Outline, Evidence, "outline-artifact");
             var now = DateTimeOffset.UtcNow;
             Session = new(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty, Person, Person, "Plan", "Plan", [], "Completed", 2, 2, null, true, "Complete", now, now, []) { BoardSource = new(Cycle.BoardId) };
@@ -213,20 +276,29 @@ public sealed partial class ProgressivePlanningTests
                         ProposalProvenance = r.ProposalProvenance, StageAssignments = r.StageAssignments ?? [] }; Items[i] = item; return Task.FromResult(item);
                 })
                 .RegisterCapability<StartBoardCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationStartBoard, (r, _) => {
-                    Starts.Add(r); Refinement = Session with { Id = Guid.NewGuid(), Status = "Active", Turns = [] }; return Task.FromResult(Refinement);
+                    Starts.Add(r); Refinement = Session with { Id = Guid.NewGuid(), Status = "Active", Turns = [] }; sessions[Refinement.Id] = Refinement; return Task.FromResult(Refinement);
                 })
-                .RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (_, _) => Task.FromResult(Refinement!))
+                .RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (r, _) => Task.FromResult(Refinement?.Id == r.SessionId ? Refinement : sessions.GetValueOrDefault(r.SessionId) ?? Refinement!))
+                .RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([]))
                 .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>(Plans));
         }
         public Task<SpecialistAgent.ProgressiveAdvance> Advance(ProgressivePlanningProgress? progress) => SpecialistAgent.AdvanceProgressivePlanningAsync(
             Cycle.BoardId, Roster, Cycle, [], Member, Session, Artifact, Outline, progress, Runtime.CreateContext(), default);
+        public async Task<SpecialistAgent.ProgressiveAdvance> Review(ProgressivePlanningProgress? progress, bool draft = true, bool keep = true)
+        {
+            return await SpecialistAgent.AdvanceProgressivePlanningAsync(Cycle.BoardId, Roster, Cycle, [], Member, Session, Artifact, Outline,
+                progress, Runtime.CreateContext(), default, (_, choices, _, _, _) => Task.FromResult(new SpecialistAgent.ReviewEffects(
+                    choices.FirstOrDefault()?.ProposalKey, draft, keep, "Test the highest uncertainty first.", draft ? "clean" : "open-collision")));
+        }
         public void CompleteRefinement()
         {
-            var story = Outline.DeliveryItems[1];
-            var leaf = story with { ProposalKey = "implementation", WorkItemTypeKey = VideoGameWorkItemTypeKeys.Task, ParentProposalKey = "playable", AccountableRoleKey = "game-engineer" };
-            Detail = Outline with { DeliveryItems = [.. Outline.DeliveryItems, leaf, leaf with { ProposalKey = "qa", AccountableRoleKey = "game-quality-assurance", DependencyProposalKeys = ["implementation"] }] };
-            DetailArtifact = Wrap(Detail, Evidence with { Phase = "Story", DetailedStoryKeys = ["playable"] }, "detail-artifact");
+            var story = Evidence.Adaptive ? Outline.DeliveryItems[0] with { WorkItemTypeKey = VideoGameWorkItemTypeKeys.Feature,
+                ParentProposalKey = "prototype", ProposalKey = "prototype.story-1" } : Outline.DeliveryItems[1];
+            var leaf = story with { ProposalKey = "implementation", WorkItemTypeKey = VideoGameWorkItemTypeKeys.Task, ParentProposalKey = story.ProposalKey, AccountableRoleKey = "game-engineer" };
+            Detail = Outline with { DeliveryItems = [.. Outline.DeliveryItems, .. (Evidence.Adaptive ? new[] { story } : Array.Empty<GameProposedWorkItemV1>()), leaf, leaf with { ProposalKey = "qa", AccountableRoleKey = "game-quality-assurance", DependencyProposalKeys = ["implementation"] }] };
+            DetailArtifact = Wrap(Detail, Evidence with { Phase = "Story", DetailedStoryKeys = [story.ProposalKey] }, "detail-artifact");
             Refinement = (Refinement ?? Session) with { Status = "Completed", Turns = [new(Guid.NewGuid(), 1, Person.OrganizationUserId, "complete", "Complete", DateTimeOffset.UtcNow, DetailArtifact)] };
+            sessions[Refinement.Id] = Refinement;
         }
         private static AgentCoordinationArtifact Wrap(GameTechnicalDeliveryProposalV1 plan, SpecialistAgent.ProgressiveEvidence evidence, string digest)
         {
