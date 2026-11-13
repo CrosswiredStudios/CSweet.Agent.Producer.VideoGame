@@ -765,10 +765,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var reusePrior = roleRepair is null && priorCycle is not null &&
             (priorCycle.PlanningDirectionsDigest == directionsDigest || priorCycle.PlanningDirectionsDigest is null && managerDirections.Count == 0);
         var adaptive = roleRepair is null && (priorCycle?.AdaptivePlanning == true || priorCycle?.TechnicalDirectorSessionId is null);
-        if (adaptive && await context.Platform.ReadOperatingStateAsync<ApprovedOutcomeLedger>("game-approved-outcomes:" + packageDigest, cancellationToken) is null)
-            await stateStore.MergeAsync<ApprovedOutcomeLedger>("game-approved-outcomes:" + packageDigest, "game.approved-outcomes.v1", 1,
-                old => old ?? new(cycle.ApprovedPackageId, cycle.ApprovedPackageVersion, packageDigest, ledger),
-                new Dictionary<string,string>(), "approved-outcomes:" + packageDigest, cancellationToken);
+        // Accepted package revisions are the durable source. The derived ledger can exceed
+        // operating-state limits; retain exact revision references and rebuild it for publication.
         var separateDesignerBacklog = !adaptive && designer is not null;
         var technicalSession = await EnsurePlanningSessionAsync(technicalDirector, boardId, cycle,
             "Technical delivery and decomposition proposal",
@@ -1723,7 +1721,6 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         _ => VideoGameMilestoneKeys.StabilizationExit
     };
 
-    internal sealed record ApprovedOutcomeLedger(Guid PackageId, int Version, string Digest, IReadOnlyList<GameOutcomeSource> Outcomes);
 
     private static ManagementStatusReport BuildManagementReport(
         Guid cycleId, Guid? requestId, ProducerOperatingState state) =>

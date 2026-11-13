@@ -1,4 +1,4 @@
-# Producer 6.9.1
+# Producer 6.9.2
 
 Corrective tickets now list every inherited finding and say the whole task is re-verified (CSweet.Agent.SDK 5.25.0). See `releases/6.8.0.md`.
 

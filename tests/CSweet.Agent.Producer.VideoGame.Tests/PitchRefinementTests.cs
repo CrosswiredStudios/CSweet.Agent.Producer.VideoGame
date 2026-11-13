@@ -209,7 +209,8 @@ public sealed class PitchRefinementTests
     [InlineData(12000)]
     public async Task QuestionsThenRefinementThenExactApprovalUnlocksPlanningAndRetriesKeepOneDocument(int outcomeLength)
     {
-        var fixture = new Fixture(new string('x', outcomeLength));
+        var acceptedText = string.Join("\n\n", Enumerable.Range(0, 300).Select(i => $"Approved requirement {i}: deterministic game input."));
+        var fixture = new Fixture(new string('x', outcomeLength), acceptedText);
         fixture.SeedModel(1, new(false, ["How many levels are in the MVP?"], "Level count affects workload.", Markdown));
         var first = await new SpecialistAgent().HandleCoordinationTurnAsync(fixture.Request(1), fixture.Context, default);
         Assert.Equal(AgentCoordinationDispositions.Continue, first.Disposition);
@@ -291,7 +292,27 @@ public sealed class PitchRefinementTests
         Assert.Equal(task.WorkContext.WorkstreamId, staffing.WorkstreamId);
         Assert.Contains(staffing.Evidence, x => x.SourceRevision == ready.RevisionSha256);
         fixture.HireTechnicalDirector();
+        fixture.Runtime.RegisterCapability<JsonElement, ArtifactPackage>(PlatformCapabilities.ArtifactPackageRead,
+            (r, _) => Task.FromResult(new ArtifactPackage(r.GetProperty("packageId").GetGuid(), "Planning", "planning", 1,
+                "Accepted", fixture.PackageMembers!, DateTimeOffset.UtcNow)));
+        var outcomes = fixture.PackageMembers!.SelectMany(m => {
+            var revision = fixture.Document(m.ArtifactId).Revisions.Single(x => x.Id == m.AcceptedRevisionId);
+            return GameOutcomeLedger.Read(task.WorkContext.WorkstreamId!.Value, task.WorkContext.TeamId!.Value, m.ArtifactId,
+                revision.Id, revision.ContentSha256, m.RequiredDocumentType, revision.Content);
+        }).ToArray();
+        Assert.True(JsonSerializer.Serialize(outcomes).Length > 128000);
+        fixture.Runtime.RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead,
+            (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([]));
+        StartBoardCoordinationRequest? started = null;
+        fixture.Runtime.RegisterCapability<StartBoardCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationStartBoard,
+            (r, _) => { started = r; return Task.FromResult(JsonSerializer.Deserialize<AgentCoordinationSession>("{}")! with {
+                Id = Guid.NewGuid(), Status = "Active", Turns = [] }); });
         await planner.HandlePersonalTodoAsync(task, fixture.Context, default);
+        Assert.NotNull(started);
+        var references = started.Artifact!.Payload.GetProperty("documentReferences").EnumerateArray().ToArray();
+        Assert.Equal(fixture.PackageMembers!.Count, references.Length);
+        Assert.All(fixture.PackageMembers!, m => Assert.Contains(references, r =>
+            r.GetProperty("documentId").GetGuid() == m.ArtifactId && r.GetProperty("revisionId").GetGuid() == m.AcceptedRevisionId));
         Assert.Single(fixture.TeamBoards);
         Assert.Single(fixture.Sprints);
         Assert.Single(fixture.StaffingProposals);
@@ -375,14 +396,15 @@ public sealed class PitchRefinementTests
                     "Submitted", PackageMembers!, null)));
         }
         public IReadOnlyList<ArtifactPackageMember>? PackageMembers;
-        public Fixture(string outcome = "Ship the accepted game")
+        public Fixture(string outcome = "Ship the accepted game", string acceptedText = "Accepted game pitch")
         {
             var document = Guid.NewGuid(); var revision = Guid.NewGuid();
+            var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(acceptedText)));
             Documents[document] = new(document, "Pitch", "video-game.vision.v1", "Approved", revision, null, revision, null, null,
-                [new(revision, 1, null, "Accepted game pitch", "source-hash", "Accepted", DateTimeOffset.UtcNow, null, DateTimeOffset.UtcNow)]);
+                [new(revision, 1, null, acceptedText, digest, "Accepted", DateTimeOffset.UtcNow, null, DateTimeOffset.UtcNow)]);
             var vision = new GameVisionBrief(Digest, "outcome", "loop", "platform", "art", "MVP", [], "criteria", [])
-                { HighLevelGddArtifactId = document, HighLevelGddAcceptedRevisionId = revision, HighLevelGddRevisionSha256 = "source-hash" };
-            Add(Director, PitchProtocol.Artifact(PitchProtocol.BriefType, Digest, new PitchBrief(vision, document, revision, "source-hash")));
+                { HighLevelGddArtifactId = document, HighLevelGddAcceptedRevisionId = revision, HighLevelGddRevisionSha256 = digest };
+            Add(Director, PitchProtocol.Artifact(PitchProtocol.BriefType, Digest, new PitchBrief(vision, document, revision, digest)));
             var runtime = Runtime = new AgentTestRuntime()
                 .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.TeamRosterReadV2,
                     (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { team = new { teamId = Team.ToString(), revision = TechnicalDirectorHired ? 2 : 1, members = TechnicalDirectorHired ? new object[] { new { employeeId = TechnicalDirector.ToString(), agentInstallationId = Guid.NewGuid(), isAvailable = true, runtimeEligibility = "Eligible", declaredRoleKeys = new[] { "game-technical-director" } } } : Array.Empty<object>() } })))
@@ -413,7 +435,7 @@ public sealed class PitchRefinementTests
                 .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                     (request, _) => Task.FromResult(new AgentOperatingStateReadResponse(States.GetValueOrDefault(request.StateKey))))
                 .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
-                    (request, _) => { var saved = State(request.StateKey, request.Payload, (request.ExpectedRevision ?? 0) + 1); States[request.StateKey] = saved; return Task.FromResult(saved); })
+                    (request, _) => { Assert.InRange(request.Payload.GetRawText().Length, 1, 128000); var saved = State(request.StateKey, request.Payload, (request.ExpectedRevision ?? 0) + 1); States[request.StateKey] = saved; return Task.FromResult(saved); })
                 .RegisterCapability<CreateArtifactDocument, ArtifactDocument>(PlatformCapabilities.ArtifactCreate,
                     (request, _) => { if (request.DocumentType == ProductionSources.DocumentType) SourceCreates++; else Creates++; var id = Guid.NewGuid(); var rev = new ArtifactRevision(Guid.NewGuid(), 1, null, request.Content, "draft1", "Draft", DateTimeOffset.UtcNow, null, null);
                         var doc = new ArtifactDocument(id, request.Title, request.DocumentType, "Draft", rev.Id, null, null, null, null, [rev]) { WorkstreamId = Workstream, TeamId = Team };
