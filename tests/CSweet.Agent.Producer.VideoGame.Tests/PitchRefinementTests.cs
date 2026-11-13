@@ -243,14 +243,55 @@ public sealed class PitchRefinementTests
         await new SpecialistAgent().HandleCoordinationTurnAsync(fixture.Request(5), fixture.Context, default);
         Assert.Single(fixture.Todos);
         // No board, sprint or metrics capabilities are registered. Initial hiring must not require them.
-        await new SpecialistAgent().HandlePersonalTodoAsync(task, fixture.Context, default);
+        var planner = new SpecialistAgent();
+        var configured = await planner.ExecuteCapabilityAsync(new(Guid.NewGuid(), AgentConfigurationCapabilities.Update,
+            JsonSerializer.SerializeToElement(new UpdateAgentConfigurationRequest(new Dictionary<string, JsonElement> {
+                ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid()), ["llmModel"] = JsonSerializer.SerializeToElement("test-model") }))),
+            fixture.Context, default);
+        Assert.True(configured.Succeeded, configured.Error);
+        var legacy = JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with {
+            Id = Guid.NewGuid(), RequesterInstallationId = Guid.Parse(fixture.Context.InstallationId),
+            TeamId = task.WorkContext.TeamId, WorkstreamId = task.WorkContext.WorkstreamId, ExpectedTeamRevision = 1,
+            Status = "RevisionRequested", DecisionComment = "Before board planning, propose the missing Technical Director and baseline Engineer and QA coverage from the accepted brief.",
+            Evidence = [new("scope-capability-gap", ready.RevisionSha256, "Technical feasibility")] };
+        var requests = new List<ResourceChangeRequestResponse> { legacy };
+        fixture.Runtime.RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
+            (_, _) => Task.FromResult(new ResourceChangeReadResponse(requests)));
+        fixture.Runtime.RegisterCapability<ResourceChangeProposalRequest, ResourceChangeRequestResponse>(PlatformCapabilities.ResourceChangePropose,
+            (r, _) => {
+                fixture.StaffingProposals.Add(r);
+                var pending = legacy with { Id = Guid.NewGuid(), Status = "Pending", DecisionComment = null,
+                    RequesterOrganizationUserId = fixture.Producer, Roles = r.Roles };
+                requests.Add(pending);
+                return Task.FromResult(pending);
+            });
+        var assessments = 0;
+        fixture.Runtime.RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (call, _) => {
+            assessments++;
+            using var input = JsonDocument.Parse(call.GetProperty("messages")[1].GetProperty("text").GetString()!);
+            var facts = input.RootElement;
+            var roles = facts.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ToList();
+            Assert.Contains("One level", facts.GetProperty("brief").GetString());
+            if (assessments == 1)
+            {
+                Assert.Equal(legacy.DecisionComment, facts.GetProperty("feedback").GetString());
+                Assert.Contains("retired", facts.GetProperty("supersededPolicy").GetString());
+            }
+            var gaps = facts.GetProperty("Members").GetArrayLength() > 0 ? Array.Empty<SpecialistAgent.CoverageGap>() :
+                [new SpecialistAgent.CoverageGap(roles.IndexOf("game-technical-director"), "Resolve technical feasibility before decomposition.")];
+            return Task.FromResult(JsonSerializer.SerializeToElement(new { role = "assistant",
+                text = JsonSerializer.Serialize(new SpecialistAgent.CoverageAssessment("The first deliverable needs technical feasibility.", gaps)) }));
+        });
+        await planner.HandlePersonalTodoAsync(task, fixture.Context, default);
+        await planner.HandlePersonalTodoAsync(task, fixture.Context, default);
+        Assert.Equal(1, assessments);
         var staffing = Assert.Single(fixture.StaffingProposals);
         Assert.Equal("game-technical-director", Assert.Single(staffing.Roles).RoleKey);
         Assert.Equal(0, fixture.MessageSends);
         Assert.Equal(task.WorkContext.WorkstreamId, staffing.WorkstreamId);
         Assert.Contains(staffing.Evidence, x => x.SourceRevision == ready.RevisionSha256);
         fixture.HireTechnicalDirector();
-        await new SpecialistAgent().HandlePersonalTodoAsync(task, fixture.Context, default);
+        await planner.HandlePersonalTodoAsync(task, fixture.Context, default);
         Assert.Single(fixture.TeamBoards);
         Assert.Single(fixture.Sprints);
         Assert.Single(fixture.StaffingProposals);
@@ -344,7 +385,7 @@ public sealed class PitchRefinementTests
             Add(Director, PitchProtocol.Artifact(PitchProtocol.BriefType, Digest, new PitchBrief(vision, document, revision, "source-hash")));
             var runtime = Runtime = new AgentTestRuntime()
                 .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.TeamRosterReadV2,
-                    (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { team = new { teamId = Team.ToString(), revision = 1, members = TechnicalDirectorHired ? new object[] { new { employeeId = TechnicalDirector.ToString(), agentInstallationId = Guid.NewGuid(), isAvailable = true, runtimeEligibility = "Eligible", declaredRoleKeys = new[] { "game-technical-director" } } } : Array.Empty<object>() } })))
+                    (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new { team = new { teamId = Team.ToString(), revision = TechnicalDirectorHired ? 2 : 1, members = TechnicalDirectorHired ? new object[] { new { employeeId = TechnicalDirector.ToString(), agentInstallationId = Guid.NewGuid(), isAvailable = true, runtimeEligibility = "Eligible", declaredRoleKeys = new[] { "game-technical-director" } } } : Array.Empty<object>() } })))
                 .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
                     (_, _) => Task.FromResult(new ResourceChangeReadResponse([])))
                 .RegisterCapability<ResourceChangeProposalRequest, JsonElement>(PlatformCapabilities.ResourceChangePropose,

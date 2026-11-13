@@ -1,4 +1,4 @@
-# Producer 6.9.0
+# Producer 6.9.1
 
 Corrective tickets now list every inherited finding and say the whole task is re-verified (CSweet.Agent.SDK 5.25.0). See `releases/6.8.0.md`.
 
@@ -203,9 +203,10 @@ Game-specific payload helpers and decision logic live in the bundled `extensions
 
 ## Progressive delivery (2.3.5)
 
-The Producer proposes a baseline Technical Director, game engineer, and QA specialist from the
-exact accepted brief before detailed decomposition. It drafts a sprint while hiring is incomplete and
-requests further roles only for uncovered backlog responsibilities. Approved unfulfilled slots
+At kickoff the Producer assesses the exact accepted brief, current roster and proposed or approved staffing.
+He explains which approaching work warrants hiring now. The Director independently reviews each proposal;
+technical planning and independent QA are responsibilities, not a mandatory hiring bundle.
+The Producer drafts a sprint while hiring is incomplete and reviews coverage as work approaches. Approved unfulfilled slots
 are not proposed again. Drafts have provisional dates, at most eight tentative tickets, and no committed capacity. Tickets can be unassigned; missing coverage stays visible.
 The technical plan is bound to the accepted brief; a roster change rebinds existing unassigned tickets
 instead of regenerating the backlog. Missing roles and their transitive dependencies remain in Backlog;

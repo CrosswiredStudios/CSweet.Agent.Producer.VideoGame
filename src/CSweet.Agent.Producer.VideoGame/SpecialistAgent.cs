@@ -21,7 +21,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string VisionAcknowledgementArtifactType = "video-game.production.game-vision-acknowledgement.v1";
     public override string AgentId => "com.csweet.video-game-producer";
     private const string PlanningCommitmentPrefix = "producer-planning:";
-    internal const string InitialHiringWait = "The initial Technical Director, engineering, and QA coverage proposal is awaiting hiring. Team-board planning starts after technical leadership is hired.";
+    private const string LegacyHiringWait = "The initial Technical Director, engineering, and QA coverage proposal is awaiting hiring. Team-board planning starts after technical leadership is hired.";
+    internal const string InitialHiringWait = "Planning staffing: ";
     internal const string PlanningRecoveryMarker = "Producer planning recovery generation 3";
     private const string EstimationCommitmentPrefix = "producer-estimation:";
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
@@ -567,7 +568,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             // retry deadline, even when recovery itself changed the board revision.
             var hiringCleared = hiringDependencyReady &&
                 correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
-                existing.Status == PersonalTodoStatuses.Running && existing.Wait?.Reason == InitialHiringWait &&
+                existing.Status == PersonalTodoStatuses.Running && (existing.Wait?.Reason == LegacyHiringWait || existing.Wait?.Reason.StartsWith(InitialHiringWait, StringComparison.Ordinal) == true) &&
                 existing.WorkContext is { } existingContext &&
                 existingContext.WorkstreamId == workContext.WorkstreamId && workContext.WorkstreamId.HasValue &&
                 existingContext.TeamId == workContext.TeamId && workContext.TeamId.HasValue &&
@@ -695,12 +696,17 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var designer = SelectRoleMember(roster, VideoGameRoleKeys.GameDesigner);
         var technicalDirector = SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector);
 
-        if (technicalDirector is null)
+        if (!operatingState.PlanningCycles.ContainsKey(workstreamId) || technicalDirector is null)
         {
-            await ProposeCoverageAsync(workstreamId, source.BoardId, roster,
-                InitialDeliveryRequirements().Where(r => r.RequiredRoleKey == VideoGameRoleKeys.TechnicalDirector).ToArray(), context, cancellationToken, handoff.RevisionDigest);
-            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                InitialHiringWait);
+            var staffing = await AssessKickoffCoverageAsync(handoff, source.BoardId, roster, context, cancellationToken);
+            if (technicalDirector is null)
+            {
+                var reason = InitialHiringWait + DescribeKickoffState(staffing.Response, staffing.Reason);
+                if (staffing.Response is null or { Status: "RevisionRequested" or "Rejected" })
+                    return PersonalTodoResult.Blocked(reason);
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), reason,
+                    staffing.Response.Status == "Pending" ? staffing.Response.ManagerOrganizationUserId : null);
+            }
         }
 
         var boardId = source.BoardId ?? (await EnsureProductionBoardAsync(workstream, teamId, context, cancellationToken)).Id;

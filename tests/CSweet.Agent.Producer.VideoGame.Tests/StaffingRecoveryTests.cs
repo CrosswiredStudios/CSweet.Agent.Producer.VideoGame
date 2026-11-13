@@ -5,6 +5,27 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class StaffingRecoveryTests
 {
+    [Fact]
+    public void Manager_chat_does_not_own_staffing_for_an_existing_production_handoff()
+    {
+        Assert.False(SpecialistAgent.UsesManagerChatStaffing("video-game-production.v2"));
+        Assert.False(SpecialistAgent.UsesManagerChatStaffing(null));
+        Assert.True(SpecialistAgent.UsesManagerChatStaffing("video-game-manager-brief.v1"));
+    }
+
+    [Theory]
+    [InlineData("RevisionRequested","Show why this needs a permanent hire")]
+    [InlineData("Pending","Director's review")]
+    [InlineData("Approved","eligible technical planning coverage")]
+    public void Planning_card_identifies_the_actual_wait(string status,string expected)
+    {
+        var response = JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with {
+            Id = Guid.NewGuid(), Status = status, DecisionComment = "Show why this needs a permanent hire" };
+        var reason = SpecialistAgent.DescribeKickoffState(response, "Scope");
+        Assert.Contains(expected,reason);
+        Assert.Contains(response.Id.ToString("D"),reason);
+    }
+
     [Theory]
     [InlineData("fresh", 2)]
     [InlineData("old", 1)]

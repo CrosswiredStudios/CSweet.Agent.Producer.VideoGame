@@ -67,7 +67,7 @@ public sealed partial class SpecialistAgent
     }
 
     private static async Task<ResourceChangeRequestResponse?> ProposeCoverageAsync(Guid workstreamId, Guid? boardId, AgentTeamContext roster,
-        IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null)
+        IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null, Guid? correctionOf = null, string? assessmentReason = null)
     {
         var missing = requirements.Where(r => RoleTaxonomy.SelectAssignment(roster.Members,
                 new WorkAssignmentRequirements(r.RequiredRoleKey, r.RequiredSpecializationKeys,
@@ -106,6 +106,8 @@ public sealed partial class SpecialistAgent
             : acceptedBriefDigest ?? throw new InvalidOperationException("Initial staffing requires the exact accepted production brief.");
         var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new
             { workstreamId, roster.Revision, roles, evidenceRevision }));
+        if (correctionOf.HasValue)
+            fingerprint = ProducerPolicyFingerprint.Digest($"{fingerprint}:reconsider:{correctionOf:N}");
         // The resource-change request publishes a durable event to the Director.
         // Only its authorized manager conversation is needed here; sending a
         // separate agent chat turn can conflict with an active Director turn.
@@ -113,7 +115,7 @@ public sealed partial class SpecialistAgent
             new CreateCommunicationChat(null, "Private direct conversation.", true, true, [directorId]), token);
         var proposal = new ResourceChangeProposalRequest(chat.Id, Guid.Empty,
             "Deliver the accepted game scope with the smallest team that covers its work.",
-            "Add one installation per uncovered capability. Retain the approved team; do not pre-hire unused disciplines.",
+            assessmentReason?.Truncate(2048) ?? "Add one installation per uncovered capability. Retain the approved team; do not pre-hire unused disciplines.",
             roster.Revision, roles, ["Initial coverage is based on accepted scope, not historical velocity."],
             ["Hiring and spending require their separate approvals.", "Execution retains ticket-level eligibility and readiness gates."],
             approved?.Id, $"producer-coverage:{fingerprint}")

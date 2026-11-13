@@ -75,8 +75,8 @@ public sealed partial class SpecialistAgent
                     a project and the smallest justified team, attach approved hires, coordinate technical planning,
                     populate the backlog, start execution and continue sprints until delivery is accepted.
                     New game setup requires a CEO-approved pitch passed through the Director project-foundation coordination. Do not create a project from this chat. Independent QA is required for every task and aggregate regression.
-                    For lightweight executable projects use software-developer plus game-technical-director or
-                    software-architect. Respect explicit staffing reductions and prior decisions. Existing approved
+                    Base staffing on the actual work and existing capacity. For a production handoff, the project
+                    workflow assesses the team against the accepted brief. Respect prior decisions. Existing approved
                     employees must be attached, not hired again. Do not turn an assignment request into a hiring request.
                     Return JSON {response,createProject,projectName,projectOutcome,teamRoles:[{roleKey,title,purpose,priority}],
                     projectId,startDelivery,separateNewProject}. Only set createProject for an authorized new project; reuse projectId
@@ -111,7 +111,7 @@ public sealed partial class SpecialistAgent
             if (selected is null && (plan.StartDelivery || plan.TeamRoles is { Count: > 0 }))
                 throw new InvalidOperationException("Choose an approved project before staffing or delivery planning.");
             var results = new List<string>();
-            if (plan.TeamRoles is { Count: > 0 })
+            if (plan.TeamRoles is { Count: > 0 } && UsesManagerChatStaffing(selected?.ProfileKey))
             {
                 var existing = staffing.Requests.Where(x => x.RequesterInstallationId.ToString() == context.InstallationId &&
                     (x.Status is "Approved" or "Pending") && (!x.WorkstreamId.HasValue || x.WorkstreamId == selected?.Id)).OrderByDescending(x => x.CreatedAt)
@@ -155,6 +155,8 @@ public sealed partial class SpecialistAgent
                 " Existing approvals and completed operations are retained; I have not confirmed that a sprint started.", cancellationToken);
         }
     }
+    internal static bool UsesManagerChatStaffing(string? profile) => profile == "video-game-manager-brief.v1";
+
     internal static WorkstreamDetail? SelectManagerProject(IReadOnlyList<WorkstreamDetail> projects,
         Guid? projectId, string? name, bool separateNewProject)
     {
@@ -204,8 +206,6 @@ public sealed partial class SpecialistAgent
         if (roles.Count == 0)
             throw new PlatformCapabilityException(PlatformCapabilities.ResourceChangePropose,
                 PlatformCapabilityErrorCode.ValidationFailed, "The suggested roles did not match available game roles.");
-        if (!roles.Any(x => RoleTaxonomy.CoreRoleKey(x.RoleKey) == "software-qa"))
-            roles.Add(new ResourceChangeRole("software-qa", "game-delivery", "Software QA", "Every task requires independent QA, including artifact delivery and aggregate regression.", 1, 100, "Next planned increment", ["work.execution.run"], false, producerId, null) { RoleCategoryKey = "software-qa" });
         var teamName = string.IsNullOrWhiteSpace(plan.ProjectName)
             ? "Game delivery team" : plan.ProjectName.Trim() + " team";
         if (teamName.Length > 160) teamName = teamName[..160];
