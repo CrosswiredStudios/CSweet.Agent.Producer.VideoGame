@@ -57,7 +57,7 @@ public sealed partial class SpecialistAgent
             { ExpectedAssignmentRevision = stage.AssignmentRevision };
     }
     /// <summary>Cross-agent convention: a Blocked outcome carrying this diagnostic needs a management decision.</summary>
-    internal const string DecisionRequiredDiagnostic = "decision-required:v1";
+    internal const string DecisionRequiredDiagnostic = WorkExecutionDiagnostics.DecisionRequired;
     private const string DecisionEscalationPrefix = "producer-decision:";
 
     /// <summary>
@@ -80,7 +80,7 @@ public sealed partial class SpecialistAgent
                 if (stage?.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) == true)
                     revisionEscalation = ReplacementDiscussionEscalation(board.Id, item, stage,
                         await TicketConversations.Discussion.ReadAsync(board.Id, item.WorkItemId, context, token));
-                if ((revisionEscalation ?? DecisionEscalation(item, stage) ?? DispatchBlockerEscalation(item, stage) ??
+                if ((revisionEscalation ?? DecisionEscalation(item, stage) ?? AgentDefectEscalation(item, stage) ?? DispatchBlockerEscalation(item, stage) ??
                         UnhandledBlockerEscalation(board.Id, execution.Id, item, stage, DateTimeOffset.UtcNow)) is not { } escalation) continue;
                 try
                 {
@@ -140,6 +140,28 @@ public sealed partial class SpecialistAgent
             $"Once the cause is addressed, reply `Retry ticket {id}: <what changed>`. An authorized retry preserves the current work; use `Replan ticket {id}: <direction>` only when the plan needs to change.";
         // One escalation per blocked attempt; a new attempt that blocks again is a new decision request.
         return ($"{DecisionEscalationPrefix}{stage.Id:N}:{stage.AttemptCount}", content);
+    }
+
+    /// <summary>
+    /// The assigned agent stopped on a defect in its own processing (diagnostic <see cref="WorkExecutionDiagnostics.AgentDefect"/>),
+    /// not on the work. Offering a plain retry would send the owner round the same failure, so say plainly that the agent
+    /// needs an update or investigation, give its exact reason, and keep retry for after that. Raised once per attempt.
+    /// </summary>
+    internal static (string Key, string Content)? AgentDefectEscalation(WorkItemExecutionResponse item, WorkStageExecutionResponse? stage)
+    {
+        var outcome = stage?.LatestOutcome;
+        if (stage is null || item.Status != "Blocked" || stage.Status != "Blocked" ||
+            outcome?.Disposition != WorkExecutionDispositions.Blocked ||
+            !(outcome.Diagnostics ?? []).Contains(WorkExecutionDiagnostics.AgentDefect, StringComparer.Ordinal)) return null;
+        var reason = new[] { outcome.Summary, stage.LastError, item.BlockedReason }
+            .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "No reason was recorded on the stage.";
+        if (reason.Length > 2500) reason = reason[..2497] + "...";
+        var id = item.ItemIdentifier;
+        var content = $"{id} is stopped by a defect in its assigned agent's own processing at the {stage.StageKey} stage, not by the work itself.\n\n" +
+            $"{reason}\n\n" +
+            "Retrying the same agent version is unlikely to help: the agent needs an update or an operator's investigation. " +
+            $"Once it is updated, reply `Retry ticket {id}: <what changed>`. The retry resumes the stage without replaying completed work.";
+        return ($"{DecisionEscalationPrefix}{stage.Id:N}:agent-defect:{stage.AttemptCount}", content);
     }
 
     /// <summary>

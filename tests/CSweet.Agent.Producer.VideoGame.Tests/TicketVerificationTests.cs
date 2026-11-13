@@ -27,7 +27,26 @@ public sealed class TicketVerificationTests
         var none = TicketVerification.FromProposal(GameBrowserVerification.None);
         Assert.NotNull(none);
         Assert.Empty(none);
-        Assert.Null(TicketVerification.FromProposal(null));
+        Assert.Null(TicketVerification.FromProposal((string?)null));
         Assert.Null(TicketVerification.FromProposal("unexpected"));
+    }
+
+    private static GameProposedWorkItemV1 Proposal(string verification, IReadOnlyList<int>? interaction) =>
+        new("task", VideoGameWorkItemTypeKeys.Task, "Task", "Do it.", ["Scene renders", "Ball breaks a brick"], VideoGameRoleKeys.Engineer,
+            [], [], ["work.execution.run"], []) { BrowserVerification = verification, InteractionCriteria = interaction };
+
+    [Fact]
+    public void Declared_interaction_criteria_become_a_browser_interaction_requirement()
+    {
+        var verifications = TicketVerification.FromProposal(Proposal(GameBrowserVerification.Canvas, [1, 5, 1]))!;
+        Assert.Equal(2, verifications.Count);
+        var interaction = verifications.Single(v => v.Kind == WorkItemVerificationKinds.BrowserInteraction);
+        Assert.Equal(new[] { 1 }, interaction.CriterionIndexes); // out-of-range and duplicate indexes are dropped
+        var planning = new WorkItemPlanningSpecification(["Task"], ["Scene renders", "Ball breaks a brick"]) { Verifications = verifications };
+        Assert.Empty(WorkItemVerifications.ValidatePlanning(planning));
+
+        Assert.Single(TicketVerification.FromProposal(Proposal(GameBrowserVerification.Canvas, null))!);
+        Assert.Single(TicketVerification.FromProposal(Proposal(GameBrowserVerification.Canvas, []))!);
+        Assert.Empty(TicketVerification.FromProposal(Proposal(GameBrowserVerification.None, [0]))!); // no build to observe
     }
 }

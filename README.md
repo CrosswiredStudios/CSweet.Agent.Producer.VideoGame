@@ -1,4 +1,8 @@
-# Producer 6.6.5
+# Producer 6.7.0
+
+Tickets record the plan's interaction criteria as a `browser-interaction` verification, and agent-defect blockers are raised as needing an agent update rather than a plain retry. See `releases/6.7.0.md`.
+
+## Earlier releases
 
 Fixes the 6.6.2 build (missing namespace import); otherwise identical to 6.6.2, which was never released.
 

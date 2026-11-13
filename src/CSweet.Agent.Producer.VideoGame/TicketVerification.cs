@@ -17,4 +17,17 @@ internal static class TicketVerification
         GameBrowserVerification.None => [],
         _ => null
     };
+
+    /// <summary>
+    /// The browser choice plus, when the plan names criteria needing live interaction evidence, a
+    /// <see cref="WorkItemVerificationKinds.BrowserInteraction"/> requirement for exactly those criteria. Indexes that do
+    /// not name one of the proposal's criteria, or interaction without a browser build, are dropped rather than recorded.
+    /// </summary>
+    internal static IReadOnlyList<WorkItemVerificationRequirement>? FromProposal(GameProposedWorkItemV1 proposal)
+    {
+        var verifications = FromProposal(proposal.BrowserVerification);
+        var indexes = (proposal.InteractionCriteria ?? []).Where(i => i >= 0 && i < proposal.AcceptanceCriteria.Count).Distinct().Order().ToArray();
+        if (verifications is not { Count: > 0 } || indexes.Length == 0) return verifications;
+        return [.. verifications, new(WorkItemVerificationKinds.BrowserInteraction) { CriterionIndexes = indexes }];
+    }
 }

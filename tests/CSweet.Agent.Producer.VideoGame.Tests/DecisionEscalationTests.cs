@@ -156,4 +156,22 @@ public sealed class DecisionEscalationTests
             JsonSerializer.SerializeToElement(new { }), [], [format]) };
         Assert.Null(SpecialistAgent.UnhandledBlockerEscalation(Guid.NewGuid(), Guid.NewGuid(), Item(correctable), correctable, DateTimeOffset.UtcNow));
     }
+
+    [Fact]
+    public void Agent_defects_are_raised_as_needing_an_agent_update_not_a_plain_retry()
+    {
+        var stage = Stage([WorkExecutionDiagnostics.AgentDefect, "detail"]);
+        var escalation = SpecialistAgent.AgentDefectEscalation(Item(stage), stage)!.Value;
+        Assert.Contains("defect in its assigned agent's own processing", escalation.Content);
+        Assert.Contains(Summary, escalation.Content);
+        Assert.Contains("unlikely to help", escalation.Content);
+        Assert.Contains("Retry ticket VG4CC32F61E0-22:", escalation.Content);
+        Assert.True(escalation.Key.Length <= 128);
+        Assert.NotEqual(escalation.Key, SpecialistAgent.AgentDefectEscalation(Item(stage), stage with { AttemptCount = 2 })!.Value.Key);
+        // Other blockers keep their own routes.
+        var plain = Stage(["detail"]);
+        Assert.Null(SpecialistAgent.AgentDefectEscalation(Item(plain), plain));
+        Assert.Null(SpecialistAgent.AgentDefectEscalation(Item(stage, "Running"), stage));
+        Assert.Equal("decision-required:v1", SpecialistAgent.DecisionRequiredDiagnostic);
+    }
 }
