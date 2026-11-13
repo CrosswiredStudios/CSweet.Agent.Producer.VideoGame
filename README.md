@@ -1,6 +1,8 @@
-# Producer 6.7.0
+# Producer 6.8.0
 
-Tickets record the plan's interaction criteria as a `browser-interaction` verification, and agent-defect blockers are raised as needing an agent update rather than a plain retry. See `releases/6.7.0.md`.
+Corrective tickets now list every inherited finding and say the whole task is re-verified (CSweet.Agent.SDK 5.25.0). See `releases/6.8.0.md`.
+
+6.7.0: tickets record the plan's interaction criteria as a `browser-interaction` verification, and agent-defect blockers are raised as needing an agent update rather than a plain retry. See `releases/6.7.0.md`.
 
 ## Earlier releases
 
