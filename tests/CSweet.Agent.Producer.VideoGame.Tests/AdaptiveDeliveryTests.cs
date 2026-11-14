@@ -157,6 +157,19 @@ public sealed class AdaptiveDeliveryTests
         await SpecialistAgent.BindAvailableWorkAsync(board, roster, "profile", runtime.CreateContext(), default);
     }
 
+    [Fact]
+    public void Estimation_can_precede_staffing_but_uncovered_review_and_dependencies_stay_outside_ready_scope()
+    {
+        var draft = Item(true);
+        var review = new WorkTechnicalDelegationRecommendation("quality", "game-quality-assurance", ["work.execution.run"], null, true, "Check the build.");
+        draft = draft with { Planning = draft.Planning! with { DelegationRecommendations = [review] } };
+        var dependent = Item(true, draft.Id);
+        var independent = Item(true);
+        WorkItem[] scope = [draft, dependent, independent];
+        Assert.Equal(3, SpecialistAgent.EligibleCandidateScope(scope, scope, estimationOnly: true).Count);
+        Assert.Equal(independent.Id, Assert.Single(SpecialistAgent.EligibleCandidateScope(scope, scope)).Id);
+    }
+
     private static WorkItem Item(bool assigned, params Guid[] dependencies)
     {
         var installation = Guid.NewGuid();

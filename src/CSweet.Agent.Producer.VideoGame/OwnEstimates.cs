@@ -8,7 +8,9 @@ public sealed partial class SpecialistAgent
 {
     internal static AgentTeammate? EstimatePartner(AgentTeammate owner, AgentTeamContext roster, string selfInstallation) =>
         owner.AgentInstallationId?.ToString("D") == selfInstallation
-            ? SelectRoleMember(roster, VideoGameRoleKeys.QualityAssurance)
+            ? roster.Members.Where(m => m.IsAvailable && m.RuntimeEligibility == "Eligible" && m.AgentInstallationId.HasValue &&
+                    m.AgentInstallationId != owner.AgentInstallationId && m.SpecializationKeys.Contains("sprint-estimate-review"))
+                .OrderBy(m => m.AgentInstallationId).FirstOrDefault() ?? SelectRoleMember(roster, VideoGameRoleKeys.QualityAssurance)
             : owner;
 
     internal static AgentCoordinationArtifact? OwnedEstimateArtifact(AgentCoordinationSession session, Guid? installation)

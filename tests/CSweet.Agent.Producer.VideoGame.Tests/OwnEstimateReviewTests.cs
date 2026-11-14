@@ -70,6 +70,9 @@ public sealed class OwnEstimateReviewTests
             DeclaredRoleKeys = [VideoGameRoleKeys.QualityAssurance]
         };
         var roster = new AgentTeamContext("team", "team", "Team", 12, "", "", [owner, qa], [], 2, false);
+        var peer = qa with { AgentInstallationId = Guid.NewGuid(), DeclaredRoleKeys = ["game-technical-director"],
+            SpecializationKeys = ["sprint-estimate-review"] };
+        Assert.Same(peer, SpecialistAgent.EstimatePartner(owner, roster with { Members = [owner, peer] }, Producer.AgentInstallationId.ToString("D")));
         Assert.Same(qa, SpecialistAgent.EstimatePartner(owner, roster, Producer.AgentInstallationId.ToString("D")));
         Assert.Same(qa, SpecialistAgent.EstimatePartner(qa, roster, Producer.AgentInstallationId.ToString("D")));
         Assert.Null(SpecialistAgent.EstimatePartner(owner, roster with { Members = [owner] }, Producer.AgentInstallationId.ToString("D")));

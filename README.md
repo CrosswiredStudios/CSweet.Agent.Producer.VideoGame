@@ -1,4 +1,6 @@
-# Producer 6.9.2
+# Producer 6.11.0
+
+The Producer estimates draft sprint work with its owners, reconciles execution and review coverage against the current roster, and either adjusts scope or pursues missing capacity. Verification requirements determine when to consult QA. See [release notes](releases/6.11.0.md).
 
 Corrective tickets now list every inherited finding and say the whole task is re-verified (CSweet.Agent.SDK 5.25.0). See `releases/6.8.0.md`.
 

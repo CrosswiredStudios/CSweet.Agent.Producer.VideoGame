@@ -187,8 +187,7 @@ public sealed partial class SpecialistAgent
         {
             var current = assignments.SingleOrDefault(x => x.StageKey == stage);
             // Preserve an eligible assignee; a new hire alone does not justify reassignment.
-            var implementers = assignments.Concat(item.StageAssignments).Where(x => x.StageKey == "development" ||
-                x.StageKey == "specialist-execution" && x.Requirements?.RequiredRoleKey is "game-engineer" or "software-developer").ToArray();
+            var implementers = assignments.Concat(item.StageAssignments).Where(x => x.StageKey is "development" or "specialist-execution").ToArray();
             var candidates = roster.Members.Where(x => stage is not ("quality" or "technical-review" or "merge-decision") ||
                 !implementers.Any(author => author.AgentInstallationId.HasValue && author.AgentInstallationId == x.AgentInstallationId ||
                     author.OrganizationUserId.HasValue && author.OrganizationUserId.Value.ToString() == x.EmployeeId)).ToArray();
@@ -237,11 +236,11 @@ public sealed partial class SpecialistAgent
             a.StageKey == r.StageKey && a.AgentInstallationId is not null && a.Requirements?.RequiredRoleKey == r.RequiredRoleKey &&
             a.SelectionEvidence is not null)).ToArray();
 
-    internal static IReadOnlyList<WorkItem> EligibleCandidateScope(IReadOnlyList<WorkItem> candidates, IReadOnlyList<WorkItem> allItems)
+    internal static IReadOnlyList<WorkItem> EligibleCandidateScope(IReadOnlyList<WorkItem> candidates, IReadOnlyList<WorkItem> allItems, bool estimationOnly = false)
     {
         var completed = allItems.Where(x => x.Status.Equals("Done", StringComparison.OrdinalIgnoreCase) ||
             x.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase)).Select(x => x.Id).ToHashSet();
-        var eligible = candidates.Where(x => !completed.Contains(x.Id) && HasStaffedExecution(x) && MissingDelegations(x).Count == 0).ToList();
+        var eligible = candidates.Where(x => !completed.Contains(x.Id) && HasStaffedExecution(x) && (estimationOnly || MissingDelegations(x).Count == 0)).ToList();
         while (true)
         {
             var ids = eligible.Select(x => x.Id).ToHashSet();

@@ -53,8 +53,9 @@ public sealed partial class SpecialistAgent
         if (configured.Policy.Stages.Any(x => x.Key == "task-integration"))
         {
             var repositories = await context.Platform.SourceControl.ListTeamRepositoryOptionsAsync(new(board.TeamId!.Value), token);
-            if (repositories.Count > 1) return "Select explicit repository bindings before configuring this release; multiple authorized repositories are available.";
-            var repository = repositories.SingleOrDefault();
+            const string ambiguousRepository = "Select explicit repository bindings for the code in this increment; multiple authorized repositories are available.";
+            var repository = repositories.Count == 1 ? repositories[0] : null;
+            HashSet<Guid>? staffingStories = null;
             try
             {
                 await RepairQaReportPlanningAsync(board, context, token);
@@ -67,14 +68,24 @@ public sealed partial class SpecialistAgent
                         var pinned = plans.Where(p => p.Status is "Active" or "Paused" or "Draft").ToArray();
                         if (pinned.Length > 1) return "Reconcile the multiple pending delivery plans.";
                         var completed = plans.Where(p => p.Status == "Completed").SelectMany(StoryScopeIds).ToHashSet();
+                        var sprintsForPlan = pinned.Length == 0 ? await context.Platform.Work.ListSprintsAsync(board.Id, token) : [];
+                        var committed = sprintsForPlan.Where(s => s.Status == "Active" || s.Status == "Planned" && s.CapacityPoints > 0)
+                            .Select(s => s.Id).ToHashSet();
+                        if (pinned.Length == 0 && committed.Count == 0) return null;
                         var ids = pinned.Length == 1 ? StoryScopeIds(pinned[0]).ToArray() : detail.Items.Where(s =>
                             s.Kind == "Story" && s.ProposalProvenance is { } provenance && cycle.Progressive.DetailedStoryKeys.Contains(provenance.ProposalItemKey) &&
-                            !completed.Contains(s.Id) && detail.Items.Any(t => t.ParentItemId == s.Id && t.ExecutionMode == WorkItemExecutionModes.Executable && t.Status != "Cancelled")).Select(s => s.Id).ToArray();
-                        if (ids.Length == 0) return "The next selected Story awaits executable detail.";
+                            !completed.Contains(s.Id) && detail.Items.Any(t => t.ParentItemId == s.Id && t.ExecutionMode == WorkItemExecutionModes.Executable && t.Status != "Cancelled" && t.SprintId is Guid sprint && committed.Contains(sprint))).Select(s => s.Id).ToArray();
+                        if (ids.Length == 0) return null;
+                        staffingStories = ids.ToHashSet();
+                        var selectedTasks = detail.Items.Where(t => t.ParentItemId is Guid parent && ids.Contains(parent) &&
+                            t.ExecutionMode == WorkItemExecutionModes.Executable && t.Status != "Cancelled");
+                        if (repositories.Count > 1 && selectedTasks.Any(t => PlannedDeliveryReview.DeliversCode(t,
+                            PrimaryExecutionAssignment(t)?.Requirements?.RequiredRoleKey ?? "game-engineer"))) return ambiguousRepository;
                         await HierarchicalProjectDelivery.PrepareStoryIncrementAsync(project, board.Id, manager, roster,
-                            repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, ids, context, token, completeFullyDefinedEpics: true);
+                            repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, ids, context, token, completeFullyDefinedEpics: true, usePlannedReview: true);
                         return null;
                     }
+                    if (repositories.Count > 1) return ambiguousRepository;
                     var accepted = plans.Where(plan => plan.Status == "Completed").SelectMany(plan => plan.EpicItemIds).ToHashSet();
                     // Reconcile the pinned active increment, including while aggregate acceptance
                     // runs after sprint completion. Deferred release work is a separate scope.
@@ -87,6 +98,7 @@ public sealed partial class SpecialistAgent
                     await HierarchicalProjectDelivery.PrepareIncrementAsync(project, board.Id, manager, roster,
                         repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, increments, context, token);
                 }
+                else if (repositories.Count > 1) return ambiguousRepository;
                 else
                     await HierarchicalProjectDelivery.PrepareAsync(project, board.Id, manager, roster,
                         repository?.RepositoryId ?? Guid.Empty, repository?.DefaultBranch ?? "", profileDigest, false, context, token);
@@ -98,8 +110,11 @@ public sealed partial class SpecialistAgent
                 // leaving rejected initial proposals untouched forever.
                 var current = await context.Platform.Work.ReadBoardAsync(board.Id, token);
                 var missing = current.Items.Where(t => t.ExecutionMode == WorkItemExecutionModes.Executable &&
-                    t.Status is not ("Done" or "Completed" or "Cancelled"))
-                    .SelectMany(t => t.Planning?.DelegationRecommendations ?? []).ToArray();
+                    t.Status is not ("Done" or "Completed" or "Cancelled") &&
+                    (staffingStories is null || t.ParentItemId is Guid parent && staffingStories.Contains(parent)))
+                    .SelectMany(t => staffingStories is null ? t.Planning?.DelegationRecommendations ?? [] :
+                        MissingSprintStaff(t, roster, manager, true))
+                    .Where(d => d.RequiredRoleKey != "manager").ToArray();
                 await ProposeCoverageAsync(project, board.Id, roster, missing, context, token);
                 if (!gap.RejectedByPlatform) return gap.Message;
                 // Retrying the same rejected plan on a timer can never succeed; say so once and back off.
@@ -169,7 +184,7 @@ public sealed partial class SpecialistAgent
         var roster = await ReadManagerTeamAsync(team, context, token);
         var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new
         {
-            board.Id, profileDigest, rosterRevision = roster?.Revision, qaManagerReviewProposalVersion = 2,
+            board.Id, profileDigest, rosterRevision = roster?.Revision, qaManagerReviewProposalVersion = 3,
             // Assignment saves and claim metadata must not create a new recovery generation.
             items = detail.Items.OrderBy(t => t.Id).Select(t => new { t.Id, t.PlanningRevision, t.ParentItemId, t.SprintId, t.Status })
         }, ManagerJson));

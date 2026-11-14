@@ -31,13 +31,13 @@ public sealed partial class SpecialistAgent
             "Attach approved staffing, obtain the technical plan, populate tickets and advance each sprint through verified delivery.",
             "High", new(WorkstreamId: project.Id, SourceFingerprint: ProjectDeliveryPlanning.Fingerprint(project)), context, ct);
     }
-    private static async Task<AgentTeamContext?> ReadManagerTeamAsync(Guid team, AgentRuntimeContext context, CancellationToken ct)
+    private static async Task<AgentTeamContext?> ReadManagerTeamAsync(Guid team, AgentRuntimeContext context, CancellationToken ct, Guid? project = null)
     {
         AgentTeamContext? result = null;
         var members = new List<AgentTeammate>();
         for (var page = 1; page <= 10; page++)
         {
-            var current = (await context.Platform.ReadTeamRosterAsync(new TeamRosterV2Request(team, null, page, 100), ct)).Team;
+            var current = (await context.Platform.ReadTeamRosterAsync(new TeamRosterV2Request(team, project, page, 100), ct)).Team;
             if (current is null) return null;
             if (result is not null && result.Revision != current.Revision) throw new InvalidOperationException("The team roster changed during discovery; retry against its current revision.");
             result ??= current; members.AddRange(current.Members);

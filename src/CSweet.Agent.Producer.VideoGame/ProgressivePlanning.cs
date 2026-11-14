@@ -13,7 +13,13 @@ public sealed partial class SpecialistAgent
         string? OutlineDigest = null, string? StoryKey = null, IReadOnlyList<string>? DetailedStoryKeys = null, string? ReviewDirectionsDigest = null, IReadOnlyList<string>? ManagerDirections = null, bool Adaptive = false, string? DraftBasis = null, IReadOnlyDictionary<string,string>? AcceptedBases = null,
         [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
         Guid? PreviousDraft = null);
-    internal sealed record ProgressiveCoverage(string SourceKey, IReadOnlyList<string> ProposalKeys);
+    internal sealed record ProgressiveCoverage(string SourceKey, IReadOnlyList<string> ProposalKeys)
+    {
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public string? Statement { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public IReadOnlyList<string>? Citations { get; init; }
+    }
     internal sealed record ProgressiveEvidence(string Phase, string ScopeKey, string OutlineDigest, string DirectionsDigest,
         IReadOnlyList<string> DetailedStoryKeys, IReadOnlyList<ProgressiveCoverage> ScopeCoverage)
     {
@@ -69,6 +75,8 @@ public sealed partial class SpecialistAgent
         if (proposal.Cycle.PlanningFingerprint != outline.Cycle.PlanningFingerprint || proposal.Cycle.ApprovedPackageDigest != outline.Cycle.ApprovedPackageDigest ||
             current.Adaptive != original.Adaptive || current.ScopeKey != original.ScopeKey || current.OutlineDigest != original.OutlineDigest || current.DirectionsDigest != original.DirectionsDigest)
             throw new InvalidOperationException("The increment belongs to different accepted inputs or scope.");
+        if (original.Adaptive && JsonSerializer.Serialize(original.ScopeCoverage) != JsonSerializer.Serialize(current.ScopeCoverage))
+            throw new InvalidOperationException("The refinement changed the approved scope ownership mapping.");
         var containers = proposal.DeliveryItems.Where(IsScopeContainer).ToArray();
         if (JsonSerializer.Serialize(original.Adaptive ? containers.Where(x => x.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone).ToArray() : containers) != JsonSerializer.Serialize(outline.DeliveryItems))
             throw new InvalidOperationException("An increment cannot rename, remove or rewrite the accepted full-scope outline.");
@@ -154,7 +162,7 @@ public sealed partial class SpecialistAgent
         AgentCoordinationSession outlineSession, AgentCoordinationArtifact outlineArtifact, GameTechnicalDeliveryProposalV1 outline,
         ProgressivePlanningProgress? progress, AgentRuntimeContext context, CancellationToken token,
         Func<ProgressivePlanningProgress, IReadOnlyList<GameProposedWorkItemV1>, WorkBoardDetail, IReadOnlyList<WorkDeliveryPlanResponse>,
-            IReadOnlyList<WorkSprint>, Task<ReviewEffects>>? review = null)
+            IReadOnlyList<WorkSprint>, Task<ReviewEffects>>? review = null, OwnershipReview? ownership = null)
     {
         var evidence = ReadProgressiveEvidence(outlineArtifact)!;
         var directionReview = evidence.Phase == "Direction" ? evidence : null;
@@ -234,7 +242,7 @@ public sealed partial class SpecialistAgent
             {
                 var designer = new GameDesignerBacklogProposalV1(cycle, [], ["Preserve every approved scope requirement and non-goal."], [], outline.ProposalDigest);
                 await PublishCanonicalBacklogAsync(boardId, roster, cycle, members, outlineSession, outlineArtifact,
-                    designer, outlineSession, outlineArtifact, outline, context, token);
+                    designer, outlineSession, outlineArtifact, outline, context, token, ownership: ownership);
             }
             var board = await context.Platform.Work.ReadBoardAsync(boardId, token);
             var published = ProgressivePublishedItems(board.Items, current.DeliveryItems.Select(x => x.ProposalKey).ToHashSet(StringComparer.Ordinal));

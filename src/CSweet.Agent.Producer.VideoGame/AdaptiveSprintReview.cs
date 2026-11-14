@@ -32,7 +32,7 @@ public sealed partial class SpecialistAgent
     private async Task<ReviewEffects> ReviewAdaptivePlanAsync(GameProductionPlanningCycleV1 cycle, AgentTeamContext roster,
         ProgressivePlanningProgress progress, IReadOnlyList<GameProposedWorkItemV1> choices, WorkBoardDetail board,
         IReadOnlyList<WorkDeliveryPlanResponse> plans, IReadOnlyList<WorkSprint> sprints,
-        ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token)
+        ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, OwnershipReview? ownership = null)
     {
         var decisions = await context.Platform.ReadDecisionsAsync(new(WorkstreamId: cycle.WorkstreamId), token);
         var roles = typeof(VideoGameRoleKeys).GetFields().Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()!).Distinct().Order().ToArray();
@@ -60,7 +60,7 @@ public sealed partial class SpecialistAgent
         var candidateKeys = choices.Select(c => c.ProposalKey).ToArray();
         var completed = sprints.Where(s => s.Status == "Completed").OrderBy(s => s.Sequence).ThenBy(s => s.Id).ToArray();
         var evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
-            cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision,
+            cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
             material = facts.Where(f => f.Kind is "finding" or "direction" or "design" or "proposal" or "qa" or "acceptance" || f.Kind == "item" && f.Detail.EndsWith(" | Blocked", StringComparison.Ordinal)).OrderBy(f => f.Kind).ThenBy(f => f.Id), completed = completed.Select(s => s.Id) }));
         var store = new RevisionSafeProjectState(context.Platform);
         var brief = await context.Platform.Artifacts.GetAsync(handoff.ArtifactId, token);
@@ -133,7 +133,7 @@ public sealed partial class SpecialistAgent
                 EvidenceIndexes = a.EvidenceIndexes.Select(index => remap[index]).ToArray() }).ToArray() };
             var digest = ProducerPolicyFingerprint.Digest(key);
             return (await store.MergeAsync<ReviewReceipt>(key, "game.planning.review.v1", 1, prior => prior ??
-                new(digest, choice.NextCandidate is int i ? candidateKeys[i] : null, choice, compact, roles, DateTimeOffset.UtcNow, evidenceDigest) { Outcomes = OutcomeCoverage(roadmap.ScopeCoverage, board.Items, plans, sprint?.CompletedAt) },
+                new(digest, choice.NextCandidate is int i ? candidateKeys[i] : null, choice, compact, roles, DateTimeOffset.UtcNow, evidenceDigest) { Outcomes = OutcomeCoverage(ownership?.Coverage ?? roadmap.ScopeCoverage, board.Items, plans, sprint?.CompletedAt) },
                 new Dictionary<string,string>(), "review:" + digest, token)).Payload;
         }
 
@@ -229,8 +229,10 @@ public sealed partial class SpecialistAgent
                 plan.Cycle.ApprovedPackageId != handoff.PlanningPackageId) return;
             var board = await context.Platform.Work.ReadBoardAsync(state.BoardId, token);
             var deliveries = await context.Platform.Work.ReadDeliveryPlansAsync(new(state.WorkstreamId), token);
+            var ownership = await context.Platform.ReadOperatingStateAsync<OwnershipReview>(OwnershipKey(plan.Cycle, roadmap), token);
+            if (ownership?.Payload is not { } reviewed) return; // Normal planning records the reviewed owners first.
             await ReviewAdaptivePlanAsync(plan.Cycle, roster, progress, SuccessorCandidates(plan.DeliveryItems,
-                roadmap.DetailedStoryKeys.ToHashSet()), board, deliveries, sprints, roadmap, handoff, context, token);
+                roadmap.DetailedStoryKeys.ToHashSet()), board, deliveries, sprints, roadmap, handoff, context, token, reviewed);
             return;
         }
     }

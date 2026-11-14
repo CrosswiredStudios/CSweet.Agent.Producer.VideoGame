@@ -221,6 +221,29 @@ public sealed partial class ProgressivePlanningTests
             .GetProperty("progressivePlanning").GetProperty("previousDraft").GetGuid());
     }
 
+    [Fact]
+    public void Ownership_review_binds_meaning_to_an_exact_criterion_and_keeps_uncovered_constraints_visible()
+    {
+        var f = new Fixture(adaptive: true);
+        GameOutcomeSource[] sources = new[] { "# History", "Paddle rebounds; score once per brick.", "Chromium desktop only." }
+            .Select((text, index) => new GameOutcomeSource("source-" + index, Guid.NewGuid(), Guid.NewGuid(), "sha", "author", text)).ToArray();
+        var draft = new SpecialistAgent.OwnershipDraft([
+            new("Paddle rebounds", [1], [new(0, 0)]), new("Score once per brick", [1], [new(1, 0)])],
+            [new("Chromium desktop only", 2, "Neither Epic specifies a target browser.")]);
+        var review = SpecialistAgent.BindOwnership(draft, sources, f.Outline.DeliveryItems);
+        Assert.Equal(3, review.Coverage.Count);
+        Assert.Empty(review.Coverage.Single(x => x.SourceKey == "Chromium desktop only").ProposalKeys);
+        Assert.All(review.Commitments, item => Assert.Equal("source-1", Assert.Single(item.Citations)));
+        Assert.Equal(f.Outline.DeliveryItems[1].AcceptanceCriteria[0], Assert.Single(review.Commitments[1].Owners).Criterion);
+        Assert.Single(review.Gaps);
+        var indexed = draft with { Commitments = [draft.Commitments[0] with { ProposedIndexes = [0, 1] }, draft.Commitments[1]] };
+        Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.BindOwnership(indexed, sources, f.Outline.DeliveryItems, 3));
+        Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.BindOwnership(indexed with { Gaps = [draft.Gaps[0] with { ProposedIndexes = [1] }] }, sources, f.Outline.DeliveryItems, 2));
+        SpecialistAgent.BindOwnership(indexed with { Gaps = [draft.Gaps[0] with { ProposedIndexes = [2] }] }, sources, f.Outline.DeliveryItems, 3);
+        var wrong = draft with { Commitments = [draft.Commitments[0] with { Owners = [new(0, 99)] }] };
+        Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.BindOwnership(wrong, sources, f.Outline.DeliveryItems));
+    }
+
     private sealed class Fixture
     {
         public readonly GameProductionPlanningCycleV1 Cycle;

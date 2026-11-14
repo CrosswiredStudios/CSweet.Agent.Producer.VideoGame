@@ -10,9 +10,11 @@ public sealed partial class ProgressivePlanningTests
     // One retained board, proposal, planning commitment and sprint history across
     // acceptance, recovery, refinement, estimates, QA readiness and real agent start callbacks.
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Accepted_increment_recovers_planning_and_starts_successor_once_across_restart_and_duplicate_wakes(bool pendingAuthority)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(false, true, true)]
+    public async Task Accepted_increment_recovers_planning_and_starts_successor_once_across_restart_and_duplicate_wakes(bool pendingAuthority, bool documentOnly, bool verify)
     {
         var f = new Fixture();
         var initial = await f.Advance(null); f.CompleteRefinement();
@@ -30,10 +32,11 @@ public sealed partial class ProgressivePlanningTests
         Assert.NotNull((await f.Advance(progress)).Waiting); Assert.Single(f.Starts);
 
         var states = new Dictionary<string, AgentOperatingStateResponse>();
+        var adaptivePreparation = false;
         ProducerOperatingState Portfolio() => new() { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> {
             [f.Cycle.WorkstreamId] = new(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId, f.Cycle.PlanningFingerprint,
                 null, null, null, null, f.DetailArtifact!.Digest, "reconciled", DateTimeOffset.UtcNow) {
-                Progressive = progress,
+                Progressive = progress, AdaptivePlanning = adaptivePreparation,
                 OutstandingAuthorityQuestions = pendingAuthority ? ["Specific Phaser version selection for particle performance"] : [],
                 EngineeringPrerequisiteKeys = pendingAuthority ? ["next-implementation"] : []
             } } };
@@ -67,7 +70,7 @@ public sealed partial class ProgressivePlanningTests
 
         var nextStory = f.Outline.DeliveryItems.Single(x => x.ProposalKey == "remaining");
         var task = nextStory with { ProposalKey = "next-implementation", WorkItemTypeKey = VideoGameWorkItemTypeKeys.Task,
-            ParentProposalKey = "remaining", AccountableRoleKey = "game-engineer" };
+            ParentProposalKey = "remaining", AccountableRoleKey = documentOnly ? "game-technical-director" : "game-engineer" };
         f.Detail = f.Detail! with { DeliveryItems = [.. f.Detail!.DeliveryItems, task] };
         var evidence = f.Evidence with { Phase = "Story", DetailedStoryKeys = ["playable", "remaining"] };
         var payload = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(f.Detail))!.AsObject();
@@ -78,13 +81,20 @@ public sealed partial class ProgressivePlanningTests
         var nextRefined = await f.Advance(next.Progress); Assert.NotNull(nextRefined.Session);
         AgentTeammate Member(string role) => new(Guid.NewGuid().ToString(), role, "Agent", null, null, "Peer", "Online") {
             AgentInstallationId = Guid.NewGuid(), IsAvailable = true, RuntimeEligibility = "Eligible", DeclaredRoleKeys = [role], EffectiveCapabilities = ["work.execution.run"] };
-        var engineer = Member("game-engineer"); var qa = Member("game-quality-assurance");
-        var roster = f.Roster with { Members = [engineer, qa] };
+        var engineer = Member(task.AccountableRoleKey); var qa = Member("game-quality-assurance");
+        var manager = Member("manager");
+        var roster = f.Roster with { Members = documentOnly && !verify ? [engineer, manager] : [engineer, manager, qa] };
+        adaptivePreparation = documentOnly;
         await Publish(roster); progress = nextRefined.Progress with { ScheduledArtifactDigest = f.DetailArtifact.Digest };
+        if (verify)
+        {
+            var ix = f.Items.FindIndex(t => t.ProposalProvenance?.ProposalItemKey == task.ProposalKey);
+            f.Items[ix] = f.Items[ix] with { Planning = f.Items[ix].Planning! with { Verifications = [new("audio-playback")] } };
+        }
         var now = DateTimeOffset.UtcNow; var ready = Guid.NewGuid(); var repository = Guid.NewGuid();
-        var board = new WorkBoardSummary(f.Cycle.BoardId, "GAME", "Game", false, false, 1, []) { TeamId = f.Cycle.TeamId, WorkstreamId = f.Cycle.WorkstreamId };
+        var board = new WorkBoardSummary(f.Cycle.BoardId, "GAME", "Game", false, false, 1, []) { TeamId = f.Cycle.TeamId, WorkstreamId = f.Cycle.WorkstreamId, ManagerOrganizationUserId = Guid.Parse(manager.EmployeeId) };
         var sprint1 = new WorkSprint(Guid.NewGuid(), board.Id, "Production Sprint 1", "First increment", "Completed", null, null, null, now, null, 0, 0, 0, 0, 1) { Sequence = 1 };
-        var sprints = new List<WorkSprint> { sprint1 }; var starts = 0; var preflightValid = false; var preflights = 0;
+        var sprints = new List<WorkSprint> { sprint1 }; var starts = 0; var preflightValid = false; var preflights = 0; var qaConsults = 0;
         WorkItem Update(Guid id, Func<WorkItem, WorkItem> change) { var index = f.Items.FindIndex(x => x.Id == id); return f.Items[index] = change(f.Items[index]); }
         f.Runtime.RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(new WorkBoardDetail(board,
             [new(ready, "Ready", "ToDo", 0, "None", null)], f.Items)));
@@ -105,6 +115,7 @@ public sealed partial class ProgressivePlanningTests
                     request.WorkItems.Select(x => new GameWorkItemEstimateV1(x.WorkItemId, 3, "high")).ToArray(), 8, [], [], "estimates");
                 type = "video-game.production.role-estimate-capacity-proposal.v1";
             } else {
+                qaConsults++;
                 var request = r.Artifact.Payload.Deserialize<GameQaSprintReadinessRequestV1>()!;
                 result = new GameQaSprintReadinessAssessmentV1(Guid.Empty, request.PlanningRevision, request.PlanningDigest, true,
                     request.Candidates.Select(x => x.WorkItemId).ToArray(), [], "readiness"); type = "video-game.production.qa-sprint-readiness-assessment.v1";
@@ -132,10 +143,39 @@ public sealed partial class ProgressivePlanningTests
         await SpecialistAgent.EnsureDraftSprintAsync(board.Id, "reconciled", f.Runtime.CreateContext(), default);
         var estimate = root with { CorrelationId = SpecialistAgent.SprintEstimationCorrelation(board.Id, "reconciled", 2),
             WorkContext = new(f.Cycle.WorkstreamId, f.Cycle.TeamId, board.Id, SourceFingerprint: "reconciled") };
+        if (documentOnly && verify)
+        {
+            var completeTeam = roster;
+            roster = roster with { Members = [engineer, manager], Revision = roster.Revision + 1 };
+            // An already approved slot is still absent from this roster.
+            var approved = JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with {
+                Id = Guid.NewGuid(), TeamId = f.Cycle.TeamId, Status = "Approved", Roles =
+                    [new("game-quality-assurance", "team", "QA", "Verify output", 1, 1, "This sprint", ["work.execution.run"], false, null, null)] };
+            f.Runtime.RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
+                (_, _) => Task.FromResult(new ResourceChangeReadResponse([approved])));
+            var producer = new AgentIdentity(manager.EmployeeId, "Gabriel", null, null, null, [], null, Guid.NewGuid().ToString(), "Marcus");
+            await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(identity: producer), default);
+            Assert.True(f.Items.Single(t => t.ProposalProvenance?.ProposalItemKey == task.ProposalKey).EstimatePoints > 0);
+            Assert.Equal(0, qaConsults);
+            Assert.DoesNotContain(todos, t => t.CorrelationId!.StartsWith("producer-readiness:"));
+            roster = completeTeam with { Revision = roster.Revision + 1 };
+        }
         await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(), default);
         var readiness = Assert.Single(todos.Where(x => x.CorrelationId!.StartsWith("producer-readiness:")));
+        Assert.Equal(documentOnly && !verify ? 0 : 1, qaConsults);
         Assert.Single(f.Items.Where(x => x.SprintId == sprints[1].Id)); Assert.Equal(0, starts);
         await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default); Assert.Equal(0, starts);
+        if (documentOnly && verify)
+        {
+            var snapshot = roster;
+            roster = roster with { Members = [engineer, manager], Revision = roster.Revision + 1 };
+            await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);
+            Assert.Null(sprints[1].CapacityPoints);
+            Assert.Equal(0, starts);
+            Assert.Equal(1, preflights);
+            roster = snapshot with { Revision = roster.Revision + 1 };
+            await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(), default);
+        }
         preflightValid = true;
         await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);
         await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);

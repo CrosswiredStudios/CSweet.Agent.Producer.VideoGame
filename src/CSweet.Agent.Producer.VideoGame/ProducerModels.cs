@@ -86,6 +86,8 @@ public sealed record ProducerPlanningCycleState(
     public DateTimeOffset? PackageAcceptedAt { get; init; }
     public DateTimeOffset? FirstExecutableTicketAt { get; init; }
     public string? PlanningDirectionsDigest { get; init; }
+    public string? OwnershipCorrectionBasis { get; init; }
+    public string? OwnershipCorrection { get; init; }
     public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
     public IReadOnlyList<string> EngineeringPrerequisiteKeys { get; init; } = [];
     public string? AuthorityDecisionFingerprint { get; init; }
