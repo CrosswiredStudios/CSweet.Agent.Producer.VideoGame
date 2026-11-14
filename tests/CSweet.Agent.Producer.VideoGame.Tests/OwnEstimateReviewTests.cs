@@ -1,3 +1,4 @@
+using CSweet.WorkManagement.Contracts;
 using System.Text.Json;
 using CSweet.Agent.SDK;
 using CSweet.Agent.SDK.VideoGame.Contracts;
@@ -22,15 +23,30 @@ public sealed class OwnEstimateReviewTests
     public async Task ProducerAuthorsProposalAndContinuesForIndependentReview()
     {
         var scope = Scope();
-        var result = await new SpecialistAgent().HandleCoordinationTurnAsync(Request(false,
+        var states=new Dictionary<string,AgentOperatingStateResponse>();
+        var runtime=new AgentTestRuntime()
+            .RegisterCapability<CSweet.WorkManagement.Contracts.WorkBoardReference,CSweet.WorkManagement.Contracts.WorkBoardDetail>(WorkItemCapabilities.Read,(_,_)=>Task.FromResult(JsonSerializer.Deserialize<CSweet.WorkManagement.Contracts.WorkBoardDetail>("{}")! with {Items=[]}))
+            .RegisterCapability<object,PersonalTodoDirectory>(PersonalTodoCapabilities.Read,(_,_)=>Task.FromResult(new PersonalTodoDirectory([])))
+            .RegisterCapability<AgentOperatingStateReadRequest,AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,(r,_)=>Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(r.StateKey))))
+            .RegisterCapability<AgentOperatingStateWriteRequest,AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,(r,_)=> {
+                var now=DateTimeOffset.UtcNow;var value=new AgentOperatingStateResponse(Guid.NewGuid(),r.StateKey,r.SchemaId,r.SchemaVersion,r.Status,r.SourceRevisions,r.ConditionCodes,r.DecisionFingerprint,r.OpenCommitmentCorrelations,r.AttentionReviewId,r.Payload,1,now,now);
+                states[r.StateKey]=value;return Task.FromResult(value);
+            }).RegisterCapability<JsonElement,object>(PlatformCapabilities.LlmChatStream,(_,_)=>Task.FromResult<object>(new {
+            text="{\"estimates\":[{\"points\":5,\"confidence\":\"medium\",\"rationale\":\"Several decision sources need reconciliation\"}],\"availableCapacity\":3,\"assumptions\":[\"Other management commitments remain\"],\"blockers\":[]}"
+        }));
+        var agent=new SpecialistAgent();
+        await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(),AgentConfigurationCapabilities.Update,JsonSerializer.SerializeToElement(
+            new UpdateAgentConfigurationRequest(new Dictionary<string,JsonElement>{{"llmProviderId",JsonSerializer.SerializeToElement(Guid.NewGuid())},{"llmModel",JsonSerializer.SerializeToElement("test")}})),"configure"),runtime.CreateContext(),default);
+        var result = await agent.HandleCoordinationTurnAsync(Request(false,
             Turn(Producer, "video-game.production.role-estimate-request.v1", scope),
             Turn(Qa, "video-game.production.role-estimate-request.v1", scope)),
-            new AgentTestRuntime().CreateContext(), default);
+            runtime.CreateContext(), default);
         Assert.Equal("Continue", result.Disposition);
         var proposal = result.Artifact!.Payload.Deserialize<GameRoleEstimateCapacityProposalV1>()!;
         Assert.Equal(VideoGameRoleKeys.Producer, proposal.RoleKey);
         Assert.Equal(scope.WorkItems[0].WorkItemId, Assert.Single(proposal.Estimates).WorkItemId);
         Assert.True(proposal.Estimates[0].EstimatePoints > 0);
+        Assert.Equal(3,proposal.AvailableSprintCapacity);
     }
 
     [Fact]

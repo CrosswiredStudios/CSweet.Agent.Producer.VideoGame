@@ -43,12 +43,18 @@ public sealed class DeliveryCorrectionContinuationTests
         };
         var modelCalls = 0;
         var effects = new List<string>();
+        var states=new Dictionary<string,AgentOperatingStateResponse>();
         var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest,AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,(r,_)=>Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(r.StateKey))))
+            .RegisterCapability<AgentOperatingStateWriteRequest,AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,(r,_)=> {
+                var now=DateTimeOffset.UtcNow;var value=new AgentOperatingStateResponse(Guid.NewGuid(),r.StateKey,r.SchemaId,r.SchemaVersion,r.Status,r.SourceRevisions,r.ConditionCodes,r.DecisionFingerprint,r.OpenCommitmentCorrelations,r.AttentionReviewId,r.Payload,1,now,now);
+                states[r.StateKey]=value;return Task.FromResult(value);
+            })
             .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read,
                 (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>([plan]))
             .RegisterCapability<JsonElement, JsonElement>(WorkItemCapabilities.Read, (request, _) => Task.FromResult(
                 request.TryGetProperty("itemId", out var itemId) ? JsonSerializer.SerializeToElement(source, json) :
-                JsonSerializer.SerializeToElement(JsonSerializer.Deserialize<WorkBoardDetail>("{}", json)! with { Items = [dependency, source] }, json)))
+                JsonSerializer.SerializeToElement(JsonSerializer.Deserialize<WorkBoardDetail>("{}", json)! with { Board=JsonSerializer.Deserialize<WorkBoardSummary>("{}",json)! with {Id=board,WorkstreamId=project,ManagerOrganizationUserId=manager},Items = [dependency, source] }, json)))
             .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (request, _) => {
                 modelCalls++;
                 Assert.Equal(provider, request.GetProperty("providerProfileId").GetGuid());
@@ -56,14 +62,14 @@ public sealed class DeliveryCorrectionContinuationTests
                 Assert.Equal("delivery-correction-source", request.GetProperty("telemetry").GetProperty("invocationKind").GetString());
                 Assert.Equal(0, request.GetProperty("tools").GetArrayLength());
                 return Task.FromResult(JsonSerializer.SerializeToElement(new { role = "assistant", text = JsonSerializer.Serialize(new {
-                    disposition = "Select", reason = "The finding concerns scene mapping, excluded from dependency scope.",
-                    choices = new[] { new { findingId, sourceItemId = source.Id, scopeEvidence = scopeText, findingEvidence = summary } }
+                    disposition = "repair", rationale = "The finding concerns scene mapping, excluded from dependency scope.",
+                    repairs = new[] { new { sourceIndex=1, findingIndexes=new[]{0}, rationale="Scene implementation owns this finding" } }
                 }) }));
             })
             .RegisterCapability<CoordinateWorkDeliveryCorrectionRequest, WorkDeliveryPlanResponse>(WorkDeliveryCapabilities.Correct, (request, _) => {
                 Assert.Equal(source.Id, request.SourceItemId);
                 effects.Add("source-selected");
-                plan = plan with { Revision = plan.Revision + 1, Corrections = [correction with { SourceItemId = source.Id, Revision = correction.Revision + 1 }] };
+                plan = plan with { Revision = plan.Revision + 1, Corrections = [correction with { SourceItemId = source.Id,SourceItemIds=request.SourceItemIds, Revision = correction.Revision + 1 }] };
                 return Task.FromResult(plan);
             })
             .RegisterCapability<CreateWorkItemRequest, WorkItem>(WorkItemCapabilities.Create, (request, _) => {

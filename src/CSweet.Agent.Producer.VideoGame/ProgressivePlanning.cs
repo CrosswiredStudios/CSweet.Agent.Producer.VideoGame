@@ -267,7 +267,9 @@ public sealed partial class SpecialistAgent
             if (!accepted && !evidence.Adaptive)
                 return new(progress, Waiting: "The increment awaits execution and independent aggregate acceptance.");
             if (!accepted && assessment?.DraftAhead == false) return new(progress, Waiting: "The Producer deferred speculative planning until the current uncertainty is resolved.");
-            var next = evidence.Adaptive ? assessment?.Story ?? candidates.FirstOrDefault()?.ProposalKey : NextProgressiveStory(outline.DeliveryItems, detailed, detailed);
+            if (assessment?.Disposition is "refine" or "wait")
+                return new(progress, Waiting: assessment.Guidance);
+            var next = evidence.Adaptive ? assessment is null ? candidates.FirstOrDefault()?.ProposalKey : assessment.Story : NextProgressiveStory(outline.DeliveryItems, detailed, detailed);
             if (next is null)
             {
                 if (!accepted) return new(progress, Waiting: "The final planned increment awaits independent acceptance.");

@@ -211,6 +211,10 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (request.Transcript.Any(t => t.Artifact?.Type == WorkContributions.RequestType))
+            return WorkContributions.ExecuteAsync(request, context,
+                new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the contribution model provider."), Settings.GetString("llmModel")),
+                RolePrompt, ResponseOptions(), cancellationToken);
         var estimateArtifact = request.Transcript.LastOrDefault(x =>
             x.Artifact?.Type == "video-game.production.role-estimate-request.v1")?.Artifact;
         var estimateRequest = estimateArtifact?.Payload.Deserialize<CSweet.Agent.SDK.VideoGame.Contracts.GameRoleEstimateCapacityRequestV1>();
@@ -225,27 +229,10 @@ public abstract class VideoGameManagerAgentBase : CSweetManagerAgentBase
                     string.IsNullOrWhiteSpace(x.AssignmentDecisionFingerprint)))
                 return Task.FromResult(AgentCoordinationTurnResult.Blocked(
                     "The estimate request is stale, empty, or addressed to a different accountable role."));
-            var estimates = estimateRequest.WorkItems.OrderBy(x => x.WorkItemId)
-                .Select(x => new CSweet.Agent.SDK.VideoGame.Contracts.GameWorkItemEstimateV1(x.WorkItemId,
-                    Math.Clamp(1m + x.AcceptanceCriteria.Count + x.DependencyWorkItemIds.Count, 1m, 13m),
-                    x.Constraints.Count + x.DependencyWorkItemIds.Count > 3 ? "low" : "medium"))
-                .ToList();
-            var digest = CoordinationFingerprint(new
-            {
-                estimateRequest.RequestFingerprint,
-                RoleKey,
-                Items = estimates.Select(x => new { x.WorkItemId, x.EstimatePoints, x.Confidence })
-            });
-            var proposal = new CSweet.Agent.SDK.VideoGame.Contracts.GameRoleEstimateCapacityProposalV1(
-                estimateRequest.BoardId, RoleKey, estimateRequest.PlanningRevision,
-                estimateRequest.PlanningDigest, estimates, estimates.Sum(x => x.EstimatePoints),
-                ["Initial role-owned estimate assumes approved inputs, available toolchain, and no unresolved dependency."],
-                [], digest);
-            return Task.FromResult(AgentCoordinationTurnResult.Completed(
-                $"Submitted {estimates.Count} role-owned estimates and current sprint capacity.",
-                new AgentCoordinationArtifactSubmission("video-game.production.role-estimate-capacity-proposal.v1",
-                    "1.0", estimateRequest.RequestFingerprint, 1, true,
-                    JsonSerializer.SerializeToElement(proposal))));
+            return WorkPlanningJudgments.EstimateAsync(estimateArtifact!.Payload, estimateRequest.RequestFingerprint,
+                context, new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
+                    throw new InvalidOperationException("Configure the planning model provider."), Settings.GetString("llmModel")),
+                ResponseOptions(), cancellationToken);
         }
 
         var qaArtifact = request.Transcript.LastOrDefault(x =>

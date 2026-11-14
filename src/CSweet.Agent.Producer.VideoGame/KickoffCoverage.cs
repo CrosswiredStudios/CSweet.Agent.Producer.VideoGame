@@ -18,7 +18,7 @@ public sealed partial class SpecialistAgent
         ProducerAcceptedHandoff handoff, Guid? board, AgentTeamContext roster, AgentRuntimeContext context, CancellationToken token)
     {
         var roles = typeof(VideoGameRoleKeys).GetFields().Where(f => f.IsLiteral)
-            .Select(f => (string)f.GetRawConstantValue()!).Distinct().Order(StringComparer.Ordinal).ToArray();
+            .Select(f => (string)f.GetRawConstantValue()!).Concat(roster.Members.SelectMany(m=>m.DeclaredRoleKeys)).Distinct().Order(StringComparer.Ordinal).ToArray();
         // Incorporate the decision made against the same approved brief by pre-adaptive
         // Directors. Never feed a different team's or project's rejection to the model.
         var history = (await context.Platform.ReadResourceChangesAsync(new(), token)).Requests;

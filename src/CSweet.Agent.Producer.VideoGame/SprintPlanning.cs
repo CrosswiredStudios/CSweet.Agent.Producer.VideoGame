@@ -5,6 +5,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
+    private sealed record EstimateProposalEvidence(string Key,string Digest,string? AssessmentStateKey);
     internal sealed record SprintPreparation(string Scope, string Digest);
     private static string PreparationKey(Guid sprint) => "producer-sprint-preparation:" + sprint.ToString("N");
     private static string PreparedScope(IEnumerable<WorkItem> tickets, long rosterRevision) =>
@@ -71,8 +72,9 @@ public sealed partial class SpecialistAgent
     internal static string SprintEstimationCorrelation(Guid board, string digest, int sequence) =>
         $"{EstimationCommitmentPrefix}{board:N}:{digest}:{sequence}:sprint-v5";
 
-    internal static IReadOnlyList<WorkItem> PendingSprintCandidates(IReadOnlyList<WorkItem> items, IReadOnlyList<WorkSprint> sprints) =>
-        items.Where(item => IsSprintCandidate(item, sprints)).ToArray();
+    internal static IReadOnlyList<WorkItem> PendingSprintCandidates(IReadOnlyList<WorkItem> items, IReadOnlyList<WorkSprint> sprints,
+        IReadOnlySet<Guid>? authorizedCorrections=null) =>
+        items.Where(item => IsSprintCandidate(item, sprints,authorizedCorrections)).ToArray();
 
     internal static PersonalTodoResult EmptySprintCandidateScope(IReadOnlyList<WorkItem> pending,
         ProducerPlanningCycleState cycle, IReadOnlyList<DecisionRecord> decisions,
@@ -89,9 +91,9 @@ public sealed partial class SpecialistAgent
     internal static string SprintCreationKey(Guid board, string digest, int sequence) =>
         $"producer-sprint:{board:N}:{digest}:{sequence}:v2";
 
-    internal static bool IsSprintCandidate(WorkItem item, IReadOnlyList<WorkSprint> sprints) =>
+    internal static bool IsSprintCandidate(WorkItem item, IReadOnlyList<WorkSprint> sprints,IReadOnlySet<Guid>? authorizedCorrections=null) =>
         item.ExecutionMode == WorkItemExecutionModes.Executable &&
         item.Status is not ("Done" or WorkStatuses.Completed or WorkStatuses.Cancelled) &&
         (item.SprintId is null || sprints.Any(x => x.Id == item.SprintId && x.Status == "Planned")) &&
-        item.ProposalProvenance is not null;
+        (item.ProposalProvenance is not null||authorizedCorrections?.Contains(item.Id)==true);
 }

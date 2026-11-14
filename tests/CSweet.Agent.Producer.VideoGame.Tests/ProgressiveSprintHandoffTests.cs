@@ -162,7 +162,7 @@ public sealed partial class ProgressivePlanningTests
         }
         await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(), default);
         var readiness = Assert.Single(todos.Where(x => x.CorrelationId!.StartsWith("producer-readiness:")));
-        Assert.Equal(documentOnly && !verify ? 0 : 1, qaConsults);
+        Assert.Equal(documentOnly?0:1, qaConsults); // Adaptive structure is local validation; the legacy protocol remains compatible.
         Assert.Single(f.Items.Where(x => x.SprintId == sprints[1].Id)); Assert.Equal(0, starts);
         await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default); Assert.Equal(0, starts);
         if (documentOnly && verify)

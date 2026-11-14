@@ -67,6 +67,8 @@ public sealed partial class SpecialistAgent
                     {
                         var pinned = plans.Where(p => p.Status is "Active" or "Paused" or "Draft").ToArray();
                         if (pinned.Length > 1) return "Reconcile the multiple pending delivery plans.";
+                        if (pinned.SingleOrDefault() is { Status: "Active" } currentPlan)
+                            await ReconcileAppliedScopeInputsAsync(board.Id,currentPlan,context,token);
                         var completed = plans.Where(p => p.Status == "Completed").SelectMany(StoryScopeIds).ToHashSet();
                         var sprintsForPlan = pinned.Length == 0 ? await context.Platform.Work.ListSprintsAsync(board.Id, token) : [];
                         var committed = sprintsForPlan.Where(s => s.Status == "Active" || s.Status == "Planned" && s.CapacityPoints > 0)

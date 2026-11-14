@@ -196,7 +196,8 @@ public sealed partial class ProgressivePlanningTests
         Assert.Equal("final.story-1", admitted.Progress.PendingStoryKey);
         Assert.Equal(draft.Progress.DraftSessionId, admitted.Progress.RefinementSessionId);
         Assert.Equal(2, f.Starts.Count);
-        var coverage = SpecialistAgent.OutcomeCoverage(f.Evidence.ScopeCoverage, f.Items, f.Plans, null);
+        Assert.False(SpecialistAgent.OutcomeCoverage(f.Evidence.ScopeCoverage,f.Items,f.Plans,null)[0].Verified);
+        var coverage = SpecialistAgent.OutcomeCoverage(f.Evidence.ScopeCoverage, f.Items, f.Plans, null,new HashSet<string>{"brief/rebound"});
         Assert.Equal(plan.Id, Assert.Single(coverage.Single(o => o.Source == "brief/rebound").AcceptancePlans));
         Assert.True(coverage[0].Verified);
         Assert.False(coverage[1].Verified);

@@ -1,6 +1,6 @@
-# Producer 6.11.1
+# Producer 6.12.0
 
-The Producer estimates draft sprint work with its owners, reconciles execution and review coverage against the current roster, and either adjusts scope or pursues missing capacity. Verification requirements determine when to consult QA. Document work uses artifact delivery. Owner-directed amendments preserve the affected ticket's scope and evidence through an idle review handoff. See [release notes](releases/6.11.1.md).
+The Producer drafts approaching work, obtains accountable effort and capacity judgments, then reconciles the actual roster before preflight. Structural readiness is shared validation; the planning assessment commissions scoped semantic advice when needed. Exact approved amendments propagate into their dependent delivery inputs with retained digest evidence. Every sprint receives evaluation, followed by the remaining increment, a successor, or explicit final-product verification and delivery completion. Public launch retains its own authorization. See [release notes](releases/6.12.0.md).
 
 Corrective tickets now list every inherited finding and say the whole task is re-verified (CSweet.Agent.SDK 5.25.0). See `releases/6.8.0.md`.
 
@@ -505,3 +505,7 @@ to technical leadership; the Technical Director requests a project-scoped exact 
 reviews it within current authority. Published provider installation and real certification run
 as host-owned work. Resource-change events wake continuation; attention reads recover missed wakes.
 An approval is not a completed installation or a passing build.
+
+## Verified project completion
+
+`platform.workstream.delivery.complete.v1` records delivery as completed only for the current accountable manager, an accepted final-product workflow, the exact current approved source, and no remaining open work. It does not change lifecycle stages, waive findings or authorize public launch. Approval of this additional grant uses the normal published-release Installed Agents update.

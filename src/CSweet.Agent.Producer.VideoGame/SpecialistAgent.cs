@@ -181,6 +181,20 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if(TrackedCollaboration.IsTrackingCard(item)) {
+            if(!TrackedCollaboration.TryGetSessionId(item,out var sessionId))return PersonalTodoResult.Blocked("The contribution tracking reference is invalid.");
+            var session=await context.Platform.Communication.ReadCoordinationAsync(sessionId,cancellationToken);
+            if(session.Initiator.OrganizationUserId.ToString()!=context.Identity?.EmployeeId||session.BoardSource?.BoardId!=item.WorkContext?.BoardId)
+                return PersonalTodoResult.Blocked("The contribution no longer binds this manager's board.");
+            var complete=session.Status==AgentCoordinationStatuses.Completed&&session.Turns.Any(t=>t.SpeakerOrganizationUserId==session.Target.OrganizationUserId&&
+                t.Artifact?.Type is WorkContributions.AnswerType or "video-game.game-design-consultation.v1");
+            return await TrackedCollaboration.ReviewAsync(context,item,new(complete) {
+                OutcomeSummary="Scoped advice is retained for the current planning assessment; it grants no approval or execution authority."},cancellationToken);
+        }
+        if (item.CorrelationId?.StartsWith("producer-corrective-planning:",StringComparison.Ordinal)==true)
+            return await ReconcileCorrectivePlanningAsync(item,context,cancellationToken);
+        if (item.CorrelationId?.StartsWith("final-product-report:v1:", StringComparison.Ordinal) == true)
+            return await ReconcileFinalReportAsync(item,context,cancellationToken);
         if (item.CorrelationId?.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal) == true)
             return await ReconcilePendingScopeAmendmentAsync(item, context, cancellationToken);
         if (item.CorrelationId?.StartsWith(WorkflowRecoveryPrefix, StringComparison.Ordinal) == true)
@@ -862,7 +876,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (advance.Session is null)
                 await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
             if (advance.Blocker is not null) return PersonalTodoResult.Blocked(advance.Blocker);
-            if (advance.Complete) return PersonalTodoResult.Completed("Every retained scope Story has been refined and its published increment work completed; aggregate delivery acceptance remains authoritative.");
+            if (advance.Complete) return await ReconcileFinalProductAsync(cycle,handoff,ownership!,context,cancellationToken);
             if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), advance.Waiting);
             technicalSession = advance.Session!;
             reviewedAuthorityQuestions = advance.ReviewedAuthorityQuestions;
@@ -987,7 +1001,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 workstreamId, handoff.RevisionDigest, roster.LeadDisplayName));
     }
 
-    private static async Task<PersonalTodoResult> ReconcileEstimatesAndQaReadinessAsync(
+    private async Task<PersonalTodoResult> ReconcileEstimatesAndQaReadinessAsync(
         PersonalTodoItem item,
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
@@ -1013,7 +1027,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Blocked("The candidate planning evidence changed.");
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
-        var pendingCandidates = PendingSprintCandidates(board.Items, planningSprints);
+        IReadOnlySet<Guid> authorizedCorrections=source.WorkItemId.HasValue
+            ? await ReadAuthorizedCorrectiveItemsAsync(workstreamId,context,cancellationToken) : new HashSet<Guid>();
+        var pendingCandidates = PendingSprintCandidates(board.Items, planningSprints,authorizedCorrections);
         currentCycle = await ReadScopedPlanningGatesAsync(currentCycle, planningState.Payload, board, context, cancellationToken);
         var candidates = pendingCandidates.Where(x =>
                 CanPrepareWithPlanningDecisions(x, currentCycle))
@@ -1037,7 +1053,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 
         var planningRevision = candidates.Max(x => x.PlanningRevision);
         var planningDigest = source.SourceFingerprint;
-        var roleProposals = new List<(AgentCoordinationSession Session, AgentCoordinationParticipant Author, AgentCoordinationArtifact Artifact,
+        var roleProposals = new List<(AgentCoordinationSession? Session, AgentCoordinationParticipant Author, EstimateProposalEvidence Evidence,
             GameRoleEstimateCapacityProposalV1 Proposal)>();
         var pendingRoles = new List<string>();
         foreach (var group in candidates.GroupBy(x => (Role: PrimaryExecutionAssignment(x)!.Requirements!.RequiredRoleKey,
@@ -1053,6 +1069,17 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             var estimationCandidates = group.Select(ToSprintCandidate).OrderBy(x => x.WorkItemId).ToList();
             var estimateRequest = new GameRoleEstimateCapacityRequestV1(boardId, role,
                 planningRevision, planningDigest, estimationCandidates, requestFingerprint);
+            if(installationId?.ToString()==context.InstallationId)
+            {
+                var payload=JsonSerializer.SerializeToElement(estimateRequest);
+                var generated=await WorkPlanningJudgments.EstimateAsync(payload,requestFingerprint,context,
+                    new AgentLlmSelection(Settings.GetGuid("llmProviderId")??throw new InvalidOperationException("Configure the planning provider."),Settings.GetString("llmModel")),ResponseOptions(),cancellationToken);
+                var submission=generated.Artifact??throw new InvalidOperationException("The owner assessment is unavailable.");
+                var selfProposal=submission.Payload.Deserialize<GameRoleEstimateCapacityProposalV1>()!;
+                var evidence=new EstimateProposalEvidence(submission.Key,selfProposal.ProposalDigest,WorkPlanningJudgments.EstimateStateKey(requestFingerprint,payload));
+                roleProposals.Add((null,new(Guid.Parse(teammate.EmployeeId),teammate.AgentInstallationId!.Value,teammate.DisplayName,role),evidence,selfProposal));
+                continue;
+            }
             var partner = EstimatePartner(teammate, roster, context.InstallationId);
             if (partner is null)
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
@@ -1079,7 +1106,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 !proposal.Estimates.Select(x => x.WorkItemId).OrderBy(x => x).SequenceEqual(expectedIds) ||
                 proposal.Estimates.Any(x => x.EstimatePoints <= 0))
                 return PersonalTodoResult.Blocked($"The {role} estimate proposal is stale, incomplete, or not bound to the candidate scope.");
-            roleProposals.Add((session, author, artifact, proposal));
+            roleProposals.Add((session, author, new(artifact.Key,artifact.Digest,null), proposal));
         }
 
 
@@ -1089,16 +1116,19 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             {
                 var current = (await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken)).Items
                     .Single(x => x.Id == estimate.WorkItemId);
-                if (current.EstimatePoints == estimate.EstimatePoints && current.EstimateProvenance?.SourceDigest == sourceProposal.Artifact.Digest)
+                if (current.EstimatePoints == estimate.EstimatePoints && current.EstimateProvenance?.SourceDigest == sourceProposal.Evidence.Digest)
                     continue;
                 _ = await context.Platform.Work.EstimateAsync(new EstimateWorkItemRequest(boardId, current.Id,
                     estimate.EstimatePoints, current.Revision,
-                    $"producer-estimate:{current.Id:N}:{sourceProposal.Artifact.Digest}")
+                    $"producer-estimate:{current.Id:N}:{sourceProposal.Evidence.Digest}")
                 {
                     Provenance = new WorkEstimateProvenance(sourceProposal.Author.OrganizationUserId,
-                        sourceProposal.Author.AgentInstallationId, sourceProposal.Session.Id,
-                        sourceProposal.Session.Revision, sourceProposal.Artifact.Digest,
-                        ConfidenceValue(estimate.Confidence))
+                        sourceProposal.Author.AgentInstallationId, sourceProposal.Session?.Id??Guid.Empty,
+                        sourceProposal.Session?.Revision??0, sourceProposal.Evidence.Digest,
+                        ConfidenceValue(estimate.Confidence)) {
+                            AssessmentStateKey=sourceProposal.Evidence.AssessmentStateKey,
+                            PlanningRevision=candidates.Single(t=>t.Id==estimate.WorkItemId).PlanningRevision
+                        }
                 }, cancellationToken);
             }
         }
@@ -1114,7 +1144,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var estimated = candidates.ToDictionary(c => c.Id);
         candidates = board.Items.Where(t => estimated.TryGetValue(t.Id, out var prior) &&
             t.PlanningRevision == prior.PlanningRevision && PrimaryExecutionAssignment(t)?.AgentInstallationId ==
-                PrimaryExecutionAssignment(prior)?.AgentInstallationId && IsSprintCandidate(t, planningSprints)).ToList();
+                PrimaryExecutionAssignment(prior)?.AgentInstallationId && IsSprintCandidate(t, planningSprints,authorizedCorrections)).ToList();
         var gaps = new List<WorkTechnicalDelegationRecommendation>();
         var staffed = new List<WorkItem>();
         var unspecified = new HashSet<string>();
@@ -1153,7 +1183,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 $"Sprint staffing: {gapText} {request?.Status} {request?.DecisionComment} Recheck the actual roster or revise draft scope.");
         }
-        var reviewScope = selectedCandidates.Where(t => !currentCycle.AdaptivePlanning || PlannedDeliveryReview.NeedsReadinessConsult(t)).ToArray();
+        var structuralIssues=WorkPlanningReadiness.Validate(selectedCandidates);
+        if(structuralIssues.Count>0)
+            return PersonalTodoResult.Blocked("Reconcile current planning: "+string.Join(" ",structuralIssues.Select(i=>$"{i.ItemId:D} {i.Code}: {i.Message}")));
+        // Semantic advice is commissioned by the adaptive review when its question
+        // calls for it. Structure/provenance is shared validation, not a QA judgment.
+        // Retain the older protocol for non-adaptive projects already using it.
+        var reviewScope = selectedCandidates.Where(t => !currentCycle.AdaptivePlanning).ToArray();
         var qaFingerprint = ProducerPolicyFingerprint.Digest(string.Join("|", boardId, sequence, planningRevision, actual.Revision,
             planningDigest, string.Join(",", selectedCandidates.OrderBy(x => x.Id).Select(x =>
                 $"{x.Id}:{x.PlanningRevision}:{x.EstimateProvenance?.SourceDigest}:{PrimaryExecutionAssignment(x)?.AgentInstallationId}"))));

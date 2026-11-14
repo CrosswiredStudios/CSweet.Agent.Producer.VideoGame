@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.11.1",
+  "version": "6.12.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -877,6 +877,11 @@
       "name": "platform.resource.decide.v1",
       "scope": "organization",
       "purpose": "Request, review or observe durable manager-approved project resource fulfillment.",
+      "modelVisible": false
+    },
+    {
+      "name": "platform.workstream.delivery.complete.v1",
+      "purpose": "Record project delivery only after explicit final-product acceptance against the current approved source; does not authorize scope changes, spending or public launch.",
       "modelVisible": false
     }
   ],
