@@ -1,4 +1,4 @@
-# Producer 6.12.1
+# Producer 6.12.2
 
 The Producer drafts approaching work, obtains accountable effort and capacity judgments, then reconciles the actual roster before preflight. Structural readiness is shared validation; the planning assessment commissions scoped semantic advice when needed. Exact approved amendments propagate into their dependent delivery inputs with retained digest evidence. Every sprint receives evaluation, followed by the remaining increment, a successor, or explicit final-product verification and delivery completion. Public launch retains its own authorization. See [release notes](releases/6.12.0.md).
 
@@ -519,3 +519,8 @@ Packages stay local to the job and are never pushed to NuGet. The job summary an
 artifact record origins, source commits and SHA-256 hashes. Private source repositories require the optional
 `CSWEET_DEPENDENCY_READ_TOKEN` Actions secret with read access to the dependency repositories.
 Run `python3 scripts/test-ci-dependencies.py` for the offline resolver regression tests.
+
+Bundled extension text uses LF checkout bytes pinned in `.gitattributes`. After an intentional
+extension edit, refresh the matching SHA-256 in `extensions/video-game/extension.json` and run
+`python3 scripts/verify-bundled-extension.py --self-test`. CI and release jobs verify exact bytes;
+line endings and unexpected source edits cannot bypass provenance checks.
