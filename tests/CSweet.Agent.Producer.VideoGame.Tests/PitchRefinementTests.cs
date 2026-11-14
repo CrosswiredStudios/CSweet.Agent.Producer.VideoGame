@@ -271,7 +271,7 @@ public sealed class PitchRefinementTests
             assessments++;
             using var input = JsonDocument.Parse(call.GetProperty("messages")[1].GetProperty("text").GetString()!);
             var facts = input.RootElement;
-            var roles = facts.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ToList();
+            var roles = facts.GetProperty("roles").EnumerateArray().ToList();
             Assert.Contains("One level", facts.GetProperty("brief").GetString());
             if (assessments == 1)
             {
@@ -279,7 +279,7 @@ public sealed class PitchRefinementTests
                 Assert.Contains("retired", facts.GetProperty("supersededPolicy").GetString());
             }
             var gaps = facts.GetProperty("Members").GetArrayLength() > 0 ? Array.Empty<SpecialistAgent.CoverageGap>() :
-                [new SpecialistAgent.CoverageGap(roles.IndexOf("game-technical-director"), "Resolve technical feasibility before decomposition.")];
+                [new SpecialistAgent.CoverageGap(roles.Single(r => r.GetProperty("RoleKey").GetString() == "game-technical-director").GetProperty("Capability").GetString(), "Resolve technical feasibility before decomposition.")];
             return Task.FromResult(JsonSerializer.SerializeToElement(new { role = "assistant",
                 text = JsonSerializer.Serialize(new SpecialistAgent.CoverageAssessment("The first deliverable needs technical feasibility.", gaps)) }));
         });

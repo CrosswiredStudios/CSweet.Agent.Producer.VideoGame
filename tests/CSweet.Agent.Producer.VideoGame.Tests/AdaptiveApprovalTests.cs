@@ -37,7 +37,7 @@ public sealed class AdaptiveApprovalTests
                 (r, _) => { if (r.RequestId == null) unscopedReads++; else Assert.Equal(hire.Id, r.RequestId);
                     return Task.FromResult(new ResourceChangeReadResponse([hire])); });
         var decision = new SpecialistAgent.ReviewChoice("Repair collision", 0, true, true, "QA retest", "No new build", [
-            new("resequence", "Address collision before scoring", null, [0]), new("hire", "Tune interacting power-ups", 0, [0])]);
+            new("resequence", "Address collision before scoring", null, [0]), new("hire", "Tune interacting power-ups", "GameDesigner", [0])]);
         var receipt = new SpecialistAgent.ReviewReceipt("review", "repair", decision,
             [new("brief", handoff.ArtifactId, "brief", "approved rules")], ["game-designer"], DateTimeOffset.UtcNow, "evidence");
         await SpecialistAgent.ApplyReviewEffectsAsync(receipt, cycle, roster, handoff, runtime.CreateContext(identity: identity), default);

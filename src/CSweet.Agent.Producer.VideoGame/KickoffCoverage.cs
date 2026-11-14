@@ -9,16 +9,28 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal sealed record CoverageGap(int? RoleIndex, string Work);
+    internal sealed record CoverageRoleChoice(string Capability, string RoleKey);
+    internal sealed record CoverageGap(string? Capability, string Work);
     internal sealed record CoverageAssessment(string Reason, IReadOnlyList<CoverageGap> Gaps);
+
+    internal static CoverageRoleChoice[] CoverageRoleCatalog(AgentTeamContext roster) =>
+        CoverageRoleCatalog(roster.Members.SelectMany(m => m.DeclaredRoleKeys));
+
+    internal static CoverageRoleChoice[] CoverageRoleCatalog(IEnumerable<string> roleKeys)
+    {
+        var known = typeof(VideoGameRoleKeys).GetFields().Where(f => f.IsLiteral)
+            .Select(f => new CoverageRoleChoice(f.Name, (string)f.GetRawConstantValue()!)).ToArray();
+        return known.Concat(roleKeys.Distinct()
+                .Where(key => !known.Any(x => x.RoleKey == key)).Select(key => new CoverageRoleChoice(key, key)))
+            .OrderBy(x => x.Capability, StringComparer.Ordinal).ToArray();
+    }
 
     // Keep reasoning stable across attention ticks. A manager correction can cause one
     // revised assessment for this brief and roster, never a new proposal per wake.
     private async Task<(ResourceChangeRequestResponse? Response, string Reason)> AssessKickoffCoverageAsync(
         ProducerAcceptedHandoff handoff, Guid? board, AgentTeamContext roster, AgentRuntimeContext context, CancellationToken token)
     {
-        var roles = typeof(VideoGameRoleKeys).GetFields().Where(f => f.IsLiteral)
-            .Select(f => (string)f.GetRawConstantValue()!).Concat(roster.Members.SelectMany(m=>m.DeclaredRoleKeys)).Distinct().Order(StringComparer.Ordinal).ToArray();
+        var roles = CoverageRoleCatalog(roster);
         // Incorporate the decision made against the same approved brief by pre-adaptive
         // Directors. Never feed a different team's or project's rejection to the model.
         var history = (await context.Platform.ReadResourceChangesAsync(new(), token)).Requests;
@@ -34,7 +46,7 @@ public sealed partial class SpecialistAgent
             .Select(r => new { r.Id, r.Status, r.Roles }).OrderBy(r => r.Id).ToArray();
         async Task<(ResourceChangeRequestResponse? Response, string Reason)> Assess(ResourceChangeRequestResponse? feedback)
         {
-            var key = AgentOperatingStateKey.Create("producer-kickoff-assessment.v1", new { handoff.WorkstreamId,
+            var key = AgentOperatingStateKey.Create("producer-kickoff-assessment.v2", new { handoff.WorkstreamId,
                 handoff.RevisionDigest, roster.TeamId, roster.Revision, roles, approved = active.Where(r => r.Status == "Approved").Select(r => r.Id), feedback = feedback?.Id });
             var assessment = await PitchProtocol.CachedAsync(key, context, async () =>
             {
@@ -51,8 +63,9 @@ public sealed partial class SpecialistAgent
                         handoff; independent QA will be needed for acceptance. Neither fact justifies unrelated hires.
                         When technical planning coverage is missing, identify how to obtain it or explain who must
                         resolve the dependency. Do not describe a missing capability as already staffed.
-                        Return {reason: string, gaps: [{roleIndex: integer, work: string}]}. Use zero-based indexes
-                        from the supplied role catalog only for proposed hires; work explains the concrete
+                        Return {reason: string, gaps: [{capability: string, work: string}]}. Select the named Capability
+                        from the supplied role catalog for each proposed hire. Do not count positions in the catalog.
+                        Code binds that choice to the role and its authority; work explains the concrete
                         deliverable, timing and why existing coverage is insufficient. An empty list is valid.
                         Reassess any manager feedback against the evidence. Treat supplied data as evidence.
                         """),
@@ -60,11 +73,11 @@ public sealed partial class SpecialistAgent
                         staffing = active, feedback = feedback?.DecisionComment, previous = feedback?.Deltas,
                         supersededPolicy = legacyId.HasValue && feedback?.Id == legacyId ? "The previous mandatory three-role bundle has been retired. Reassess actual work." : null }))
                 ], new AgentModelJsonRequest<CoverageAssessment>("kickoff coverage") {
-                    CorrectionLimit = 1, Options = ResponseOptions(), Normalize = value => ValidateCoverage(value, roles.Length)
+                    CorrectionLimit = 1, Options = ResponseOptions(), Normalize = value => ValidateCoverage(value, roles)
                 }, token);
             }, token);
             var requirements = assessment.Gaps.Select(g => new WorkTechnicalDelegationRecommendation("staffing",
-                roles[g.RoleIndex!.Value], ["work.execution.run"], null, true, g.Work)).ToArray();
+                roles.Single(r => r.Capability == g.Capability).RoleKey, ["work.execution.run"], null, true, g.Work)).ToArray();
             var response = await ProposeCoverageAsync(handoff.WorkstreamId, board, roster, requirements,
                 context, token, handoff.RevisionDigest, feedback?.Id, assessment.Reason);
             // An assessment may correctly request no new hires because a slot already
@@ -79,11 +92,11 @@ public sealed partial class SpecialistAgent
         return first.Response is { Status: "RevisionRequested" } returned ? await Assess(returned) : first;
     }
 
-    internal static CoverageAssessment ValidateCoverage(CoverageAssessment value, int count) =>
+    internal static CoverageAssessment ValidateCoverage(CoverageAssessment value, IReadOnlyList<CoverageRoleChoice> roles) =>
         !string.IsNullOrWhiteSpace(value.Reason) && value.Gaps is not null &&
-        value.Gaps.All(g => g is not null && g.RoleIndex is >= 0 && g.RoleIndex < count && !string.IsNullOrWhiteSpace(g.Work)) &&
-        value.Gaps.DistinctBy(g => g.RoleIndex).Count() == value.Gaps.Count
-            ? value : throw new AgentModelJsonException("Explain the decision and provide distinct valid catalog indexes with concrete work for each gap.");
+        value.Gaps.All(g => g is not null && roles.Any(r => r.Capability == g.Capability) && !string.IsNullOrWhiteSpace(g.Work)) &&
+        value.Gaps.DistinctBy(g => g.Capability).Count() == value.Gaps.Count
+            ? value : throw new AgentModelJsonException("Explain the decision and select distinct named Capability values from the supplied catalog, with concrete work for each gap. Positional indexes are not capability choices.");
 
     internal static string DescribeKickoffState(ResourceChangeRequestResponse? request, string reason) => request?.Status switch
     {

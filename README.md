@@ -1,4 +1,8 @@
-# Producer 6.12.2
+# Producer 6.12.3
+
+Staffing discovery and sprint reviews select named capabilities from the supplied catalog. Code binds
+each choice to the published role; agents never count numeric role positions. Staffing and team size
+continue to follow the approaching work, available coverage, and management review.
 
 The Producer drafts approaching work, obtains accountable effort and capacity judgments, then reconciles the actual roster before preflight. Structural readiness is shared validation; the planning assessment commissions scoped semantic advice when needed. Exact approved amendments propagate into their dependent delivery inputs with retained digest evidence. Every sprint receives evaluation, followed by the remaining increment, a successor, or explicit final-product verification and delivery completion. Public launch retains its own authorization. See [release notes](releases/6.12.0.md).
 

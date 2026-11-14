@@ -10,7 +10,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 public sealed partial class SpecialistAgent
 {
     internal sealed record ReviewFact(string Kind, Guid Id, string Revision, string Detail);
-    internal sealed record ReviewAction(string Kind, string Rationale, int? RoleIndex, IReadOnlyList<int> EvidenceIndexes);
+    internal sealed record ReviewAction(string Kind, string Rationale, string? Capability, IReadOnlyList<int> EvidenceIndexes);
     internal sealed record ReviewChoice(string NextGoal, int? NextCandidate, bool DraftAhead, bool KeepDraft, string RevisitWhen,
         string FeelSummary, IReadOnlyList<ReviewAction> Actions)
     {
@@ -38,7 +38,7 @@ public sealed partial class SpecialistAgent
         ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, OwnershipReview? ownership = null)
     {
         var decisions = await context.Platform.ReadDecisionsAsync(new(WorkstreamId: cycle.WorkstreamId), token);
-        var roles = typeof(VideoGameRoleKeys).GetFields().Where(f => f.IsLiteral).Select(f => (string)f.GetRawConstantValue()!).Concat(roster.Members.SelectMany(m=>m.DeclaredRoleKeys)).Distinct().Order().ToArray();
+        var roles = CoverageRoleCatalog(roster);
         var facts = new List<ReviewFact> { new("brief", handoff.ArtifactId, handoff.RevisionDigest, "Accepted production brief") };
         foreach (var item in board.Items.Where(i => i.ProposalProvenance != null).OrderBy(i => i.Id))
             facts.Add(new(item.ExecutionMode == WorkItemExecutionModes.Executable ? "item" : "container", item.Id,
@@ -63,7 +63,7 @@ public sealed partial class SpecialistAgent
         var candidateKeys = choices.Select(c => c.ProposalKey).ToArray();
         var completed = sprints.Where(s => s.Status == "Completed").OrderBy(s => s.Sequence).ThenBy(s => s.Id).ToArray();
         var evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
-            cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
+            modelContract = "named-capabilities.v2", cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
             material = facts.OrderBy(f => f.Kind).ThenBy(f => f.Id),
             candidateContent = choices, completed = completed.Select(s => s.Id) }));
         var store = new RevisionSafeProjectState(context.Platform);
@@ -109,14 +109,15 @@ public sealed partial class SpecialistAgent
                     Give a short feelSummary with actual build reference or prerequisite progress, how to try it, attributed observations
                     and remaining hypotheses. Never invent human playtests, build links or observations. Report a research-only sprint honestly.
                     Examine the provisional Story, its assumptions and current evidence. Set keepDraft true when the same draft remains suitable.
-                    Return {disposition,nextGoal,nextCandidate,draftAhead,keepDraft,revisitWhen,feelSummary,actions:[{kind,rationale,roleIndex,evidenceIndexes}],additionalDraftCandidates:[]}.
+                    Return {disposition,nextGoal,nextCandidate,draftAhead,keepDraft,revisitWhen,feelSummary,actions:[{kind,rationale,capability,evidenceIndexes}],additionalDraftCandidates:[]}.
                     Include verifiedSources as indexes into supplied obligations only when accepted evidence meaningfully
                     verifies the approved wording and applicable constraints. Existing tickets being done is insufficient.
                     The sprint snapshot is historical; other collected facts describe current observations/direction.
                     Do not backdate newer management direction, later findings or observations to sprint completion.
                     Use proceed, resequence, refine, consult, hire, spend, qa-disposition, escalate or ceo-hold. Cite evidence by zero-based index.
                     Prefer one proceed for ordinary success. Assess rules uncertainty, overlapping mechanics, content load, evidence and capacity.
-                    A consultation needs one bounded question. A hire needs a sustained gap and its deliverable. Use roleIndex only for consult or hire.
+                    A consultation needs one bounded question. A hire needs a sustained gap and its deliverable. For consult or hire,
+                    select capability by its supplied Capability name, never by position. Other actions use null capability.
                     If a Designer is already assigned consider a scoped contribution to the approaching work. Check prior proposals and their authoritative status before requesting further action. Extra spend and a change in QA
                     obligations require independent authority. A CEO hold needs a specific reserved decision and only otherwise ready affected item references.
                     A play invitation never holds work. Use proceed for experiments already authorized within delegated resources. Reserve spend for a specific additional cost with its amount, currency and purpose grounded in the supplied evidence. Prioritize repairing actual failures; keep useful draft detail when its assumptions survive.
@@ -127,11 +128,11 @@ public sealed partial class SpecialistAgent
             ], new AgentModelJsonRequest<ReviewChoice>("game planning review") {
                 Options = ResponseOptions(), Normalize = value =>
                 {
-                    ValidateReview(value, choices.Count, roles.Length, evidence);
+                    ValidateReview(value, choices.Count, roles, evidence);
                     var obligations=ownership?.Coverage??roadmap.ScopeCoverage;
                     if(value.VerifiedSources?.Any(i=>i<0||i>=obligations.Count)==true)
                         throw new AgentModelJsonException("Verified source indexes must refer to supplied approved obligations.");
-                    if (value.Actions.Any(a => a.Kind == "consult" && SelectRoleMember(roster, roles[a.RoleIndex!.Value]) == null))
+                    if (value.Actions.Any(a => a.Kind == "consult" && SelectRoleMember(roster, roles.Single(r => r.Capability == a.Capability).RoleKey) == null))
                         throw new AgentModelJsonException("Consult an available qualified participant. Propose a hire only for a sustained gap.");
                     return value;
                 }
@@ -146,7 +147,7 @@ public sealed partial class SpecialistAgent
                 EvidenceIndexes = a.EvidenceIndexes.Select(index => remap[index]).ToArray() }).ToArray() };
             var digest = ProducerPolicyFingerprint.Digest(key);
             return (await store.MergeAsync<ReviewReceipt>(key, "game.planning.review.v1", 1, prior => prior ??
-                new(digest, choice.NextCandidate is int i ? candidateKeys[i] : null, choice, compact, roles, DateTimeOffset.UtcNow, evidenceDigest) {
+                new(digest, choice.NextCandidate is int i ? candidateKeys[i] : null, choice, compact, roles.Select(r => r.RoleKey).ToArray(), DateTimeOffset.UtcNow, evidenceDigest) {
                     Outcomes = OutcomeCoverage(ownership?.Coverage ?? roadmap.ScopeCoverage, board.Items, plans, sprint?.CompletedAt,
                         (choice.VerifiedSources??[]).Select(i=>(ownership?.Coverage??roadmap.ScopeCoverage)[i].SourceKey).ToHashSet()) },
                 new Dictionary<string,string>(), "review:" + digest, token)).Payload;
@@ -156,7 +157,7 @@ public sealed partial class SpecialistAgent
         ReviewReceipt? latest = null;
         foreach (var sprint in completed)
         {
-            latest = await Decide($"game-sprint-review:{cycle.WorkstreamId:N}:{sprint.Id:N}", sprint);
+            latest = await Decide($"game-sprint-review-v2:{cycle.WorkstreamId:N}:{sprint.Id:N}", sprint);
 
             try { await PublishSprintReviewAsync(cycle.WorkstreamId, cycle.BoardId, sprint, latest, context, token); }
             catch (Exception error) when (error is PlatformCapabilityException or HttpRequestException)
@@ -235,7 +236,7 @@ public sealed partial class SpecialistAgent
         {
             var sent = $"game-review-sent:{state.WorkstreamId:N}:{sprint.Id:N}";
             if (await context.Platform.ReadOperatingStateAsync<ReviewReportSent>(sent, token) != null) continue;
-            var key = $"game-sprint-review:{state.WorkstreamId:N}:{sprint.Id:N}";
+            var key = $"game-sprint-review-v2:{state.WorkstreamId:N}:{sprint.Id:N}";
             var saved = await context.Platform.ReadOperatingStateAsync<ReviewReceipt>(key, token);
             if (saved != null)
             {
@@ -261,7 +262,7 @@ public sealed partial class SpecialistAgent
         }
     }
 
-    internal static ReviewChoice ValidateReview(ReviewChoice value, int candidateCount, int roleCount, IReadOnlyList<ReviewFact> evidence)
+    internal static ReviewChoice ValidateReview(ReviewChoice value, int candidateCount, IReadOnlyList<CoverageRoleChoice> roles, IReadOnlyList<ReviewFact> evidence)
     {
         if (string.IsNullOrWhiteSpace(value.NextGoal) || string.IsNullOrWhiteSpace(value.RevisitWhen) || string.IsNullOrWhiteSpace(value.FeelSummary) ||
             (value.NextCandidate is int i && (i < 0 || i >= candidateCount)) ||
@@ -275,10 +276,10 @@ public sealed partial class SpecialistAgent
             value.Actions is not { Count: > 0 } || value.Actions.Any(a => a == null ||
                 a.Kind is not ("proceed" or "resequence" or "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold") ||
                 string.IsNullOrWhiteSpace(a.Rationale) || a.EvidenceIndexes is not { Count: > 0 } || a.EvidenceIndexes.Any(i => i < 0 || i >= evidence.Count) ||
-                ((a.Kind is "hire" or "consult") ? a.RoleIndex is not int role || role < 0 || role >= roleCount : a.RoleIndex.HasValue) ||
+                ((a.Kind is "hire" or "consult") ? !roles.Any(r => r.Capability == a.Capability) : a.Capability is not null) ||
                 a.Kind == "ceo-hold" && !a.EvidenceIndexes.Any(i => evidence[i].Kind == "item") ||
                 a.Kind == "qa-disposition" && !a.EvidenceIndexes.Any(i => evidence[i].Kind is "qa" or "finding")))
-            throw new AgentModelJsonException("Supply an eligible next candidate, supported actions, valid role/evidence indexes and an evidence-backed feel summary.");
+            throw new AgentModelJsonException("Supply an eligible next candidate, supported actions, named capability choices, valid evidence indexes and an evidence-backed feel summary.");
         return value;
     }
 
@@ -295,7 +296,10 @@ public sealed partial class SpecialistAgent
             var recorded = await context.Platform.ReadOperatingStateAsync<ReviewActionReceipt>(key, token);
             var protectedAction = action.Kind is "hire" or "spend" or "ceo-hold" or "escalate" or "qa-disposition";
             var registryKey = "game-review-proposals:" + cycle.WorkstreamId.ToString("N");
-            var role = action.RoleIndex is int index ? receipt.Roles[index] : null;
+            var role = action.Capability is { } capability
+                ? CoverageRoleCatalog(receipt.Roles).SingleOrDefault(r => r.Capability == capability && receipt.Roles.Contains(r.RoleKey))?.RoleKey : null;
+            if (action.Kind is "hire" or "consult" && role is null)
+                throw new AgentModelJsonException("Reassess this action using a named capability from its recorded catalog before applying it.");
             var intent = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new { action.Kind, role, action.Rationale,
                 evidence = refs.Where(f => f.Kind != "proposal").Select(f => f.Id).Order() }));
             if (recorded != null && !protectedAction) continue;
@@ -317,12 +321,12 @@ public sealed partial class SpecialistAgent
             if (action.Kind == "hire")
             {
                 var staffing = await ProposeCoverageAsync(cycle.WorkstreamId, cycle.BoardId, roster,
-                    [new("specialist-execution", receipt.Roles[action.RoleIndex!.Value], ["work.execution.run"], null, true, action.Rationale)],
+                    [new("specialist-execution", role!, ["work.execution.run"], null, true, action.Rationale)],
                     context, token, handoff.RevisionDigest);
                 if (staffing != null) await Record(staffing.Id, staffing.Status);
             }
             else if (action.Kind == "consult" &&
-                SelectRoleMember(roster, receipt.Roles[action.RoleIndex!.Value]) is { } member)
+                SelectRoleMember(roster, role!) is { } member)
             {
                 var scope = receipt.Story ?? "project";
                 var question = new WorkContributionRequest(cycle.WorkstreamId,cycle.BoardId,scope,action.Rationale,
