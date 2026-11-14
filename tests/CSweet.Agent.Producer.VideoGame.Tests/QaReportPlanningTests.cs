@@ -8,6 +8,7 @@ public sealed class QaReportPlanningTests
 {
     [Theory]
     [InlineData("game-quality-assurance", "Artifact")]
+    [InlineData("game-technical-director", "Artifact")]
     [InlineData("game-engineer", "Code")]
     public void New_proposal_records_the_delivery_kind(string role, string kind) =>
         Assert.Equal(kind, SpecialistAgent.ProposalDeliveryKind(role));

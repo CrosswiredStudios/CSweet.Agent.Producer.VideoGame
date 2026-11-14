@@ -12,7 +12,7 @@ public sealed class RoleReplanningSnapshotTests
         var json = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var items = Enumerable.Range(0, 25).Select(i => JsonSerializer.Deserialize<WorkItem>("{}")! with
         {
-            Id = Guid.NewGuid(), Title = "Task " + i, Description = new string('d', 2000),
+            Id = Guid.NewGuid(), Title = "Task " + i, Description = new string('d', i == 0 ? 150000 : 2000),
             Planning = new([new string('r', 2000)], [new string('a', 2000)], [new string('c', 2000)])
         }).ToArray();
         var request = new RoleRepairRequest(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
@@ -38,7 +38,7 @@ public sealed class RoleReplanningSnapshotTests
         await Assert.ThrowsAnyAsync<Exception>(() => SpecialistAgent.PersistRoleRepairRequestAsync(key, request, runtime.CreateContext(), CancellationToken.None));
         Assert.False(stored.ContainsKey(key));
         await SpecialistAgent.PersistRoleRepairRequestAsync(key, request, runtime.CreateContext(), CancellationToken.None);
-        Assert.Equal(items.Length + 1, writes);
+        Assert.True(writes > items.Length + 1);
         var header = stored[key].Payload.Deserialize<RoleRepairRequest>(json)!;
         Assert.Empty(header.OriginalItems);
         Assert.Equal(items.Length, header.OriginalItemStateKeys.Count);

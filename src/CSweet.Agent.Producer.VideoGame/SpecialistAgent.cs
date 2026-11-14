@@ -899,7 +899,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                     "The corrected plan is ready; let current work finish before carrying unfinished scope into the replacement sprint.");
             await PrepareRoleRepairSprintAsync(roleRepair, context, cancellationToken);
         }
-        var published = roleRepairPublished ? roleRepair!.OriginalItems.Count : await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
+        var published = roleRepairPublished ? roleRepair!.OriginalItems.Count : roleRepair?.ScopeDirection is not null
+            ? await PublishAmendedPlanningAsync(roleRepair, technicalSession.Id, technicalArtifact!.Digest, context, cancellationToken)
+            : await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
             designerSession, designerArtifact!, designerProposal,
             technicalSession, technicalArtifact!, technicalProposal,
             context, cancellationToken, RetainedRoleRepairConstraints(roleRepair), ledger, ownership);
@@ -1695,8 +1697,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             var sourceArtifact = sourceIsTechnical ? technicalArtifact : designerArtifact;
             var planning = existing.Planning with
             {
-                DeliveryKind = proposal.AccountableRoleKey == "game-quality-assurance" && existing.Delivery is null &&
-                    existing.Status is "Ready" or "Open" or "Backlog" or "Planned" ? "Artifact" : existing.Planning.DeliveryKind,
+                DeliveryKind = existing.Delivery?.DeliveryKind ?? (existing.ExecutionMode == WorkItemExecutionModes.Executable &&
+                    existing.Status is "Ready" or "Open" or "Backlog" or "Planned" && ProposalDeliveryKind(proposal.AccountableRoleKey) == "Artifact"
+                        ? "Artifact" : existing.Planning.DeliveryKind),
                 Requirements = [proposal.Description],
                 AcceptanceCriteria = proposal.AcceptanceCriteria,
                 Constraints = Constraints(proposal).ToList(),

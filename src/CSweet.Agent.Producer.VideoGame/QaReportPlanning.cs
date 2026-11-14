@@ -6,9 +6,9 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    // QA executes validation and delivers evidence, not the implementation under test.
+    // Use the same code-author classification as the delivery planner.
     internal static string ProposalDeliveryKind(string authorRole) =>
-        authorRole == "game-quality-assurance" ? "Artifact" : "Code";
+        RoleTaxonomy.CoreRoleKey(authorRole) == "software-developer" ? "Code" : "Artifact";
 
     internal static bool NeedsQaReportPlanningRepair(WorkItem item)
     {

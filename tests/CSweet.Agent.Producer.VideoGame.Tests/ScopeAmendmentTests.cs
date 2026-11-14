@@ -129,6 +129,21 @@ public sealed class ScopeAmendmentTests
     }
 
     [Theory]
+    [InlineData("changes_requested", 0, true)]
+    [InlineData("changes_requested", 1, false)]
+    [InlineData("approved", 0, false)]
+    public void Amendment_can_use_an_idle_rework_handoff(string outcome, int attempts, bool expected)
+    {
+        var stage = JsonSerializer.Deserialize<WorkStageExecutionResponse>("{}")! with {
+            Id = Guid.NewGuid(), StageKey = "specialist-execution", Status = "Pending", Traversal = 2, AttemptCount = attempts };
+        var review = stage with { Id = Guid.NewGuid(), StageKey = "quality", Traversal = 1, Status = "Completed", LastOutcomeCode = outcome };
+        var item = JsonSerializer.Deserialize<WorkItemExecutionResponse>("{}")! with {
+            WorkItemId = Guid.NewGuid(), CurrentStageKey = stage.StageKey, Status = "Pending", Traversal = 2, Stages = [review, stage] };
+        var execution = JsonSerializer.Deserialize<WorkSprintExecutionResponse>("{}")! with { Status = "Active", Items = [item] };
+        Assert.Equal(expected, SpecialistAgent.CanAmendScope(execution, item.WorkItemId, stage.Id));
+    }
+
+    [Theory]
     [InlineData("Running")]
     [InlineData("Dispatching")]
     [InlineData("WaitingForApproval")]

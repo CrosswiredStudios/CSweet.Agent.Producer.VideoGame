@@ -58,28 +58,83 @@ public sealed partial class SpecialistAgent
     private static async Task WriteSnapshotAsync<T>(string key, string schema, T payload,
         AgentRuntimeContext context, CancellationToken token)
     {
-        if (await context.Platform.ReadOperatingStateAsync<T>(key, token) is not null) return;
         var json = JsonSerializer.SerializeToElement(payload, AcceptanceJson);
-        if (json.GetRawText().Length > 65536)
-            throw new InvalidOperationException("A role-replanning ticket snapshot exceeds the host bound; split its scope without truncating requirements.");
-        try
+        if (json.GetRawText().Length <= 65536)
         {
-            await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(key,
-                schema, 1, "Active", new Dictionary<string,string>(), [], ProducerPolicyFingerprint.Digest(key), [], Guid.NewGuid(), json, null, key), token);
+            await WriteImmutablePageAsync(key, schema, json, context, token);
+            return;
         }
-        catch (PlatformCapabilityException error) when (error.Code == PlatformCapabilityErrorCode.Conflict) { }
+
+        // Commit the index last. Content-addressed pages can be replayed after a lost response.
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(json);
+        var digest = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes));
+        var pages = 0;
+        foreach (var page in bytes.Chunk(32768))
+            await WriteImmutablePageAsync(SnapshotPageKey(key, digest, pages++), "video-game.snapshot-bytes.v1",
+                JsonSerializer.SerializeToElement(new SnapshotPage(page), AcceptanceJson), context, token);
+        await WriteImmutablePageAsync(key, "video-game.paged-snapshot.v1",
+            JsonSerializer.SerializeToElement(new SnapshotIndex(digest, bytes.Length, pages), AcceptanceJson), context, token);
+    }
+
+    private sealed record SnapshotPage(byte[] Bytes);
+    private sealed record SnapshotIndex(string Digest, int Length, int Pages);
+    private static string SnapshotPageKey(string key, string digest, int page) =>
+        $"producer-snapshot:{ProducerPolicyFingerprint.Digest(key)}:{digest}:{page}";
+
+    private static async Task WriteImmutablePageAsync(string key, string schema, JsonElement json,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        var read = new AgentOperatingStateReadRequest(key);
+        var saved = await context.Platform.ReadOperatingStateAsync(read, token);
+        if (saved is null)
+        {
+            try
+            {
+                await context.Platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(key,
+                    schema, 1, "Active", new Dictionary<string,string>(), [], ProducerPolicyFingerprint.Digest(key), [], Guid.NewGuid(), json, null, key), token);
+                return;
+            }
+            catch (PlatformCapabilityException error) when (error.Code == PlatformCapabilityErrorCode.Conflict)
+            {
+                saved = await context.Platform.ReadOperatingStateAsync(read, token);
+            }
+        }
+        if (saved?.SchemaId != schema || !JsonElement.DeepEquals(saved.Payload, json))
+            throw new InvalidOperationException("The retained scope snapshot has changed. Recheck the authorized amendment.");
+    }
+
+    private static async Task<T?> ReadSnapshotAsync<T>(string key, AgentRuntimeContext context, CancellationToken token) where T : class
+    {
+        var saved = await context.Platform.ReadOperatingStateAsync(new AgentOperatingStateReadRequest(key), token);
+        if (saved is null) return null;
+        if (saved.SchemaId != "video-game.paged-snapshot.v1") return saved.Payload.Deserialize<T>(AcceptanceJson);
+        var index = saved.Payload.Deserialize<SnapshotIndex>(AcceptanceJson)!;
+        if (index.Length <= 0 || index.Pages != (index.Length - 1) / 32768 + 1 || index.Digest.Length != 64)
+            throw new InvalidOperationException("Invalid scope snapshot index.");
+        using var stream = new MemoryStream();
+        for (var i = 0; i < index.Pages; i++)
+        {
+            var part = await context.Platform.ReadOperatingStateAsync<SnapshotPage>(SnapshotPageKey(key, index.Digest, i), token);
+            if (part?.SchemaId != "video-game.snapshot-bytes.v1" || part.Payload.Bytes.Length != Math.Min(32768, index.Length - stream.Length))
+                throw new InvalidOperationException("An exact scope snapshot page is missing or incomplete.");
+            stream.Write(part.Payload.Bytes);
+        }
+        var bytes = stream.ToArray();
+        if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bytes)) != index.Digest)
+            throw new InvalidOperationException("Scope snapshot content differs from the recorded revision.");
+        return JsonSerializer.Deserialize<T>(bytes, AcceptanceJson);
     }
 
     internal static async Task<RoleRepairRequest?> ReadRoleRepairRequestAsync(string key,
         AgentRuntimeContext context, CancellationToken token)
     {
-        var request = (await context.Platform.ReadOperatingStateAsync<RoleRepairRequest>(key, token))?.Payload;
+        var request = await ReadSnapshotAsync<RoleRepairRequest>(key, context, token);
         if (request is null || request.OriginalItemStateKeys.Count == 0) return request;
         if (request.OriginalItemStateKeys.Count > 200) throw new InvalidOperationException("Role-replanning scope exceeds the bounded ticket count.");
         var items = new List<WorkItem>();
         foreach (var pageKey in request.OriginalItemStateKeys)
         {
-            var item = (await context.Platform.ReadOperatingStateAsync<WorkItem>(pageKey, token))?.Payload
+            var item = await ReadSnapshotAsync<WorkItem>(pageKey, context, token)
                 ?? throw new InvalidOperationException("An exact role-replanning scope snapshot is missing.");
             if (pageKey != key + ":scope:" + item.Id.ToString("N") || items.Any(x => x.Id == item.Id))
                 throw new InvalidOperationException("A role-replanning scope snapshot has invalid identity.");
@@ -186,8 +241,9 @@ public sealed partial class SpecialistAgent
             ?? throw new InvalidOperationException("The source sprint execution is unavailable.");
         if (execution.Status != "Cancelled")
         {
-            if (execution.Status != "Active" || !execution.Items.Any(x => x.WorkItemId == request.WorkItemId &&
-                x.Stages.Any(s => s.Id == request.ReviewStageId && s.Status is "WaitingForApproval" or "Blocked" or "Failed")))
+            if (execution.Status != "Active" || request.ScopeDirection is null &&
+                !execution.Items.Any(x => x.WorkItemId == request.WorkItemId &&
+                    x.Stages.Any(s => s.Id == request.ReviewStageId && s.Status is "WaitingForApproval" or "Blocked" or "Failed")))
                 throw new InvalidOperationException("The original delivery review is no longer waiting for this correction.");
             if (request.InfrastructureRecovery && !CanRecoverExhaustedSprint(execution, request.WorkItemId, request.ReviewStageId))
                 throw new InvalidOperationException("The exhausted stage changed or other work is active; reassess recovery.");

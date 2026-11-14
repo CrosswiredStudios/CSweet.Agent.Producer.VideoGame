@@ -57,6 +57,33 @@ public sealed class StructuredScopeAmendmentTests
     }
 
     [Fact]
+    public async Task Scope_publication_uses_finalized_channel_and_revises_only_the_named_ticket()
+    {
+        var (request, _) = Fixture();
+        var before = request.OriginalItems.First(x => x.Id == request.WorkItemId);
+        var current = before with { Delivery = new(Guid.Empty, before.Planning!.Requirements, before.Planning.AcceptanceCriteria)
+            { DeliveryKind = "Artifact" }, Planning = before.Planning with { DeliveryKind = "Code" } };
+        request = request with { OriginalItems = request.OriginalItems.Select(x => x.Id == current.Id ? current : x).ToArray(),
+            ScopeReplacements = [new(current.Id, "acceptanceCriteria", current.Planning.AcceptanceCriteria[0], "Published document revision")] };
+        var writes = 0;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<WorkItemReference, WorkItem>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(current))
+            .RegisterCapability<ReviseWorkItemPlanningRequest, WorkItem>(WorkItemCapabilities.RevisePlanning, (change, _) => {
+                Assert.Equal(current.Id, change.ItemId);
+                Assert.Equal("Artifact", change.Planning.DeliveryKind);
+                Assert.Equal(current.Planning.Constraints, change.Planning.Constraints);
+                Assert.Null(change.StageAssignments);
+                current = current with { Planning = change.Planning, ProposalProvenance = change.ProposalProvenance };
+                writes++;
+                return Task.FromResult(current);
+            });
+        var session = Guid.NewGuid();
+        for (int i = 0; i < 2; i++)
+            await SpecialistAgent.PublishAmendedPlanningAsync(request, session, "digest", runtime.CreateContext(), default);
+        Assert.Equal(1, writes);
+    }
+
+    [Fact]
     public async Task GeneratedAcceptancePlanningReceivesExactAmendmentWithReplayAndStaleGuards()
     {
         var (request, _) = Fixture();

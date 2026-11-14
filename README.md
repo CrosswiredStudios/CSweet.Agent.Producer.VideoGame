@@ -1,6 +1,6 @@
-# Producer 6.11.0
+# Producer 6.11.1
 
-The Producer estimates draft sprint work with its owners, reconciles execution and review coverage against the current roster, and either adjusts scope or pursues missing capacity. Verification requirements determine when to consult QA. See [release notes](releases/6.11.0.md).
+The Producer estimates draft sprint work with its owners, reconciles execution and review coverage against the current roster, and either adjusts scope or pursues missing capacity. Verification requirements determine when to consult QA. Document work uses artifact delivery. Owner-directed amendments preserve the affected ticket's scope and evidence through an idle review handoff. See [release notes](releases/6.11.1.md).
 
 Corrective tickets now list every inherited finding and say the whole task is re-verified (CSweet.Agent.SDK 5.25.0). See `releases/6.8.0.md`.
 

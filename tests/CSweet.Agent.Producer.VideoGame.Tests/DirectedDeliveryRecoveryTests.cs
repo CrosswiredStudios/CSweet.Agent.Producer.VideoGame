@@ -76,7 +76,7 @@ public sealed class DirectedDeliveryRecoveryTests
                 todos.Add(todo); return Task.FromResult(todo);
             });
         runtime.RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (_, _) => Task.FromResult(JsonSerializer.SerializeToElement(new {
-            text = JsonSerializer.Serialize(new ScopeAmendmentPlan([new(sourceItem.Id, "acceptanceCriteria", "Independent QA", "Independent QA using available checks; physical device checks deferred")])), role = "assistant"
+            text = JsonSerializer.Serialize(new ScopeEditSelection([new(0, "acceptanceCriteria", 1, "Independent QA using available checks; physical device checks deferred")])), role = "assistant"
         })));
         var context = runtime.CreateContext(identity: new AgentIdentity(producer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Manager"));
         var sender = scenario is "colleague" or "colleague-replan" or "ancestor" or "ancestor-amend" or "colleague-amend" ? Guid.NewGuid() : manager;

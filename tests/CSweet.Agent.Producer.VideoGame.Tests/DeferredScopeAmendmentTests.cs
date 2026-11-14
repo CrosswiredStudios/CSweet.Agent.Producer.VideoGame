@@ -367,8 +367,8 @@ public sealed class DeferredScopeAmendmentTests
                 .RegisterCapability<JsonElement, JsonElement>(PlatformCapabilities.LlmChatStream, (_, _) =>
                 {
                     ModelCalls++;
-                    return Task.FromResult(JsonSerializer.SerializeToElement(new { text = JsonSerializer.Serialize(new ScopeAmendmentPlan(
-                        [new(Item.Id, "acceptanceCriteria", "60 second benchmark", "Owner accepted unmeasured risk; benchmark deferred")])), role = "assistant" }));
+                    return Task.FromResult(JsonSerializer.SerializeToElement(new { text = JsonSerializer.Serialize(new ScopeEditSelection(
+                        [new(0, "acceptanceCriteria", 1, "Owner accepted unmeasured risk; benchmark deferred")])), role = "assistant" }));
                 });
             Context = runtime.CreateContext(identity: new(Producer.ToString(), "Producer", null, "Producer", null, [], null, Requester.ToString(), "Owner"));
         }
