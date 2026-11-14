@@ -1,4 +1,4 @@
-# Producer 6.12.0
+# Producer 6.12.1
 
 The Producer drafts approaching work, obtains accountable effort and capacity judgments, then reconciles the actual roster before preflight. Structural readiness is shared validation; the planning assessment commissions scoped semantic advice when needed. Exact approved amendments propagate into their dependent delivery inputs with retained digest evidence. Every sprint receives evaluation, followed by the remaining increment, a successor, or explicit final-product verification and delivery completion. Public launch retains its own authorization. See [release notes](releases/6.12.0.md).
 
@@ -509,3 +509,13 @@ An approval is not a completed installation or a passing build.
 ## Verified project completion
 
 `platform.workstream.delivery.complete.v1` records delivery as completed only for the current accountable manager, an accepted final-product workflow, the exact current approved source, and no remaining open work. It does not change lifecycle stages, waive findings or authorize public launch. Approval of this additional grant uses the normal published-release Installed Agents update.
+
+## CI dependency fallback
+
+GitHub Actions uses the pinned SDK and WorkManagement.Contracts versions from NuGet when available.
+An unpublished version is packed from its reviewed full commit in `build/ci-dependencies.json`.
+Update that commit pin together with any SDK or contracts dependency bump; CI rejects mismatched versions.
+Packages stay local to the job and are never pushed to NuGet. The job summary and dependency-provenance
+artifact record origins, source commits and SHA-256 hashes. Private source repositories require the optional
+`CSWEET_DEPENDENCY_READ_TOKEN` Actions secret with read access to the dependency repositories.
+Run `python3 scripts/test-ci-dependencies.py` for the offline resolver regression tests.
