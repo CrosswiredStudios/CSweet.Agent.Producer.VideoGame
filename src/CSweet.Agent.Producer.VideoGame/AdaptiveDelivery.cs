@@ -67,23 +67,28 @@ public sealed partial class SpecialistAgent
     }
 
     private static async Task<ResourceChangeRequestResponse?> ProposeCoverageAsync(Guid workstreamId, Guid? boardId, AgentTeamContext roster,
-        IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null, Guid? correctionOf = null, string? assessmentReason = null)
+        IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null, Guid? correctionOf = null, string? assessmentReason = null,
+        bool reconcileCorrection = false)
     {
         var missing = requirements.Where(r => RoleTaxonomy.SelectAssignment(roster.Members,
                 new WorkAssignmentRequirements(r.RequiredRoleKey, r.RequiredSpecializationKeys,
                     r.PreferredSpecializationKeys, r.RequiredCapabilityKeys)) is null)
             .GroupBy(x => x.RequiredRoleKey, StringComparer.Ordinal).ToList();
-        if (missing.Count == 0) return null;
+        if (missing.Count == 0 && !reconcileCorrection) return null;
         if (!Guid.TryParse(context.Identity?.EmployeeId, out var producerId) ||
             !Guid.TryParse(context.Identity?.ManagerEmployeeId, out var directorId))
             throw new InvalidOperationException("Staffing proposals require an accountable Producer and manager.");
-        var requests = (await context.Platform.ReadResourceChangesAsync(new ResourceChangeReadRequest(), token)).Requests
+        var current = await context.Platform.ReadResourceChangeContextAsync(token);
+        var requests = current.Requests
             .Where(x => x.TeamId == Guid.Parse(roster.TeamId)).OrderByDescending(x => x.CreatedAt).ToList();
-        if (requests.FirstOrDefault(x => x.RequesterOrganizationUserId == producerId && x.Status == "Pending") is { } pending)
-            return pending.WorkstreamId == workstreamId && missing.All(g => pending.Roles.Any(r => r.RoleKey == g.Key)) ? pending : null;
         var approved = requests.FirstOrDefault(x => x.Status == "Approved");
-        var roles = approved?.Roles.ToList() ?? [];
-        var proposed = false;
+        var correction = current.Corrections.SingleOrDefault(x => x.SourceRequestId == approved?.Id && x.RequesterOrganizationUserId == producerId &&
+            x.TeamId == Guid.Parse(roster.TeamId) && x.WorkstreamId == workstreamId && x.Status == "Pending");
+        if (requests.FirstOrDefault(x => x.RequesterOrganizationUserId == producerId && x.Status == "Pending") is { } pending)
+            return pending.WorkstreamId == workstreamId && pending.CorrectionId == correction?.Id && missing.All(g => pending.Roles.Any(r => r.RoleKey == g.Key)) ? pending : null;
+        if (missing.Count == 0 && correction is null) return null;
+        var roles = CorrectedBaseRoles(approved?.Roles ?? [], correction, roster).ToList();
+        var proposed = correction is not null;
         foreach (var group in missing)
         {
             // An approved unfulfilled slot remains the hiring system's responsibility, not another new hire.
@@ -105,7 +110,8 @@ public sealed partial class SpecialistAgent
                 { WorkstreamId = workstreamId, TeamId = Guid.Parse(roster.TeamId) }, token)).SourceRevision
             : acceptedBriefDigest ?? throw new InvalidOperationException("Initial staffing requires the exact accepted production brief.");
         var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new
-            { workstreamId, roster.Revision, roles, evidenceRevision }));
+            { workstreamId, roster.Revision, roles, evidenceRevision,
+                correction = correction is null ? null : new { correction.Id, correction.Revision, correction.SourceRequestId } }));
         if (correctionOf.HasValue)
             fingerprint = ProducerPolicyFingerprint.Digest($"{fingerprint}:reconsider:{correctionOf:N}");
         // The resource-change request publishes a durable event to the Director.
@@ -121,16 +127,30 @@ public sealed partial class SpecialistAgent
             approved?.Id, $"producer-coverage:{fingerprint}")
         {
             TeamId = Guid.Parse(roster.TeamId), WorkstreamId = workstreamId, ExpectedTeamRevision = roster.Revision,
+            CorrectionId = correction?.Id,
             Evidence = [new ResourceChangeEvidence("scope-capability-gap", evidenceRevision,
-                $"Accepted brief {acceptedBriefDigest ?? "linked through board planning"}; board {boardId?.ToString("D") ?? "deferred until technical leadership is hired"}; missing roles: {string.Join(", ", missing.Select(x => x.Key))}.")],
+                $"Accepted brief {acceptedBriefDigest ?? "linked through board planning"}; board {boardId?.ToString("D") ?? "deferred until technical leadership is hired"}; missing roles: {string.Join(", ", missing.Select(x => x.Key))}."),
+                .. correction is null ? Array.Empty<ResourceChangeEvidence>() :
+                    [new ResourceChangeEvidence("staffing-correction", $"{correction.Id:N}:{correction.Revision}", correction.Reason)]],
             AlternativesConsidered = ["Reuse qualified team installations.", "Sequence work before adding parallel capacity.", "Defer optional specialist work."],
             ExpectedEffect = "Unblock the named planning or backlog responsibilities; continue all independently ready work."
         };
+        if (correction is not null)
+            return await context.Platform.ProposeResourceChangeAsync(proposal, token);
         return await SubmitCoverageAsync(proposal, boardId, context.Platform.ProposeResourceChangeAsync, token,
             boardId is { } evidenceBoard ? async ct => (await context.Platform.Work.ReadFlowMetricsAsync(
                 new ReadWorkFlowMetricsRequest(evidenceBoard) { WorkstreamId = workstreamId,
                     TeamId = Guid.Parse(roster.TeamId) }, ct)).SourceRevision : null);
     }
+
+    internal static IReadOnlyList<ResourceChangeRole> CorrectedBaseRoles(IReadOnlyList<ResourceChangeRole> approved,
+        StaffingCorrectionResponse? correction, AgentTeamContext roster) => approved.Select(role =>
+        {
+            if (correction?.RoleKey != role.RoleKey) return role;
+            // Occupancy is distinct from execution eligibility. Unavailable staff still hold their positions.
+            var occupied = roster.Members.Count(m => m.DeclaredRoleKeys.Contains(role.RoleKey));
+            return occupied == 0 ? null : role with { Headcount = Math.Min(role.Headcount, occupied) };
+        }).Where(role => role is not null).Select(role => role!).ToArray();
 
     internal static async Task BindAvailableWorkAsync(Guid boardId, AgentTeamContext roster, string profileDigest,
         AgentRuntimeContext context, CancellationToken token)

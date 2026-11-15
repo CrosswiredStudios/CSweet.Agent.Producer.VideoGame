@@ -205,9 +205,10 @@ public sealed class PitchRefinementTests
     internal static string Markdown => string.Join("\n", new[] { "Scope", "Player experience", "Non-goals", "Acceptance criteria", "Deliverables", "Constraints", "Risks", "Open questions" }.Select(x => $"## {x}\nPlanning detail for {x}."));
 
     [Theory]
-    [InlineData(30)]
-    [InlineData(12000)]
-    public async Task QuestionsThenRefinementThenExactApprovalUnlocksPlanningAndRetriesKeepOneDocument(int outcomeLength)
+    [InlineData(30, false)]
+    [InlineData(12000, false)]
+    [InlineData(30, true)]
+    public async Task QuestionsThenRefinementThenExactApprovalUnlocksPlanningAndRetriesKeepOneDocument(int outcomeLength, bool correcting)
     {
         var acceptedText = string.Join("\n\n", Enumerable.Range(0, 300).Select(i => $"Approved requirement {i}: deterministic game input."));
         var fixture = new Fixture(new string('x', outcomeLength), acceptedText);
@@ -256,13 +257,19 @@ public sealed class PitchRefinementTests
             Status = "RevisionRequested", DecisionComment = "Before board planning, propose the missing Technical Director and baseline Engineer and QA coverage from the accepted brief.",
             Evidence = [new("scope-capability-gap", ready.RevisionSha256, "Technical feasibility")] };
         var requests = new List<ResourceChangeRequestResponse> { legacy };
+        var wrongSlot = new ResourceChangeRole("game-security-privacy", "studio", "Security", "Misclassified technical planning", 1, 1,
+            "Now", ["work.execution.run"], false, fixture.Producer, null);
+        var approvedWrong = legacy with { Id = Guid.NewGuid(), RequesterOrganizationUserId = fixture.Producer, Status = "Approved", Roles = [wrongSlot] };
+        StaffingCorrectionResponse? correction = correcting ? new(Guid.NewGuid(), approvedWrong.Id, Guid.NewGuid(), fixture.Producer,
+            legacy.TeamId, legacy.WorkstreamId, wrongSlot.RoleKey, "Correct this slot to Technical Director capacity.", "Pending", null, 1, DateTimeOffset.UtcNow) : null;
+        if (correcting) requests.Add(approvedWrong);
         fixture.Runtime.RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
-            (_, _) => Task.FromResult(new ResourceChangeReadResponse(requests)));
+            (_, _) => Task.FromResult(new ResourceChangeReadResponse(requests) { Corrections = correction is null ? [] : [correction] }));
         fixture.Runtime.RegisterCapability<ResourceChangeProposalRequest, ResourceChangeRequestResponse>(PlatformCapabilities.ResourceChangePropose,
             (r, _) => {
                 fixture.StaffingProposals.Add(r);
                 var pending = legacy with { Id = Guid.NewGuid(), Status = "Pending", DecisionComment = null,
-                    RequesterOrganizationUserId = fixture.Producer, Roles = r.Roles };
+                    RequesterOrganizationUserId = fixture.Producer, Roles = r.Roles, CorrectionId = r.CorrectionId };
                 requests.Add(pending);
                 return Task.FromResult(pending);
             });
@@ -288,6 +295,16 @@ public sealed class PitchRefinementTests
         Assert.Equal(1, assessments);
         var staffing = Assert.Single(fixture.StaffingProposals);
         Assert.Equal("game-technical-director", Assert.Single(staffing.Roles).RoleKey);
+        if (correcting)
+        {
+            Assert.Equal(correction!.Id, staffing.CorrectionId);
+            Assert.Equal(approvedWrong.Id, staffing.SupersedesRequestId);
+            Assert.DoesNotContain(staffing.Roles, x => x.RoleKey == wrongSlot.RoleKey);
+            requests[requests.FindIndex(x => x.Id == approvedWrong.Id)] = approvedWrong with { Status = "Superseded" };
+            var pending = requests.FindIndex(x => x.Status == "Pending");
+            requests[pending] = requests[pending] with { Status = "Approved" };
+            correction = null;
+        }
         Assert.Equal(0, fixture.MessageSends);
         Assert.Equal(task.WorkContext.WorkstreamId, staffing.WorkstreamId);
         Assert.Contains(staffing.Evidence, x => x.SourceRevision == ready.RevisionSha256);

@@ -181,6 +181,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (item.CorrelationId?.StartsWith("producer-staffing-correction:", StringComparison.Ordinal) == true)
+            return await ReconcileStaffingCorrectionAsync(item, context, cancellationToken);
         if(TrackedCollaboration.IsTrackingCard(item)) {
             if(!TrackedCollaboration.TryGetSessionId(item,out var sessionId))return PersonalTodoResult.Blocked("The contribution tracking reference is invalid.");
             var session=await context.Platform.Communication.ReadCoordinationAsync(sessionId,cancellationToken);
@@ -292,6 +294,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             {
                 _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board?.Id,
                     planningHandoff.CoordinationSessionId, planningHandoff.HandoffDigest, context, cancellationToken);
+                await EnsureStaffingCorrectionCommitmentsAsync(workstream.Id, entry.ActiveTeam.TeamId, board?.Id, context, cancellationToken);
                 var staffingRoster = (await context.Platform.ReadTeamRosterAsync(
                     new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), cancellationToken)).Team;
                 if (staffingRoster is not null && SelectRoleMember(staffingRoster, VideoGameRoleKeys.TechnicalDirector) is not null)
@@ -556,7 +559,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         CancellationToken cancellationToken,
         bool hiringDependencyReady = false,
         ProgressiveContinuation? progressiveContinuation = null,
-        bool scopeAmendmentReady = false)
+        bool scopeAmendmentReady = false,
+        DateTimeOffset? dependencyChangedAt = null)
     {
         var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
         var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
@@ -589,11 +593,15 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existingContext.SourceFingerprint == workContext.SourceFingerprint;
             var amendmentCleared = scopeAmendmentReady && correlationId.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal) &&
                 existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
-            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !hiringCleared && !acceptanceCleared && !amendmentCleared && !prerequisiteCleared)
+            var dependencyChanged = dependencyChangedAt > existing.UpdatedAt && existing.WorkContext?.WorkstreamId == workContext.WorkstreamId &&
+                existing.WorkContext?.TeamId == workContext.TeamId && existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
+            if (existing.Status == PersonalTodoStatuses.Blocked && correlationId.StartsWith("producer-staffing-correction:", StringComparison.Ordinal) && !dependencyChanged)
+                return existing;
+            if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !dependencyChanged && !hiringCleared && !acceptanceCleared && !amendmentCleared && !prerequisiteCleared)
                 return existing;
             // A terminal planning conflict must not be requeued on every attention tick.
             // A later recovery generation may reassess it once with new repair logic.
-            if (IsSettledPlanningBlock(existing, correlationId) ||
+            if (IsSettledPlanningBlock(existing, correlationId) && !dependencyChanged ||
                 (correlationId.StartsWith(RoleRepairPrefix, StringComparison.Ordinal) && existing.Status == PersonalTodoStatuses.Blocked))
                 return existing;
             if (existing.Status == PersonalTodoStatuses.Blocked &&

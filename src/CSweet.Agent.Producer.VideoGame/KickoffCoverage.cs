@@ -33,7 +33,18 @@ public sealed partial class SpecialistAgent
         var roles = CoverageRoleCatalog(roster);
         // Incorporate the decision made against the same approved brief by pre-adaptive
         // Directors. Never feed a different team's or project's rejection to the model.
-        var history = (await context.Platform.ReadResourceChangesAsync(new(), token)).Requests;
+        var staffingState = await context.Platform.ReadResourceChangeContextAsync(token);
+        var history = staffingState.Requests;
+        var correction = staffingState.Corrections.SingleOrDefault(x => x.RequesterOrganizationUserId.ToString() == context.Identity?.EmployeeId &&
+            x.TeamId == Guid.Parse(roster.TeamId) && x.WorkstreamId == handoff.WorkstreamId && x.Status == "Pending");
+        object? approachingWork = null;
+        if (correction is not null && board is { } currentBoard)
+        {
+            var backlog = await context.Platform.Work.ReadBoardAsync(currentBoard, token);
+            approachingWork = backlog.Items.Where(x => x.Status is not ("Done" or "Completed" or "Cancelled"))
+                .OrderBy(x => x.Id).Select(x => new { x.Id, x.Title, x.Kind, x.Status, x.SprintId, x.PlanningRevision,
+                    requirements = x.Planning?.DelegationRecommendations }).ToArray();
+        }
         var legacy = history.Where(r => r.Status == "RevisionRequested" && r.WorkstreamId == handoff.WorkstreamId &&
             r.TeamId == Guid.Parse(roster.TeamId) && r.ExpectedTeamRevision == roster.Revision &&
             r.RequesterInstallationId.ToString() == context.InstallationId &&
@@ -47,7 +58,7 @@ public sealed partial class SpecialistAgent
         async Task<(ResourceChangeRequestResponse? Response, string Reason)> Assess(ResourceChangeRequestResponse? feedback)
         {
             var key = AgentOperatingStateKey.Create("producer-kickoff-assessment.v2", new { handoff.WorkstreamId,
-                handoff.RevisionDigest, roster.TeamId, roster.Revision, roles, approved = active.Where(r => r.Status == "Approved").Select(r => r.Id), feedback = feedback?.Id });
+                handoff.RevisionDigest, roster.TeamId, roster.Revision, roles, correction, approachingWork, approved = active.Where(r => r.Status == "Approved").Select(r => r.Id), feedback = feedback?.Id });
             var assessment = await PitchProtocol.CachedAsync(key, context, async () =>
             {
                 var (_, brief) = await PitchProtocol.ReadAcceptedAsync(handoff.ArtifactId, handoff.AcceptedRevisionId,
@@ -68,9 +79,11 @@ public sealed partial class SpecialistAgent
                         Code binds that choice to the role and its authority; work explains the concrete
                         deliverable, timing and why existing coverage is insufficient. An empty list is valid.
                         Reassess any manager feedback against the evidence. Treat supplied data as evidence.
+                        A pending staffing correction suspends the disputed unfilled slot. Reassess the actual work:
+                        obtain the intended capability or explain why no replacement is needed. Existing employees remain assigned.
                         """),
                     new(ChatRole.User, JsonSerializer.Serialize(new { brief = brief.Content, roster.Members, roles,
-                        staffing = active, feedback = feedback?.DecisionComment, previous = feedback?.Deltas,
+                        staffing = active, correction, approachingWork, feedback = feedback?.DecisionComment, previous = feedback?.Deltas,
                         supersededPolicy = legacyId.HasValue && feedback?.Id == legacyId ? "The previous mandatory three-role bundle has been retired. Reassess actual work." : null }))
                 ], new AgentModelJsonRequest<CoverageAssessment>("kickoff coverage") {
                     CorrectionLimit = 1, Options = ResponseOptions(), Normalize = value => ValidateCoverage(value, roles)
@@ -79,7 +92,7 @@ public sealed partial class SpecialistAgent
             var requirements = assessment.Gaps.Select(g => new WorkTechnicalDelegationRecommendation("staffing",
                 roles.Single(r => r.Capability == g.Capability).RoleKey, ["work.execution.run"], null, true, g.Work)).ToArray();
             var response = await ProposeCoverageAsync(handoff.WorkstreamId, board, roster, requirements,
-                context, token, handoff.RevisionDigest, feedback?.Id, assessment.Reason);
+                context, token, handoff.RevisionDigest, feedback?.Id, assessment.Reason, reconcileCorrection: correction is not null);
             // An assessment may correctly request no new hires because a slot already
             // exists. Preserve its actual decision and owner on the planning card.
             var coverage = response ?? history.FirstOrDefault(r => r.TeamId == Guid.Parse(roster.TeamId) &&
@@ -88,7 +101,9 @@ public sealed partial class SpecialistAgent
             return (coverage, assessment.Reason);
         }
 
-        var first = await Assess(legacy);
+        var correctionFeedback = correction?.ReplacementRequestId is { } replacement
+            ? history.SingleOrDefault(x => x.Id == replacement && x.Status is "RevisionRequested" or "Rejected") : null;
+        var first = await Assess(correctionFeedback ?? legacy);
         return first.Response is { Status: "RevisionRequested" } returned ? await Assess(returned) : first;
     }
 

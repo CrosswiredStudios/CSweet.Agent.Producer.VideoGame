@@ -1,4 +1,4 @@
-# Producer 6.12.3
+# Producer 6.12.4
 
 Staffing discovery and sprint reviews select named capabilities from the supplied catalog. Code binds
 each choice to the published role; agents never count numeric role positions. Staffing and team size
