@@ -8,7 +8,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal const string OwnershipContractRevision = "current-planning-context.v4";
+    internal const string OwnershipContractRevision = "scoped-planning-recovery.v5";
     internal sealed record PlanningContractReceipt(string Revision, DateTimeOffset ChangedAt);
 
     internal static async Task<DateTimeOffset> PlanningContractChangedAtAsync(Guid workstream, string fingerprint,
@@ -136,7 +136,8 @@ public sealed partial class SpecialistAgent
             var update = new WorkIssueUpdate(key, existing?.Statement ?? gap.Statement, gap.Reason, gap.AffectedProposalKeys) {
                 IssueId = existing?.Id, ExpectedRevision = existing?.Revision, Phase = phase,
                 BriefTitle = gap.BriefTitle, BriefSummary = gap.BriefSummary,
-                NextAction = phase == "AwaitingDecision" ? "Obtain delegated management direction on the incompatible requirements" :
+                NextAction = gap.Impact == "FutureWork" ? "Own and refine the later outcome; continue independent current work" :
+                    phase == "AwaitingDecision" ? "Obtain delegated management direction on the incompatible requirements" :
                     phase == "AwaitingReview" ? "Apply source-bound advice and reassess meaningful ownership" : "Reconcile responsibility within the accepted scope"
             };
             // Presentation rewording is not new substantive work.
@@ -175,7 +176,8 @@ public sealed partial class SpecialistAgent
                 await AskManagerAsync("Reconcile the remaining responsibility: " + issue.Statement + ". Affected work: " +
                     string.Join(", ", proposal.DeliveryItems.Where(i => issue.ScopeKeys.Contains(i.ProposalKey)).Select(i => i.Title)) +
                     ". Accountable: " + manager + ". No user decision is requested. Review retained specialist advice within delegated authority: " +
-                    string.Join("; ", advice.Where(a => a.ScopeKeys.Intersect(issue.ScopeKeys).Any()).Select(a => a.Text)));
+                    string.Join("; ", advice.Where(a => a.ScopeKeys.Intersect(issue.ScopeKeys).Any() ||
+                        issue.ScopeKeys.Count == 0 && a.ScopeKeys.Count == 0).Select(a => a.Text)));
             }
             else if (!commissions.Any(c => c.Status is "Pending" or "Dispatched")) pending.Add(issue);
         }

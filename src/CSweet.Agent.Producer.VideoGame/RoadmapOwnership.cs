@@ -17,6 +17,7 @@ public sealed partial class SpecialistAgent
     }
     internal sealed record OwnershipGap(string Statement, int SourceIndex, string Reason)
     {
+        public string Impact { get; init; } = "Unassessed";
         public IReadOnlyList<int> ProposedIndexes { get; init; } = [];
         public int? ExistingObligationIndex { get; init; }
         public IReadOnlyList<int> AffectedEpicIndexes { get; init; } = [];
@@ -34,6 +35,7 @@ public sealed partial class SpecialistAgent
     { public string? ObligationKey { get; init; } }
     internal sealed record BoundOwnershipGap(string Statement, string Reason, IReadOnlyList<string> AffectedProposalKeys)
     {
+        public string Impact { get; init; } = "Unassessed";
         public IReadOnlyList<PlanningOwnershipEvidence> ConflictEvidence { get; init; } = [];
         public string? ObligationKey { get; init; }
         public IReadOnlyList<string> Citations { get; init; } = [];
@@ -91,7 +93,9 @@ public sealed partial class SpecialistAgent
             index, c.Statement, sources = (c.Citations ?? []).Select(k => sourceIndexes.TryGetValue(k, out var i) ? i :
                 throw new InvalidOperationException("Roadmap commitment cites a source outside the accepted package.")).ToArray(), c.ProposalKeys }).ToArray();
         // Contributions change the review basis; old criterion-only reviews cannot be replayed.
-        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v3", new { projection = OwnershipKey(cycle, roadmap), catalog, retainedIdentities = existing.Select(e => new { e.Key, e.IsCurrent }) });
+        var resources = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
+        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v4", new { projection = OwnershipKey(cycle, roadmap), catalog,
+            resources = resources.Fingerprint, retainedIdentities = existing.Select(e => new { e.Key, e.IsCurrent }) });
         var reviewed = await PitchProtocol.CachedAsync(key, context, async () => {
             using var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
                 throw new InvalidOperationException("Configure the Producer planning provider."), Settings.GetString("llmModel"), new(InvocationKind: "producer-roadmap-ownership")));
@@ -108,7 +112,13 @@ public sealed partial class SpecialistAgent
                 Include briefTitle and briefSummary for each gap: a short plain-language title and one sentence about its consequence.
                 Keep source details, technical diagnostics and internal references in the full reason and reference fields.
                 Statements and reasons explain the finding in human terms; keep internal keys and indexes in reference fields.
-                An empty affectedEpicIndexes means impact is unknown and must conservatively hold all scope, not silently clear work.
+                Classify each gap's impact as Scoped, FutureWork, or Unassessed. Scoped means a concrete missing prerequisite
+                affects the selected affectedEpicIndexes. FutureWork means an approved later outcome needs planning responsibility
+                but is not a prerequisite of the supplied early work; use empty affectedEpicIndexes and explain that independence.
+                FutureWork remains an open responsibility and must be commissioned and resolved before final completion.
+                Unassessed means dependency impact is genuinely unknown; empty indexes then conservatively hold all scope.
+                Do not label future content, final acceptance, release approvals or later staffing as dependencies of a technical PoC
+                merely because they belong to the same product. Conversely, do not defer an actual dependency to bypass it.
                 Include proposedIndexes on commitments and gaps, accounting for each proposed obligation exactly once.
                 Routine missing responsibility is agent reconciliation. A conditional instruction to escalate if an experiment fails
                 is not evidence that it failed or is impossible. Do not invent observed measurements, participant studies or technical failures.
@@ -120,7 +130,7 @@ public sealed partial class SpecialistAgent
                 Empty gaps means every obligation has a meaningful owner; it never means all work is complete.
                 """), new(ChatRole.User, JsonSerializer.Serialize(new { sources = sources.Select((s, index) => new { index, s.ApprovedText }),
                     existingObligations = existing.Select((e,index) => new { index,e.Statement,e.Sources,e.IsCurrent }),
-                    approvedBasisChanged = registry?.Payload.ApprovedDigest != cycle.ApprovedPackageDigest,
+                    approvedBasisChanged = registry?.Payload.ApprovedDigest != cycle.ApprovedPackageDigest, currentResources = resources,
                     proposed, epics = epics.Select((e,index) => new { index,e.ProposalKey,e.Title }),
                     evidence = catalog.Select((e,index) => new { index,e.Kind,e.Text,e.ScopeKeys }) }))],
                 new AgentModelJsonRequest<OwnershipDraft>("approved scope ownership") { CorrectionLimit = 1, Options = ResponseOptions(),
@@ -166,7 +176,10 @@ public sealed partial class SpecialistAgent
         foreach (var g in draft.Gaps)
         {
             if (g == null || !Distinct(g.Statement) || !Source(g.SourceIndex) || string.IsNullOrWhiteSpace(g.Reason) ||
-                g.AffectedEpicIndexes is null || g.AffectedEpicIndexes.Any(i => i < 0 || i >= epics.Count))
+                g.AffectedEpicIndexes is null || g.AffectedEpicIndexes.Any(i => i < 0 || i >= epics.Count) ||
+                g.Impact is not ("Unassessed" or "Scoped" or "FutureWork") ||
+                g.Impact == "Scoped" && g.AffectedEpicIndexes.Count == 0 ||
+                g.Impact == "FutureWork" && g.AffectedEpicIndexes.Count > 0)
                 throw new AgentModelJsonException("Give each gap an approved source, reason and valid affected scope indexes.");
             IReadOnlyList<PlanningOwnershipEvidence> conflict = [];
             if (g.ConflictEvidenceIndexes is { Count: > 0 })
@@ -177,8 +190,10 @@ public sealed partial class SpecialistAgent
                 if (conflict.Count < 2 || conflict.Any(e => e.Kind is not ("Constraint" or "Decision")))
                     throw new AgentModelJsonException("An authority conflict must identify the incompatible binding constraints or decisions. Missing evidence is routine reconciliation.");
             }
-            gaps.Add(new(g.Statement.Trim(), g.Reason.Trim(), (g.AffectedEpicIndexes.Count == 0 ? epics.Select(e => e.ProposalKey) :
-                g.AffectedEpicIndexes.Distinct().Select(i => epics[i].ProposalKey)).ToArray()) { ConflictEvidence = conflict, Citations = [sources[g.SourceIndex].Key] });
+            gaps.Add(new(g.Statement.Trim(), g.Reason.Trim(), (g.Impact == "FutureWork" ? [] :
+                g.AffectedEpicIndexes.Count == 0 ? epics.Select(e => e.ProposalKey) :
+                g.AffectedEpicIndexes.Distinct().Select(i => epics[i].ProposalKey)).ToArray()) {
+                    Impact = g.Impact, ConflictEvidence = conflict, Citations = [sources[g.SourceIndex].Key] });
         }
         var accounted = draft.Commitments.SelectMany(c => c.ProposedIndexes ?? []).Concat(draft.Gaps.SelectMany(g => g.ProposedIndexes ?? [])).Order().ToArray();
         if (!accounted.SequenceEqual(Enumerable.Range(0, proposedCount))) throw new AgentModelJsonException("Account for every proposed commitment exactly once.");

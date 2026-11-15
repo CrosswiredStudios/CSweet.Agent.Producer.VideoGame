@@ -7,6 +7,26 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed partial class ProgressivePlanningTests
 {
     [Fact]
+    public async Task FutureResponsibilityIsCommissionedOnceWithoutHoldingCurrentWorkAndCanAcquireAReviewedOwner()
+    {
+        var f = new Fixture(adaptive: true, independent: true); var registry = new IssueRegistry(f.Runtime);
+        var state = new ProducerPlanningCycleState(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId,
+            f.Cycle.PlanningFingerprint, null, null, null, null, f.Artifact.Digest, null, DateTimeOffset.UtcNow);
+        var handoff = new ProducerAcceptedHandoff(f.Cycle.WorkstreamId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
+        var review = new SpecialistAgent.OwnershipReview([], [new("Later content", "Independent of the smoke experiment", []) {
+            Impact = "FutureWork", ObligationKey = "later-content" }]);
+        for (var n = 0; n < 2; n++)
+            state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, review, f.Outline, f.Member, handoff, f.Runtime.CreateContext(), default);
+        Assert.Single(registry.Issues); Assert.Equal("Open", registry.Issues[0].Status);
+        Assert.Equal(1, registry.CommissionCalls); Assert.Empty(state.OwnershipHeldProposalKeys);
+        Assert.Equal(new[] { registry.Issues[0].Id }, registry.LastCommission!.IssueIds);
+        var sources = new[] { new CSweet.Agent.SDK.VideoGame.Contracts.GameOutcomeSource("accepted", handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest, "Director", "Later content") };
+        var contribution = new PlanningOwnershipEvidence("reviewed-advice", "Responsibility", "The assigned specialist owns later content refinement against the accepted brief.", []);
+        var owned = SpecialistAgent.BindOwnership(new([new("Later content", [0], [0])], []), sources, f.Outline.DeliveryItems, suppliedCatalog: [contribution]);
+        Assert.Empty(owned.Gaps); Assert.Equal(contribution, owned.Commitments[0].Owners[0].Evidence);
+    }
+
+    [Fact]
     public async Task AChangedPlanningContractReleasesOnlyTheMatchingBlockOnceAndDoesNotLoopOnAnotherFailure()
     {
         var states = new Dictionary<string, AgentOperatingStateResponse>();

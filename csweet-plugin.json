@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.15.0",
+  "version": "6.16.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -902,6 +902,7 @@
   ],
   "events": {
     "subscribes": [
+      "com.csweet.communication.message.mentioned.v1",
       "work.issues.changed.v1",
       "com.csweet.work.item.discussion.changed.v1",
       "com.csweet.calendar.reminder-due.v1",

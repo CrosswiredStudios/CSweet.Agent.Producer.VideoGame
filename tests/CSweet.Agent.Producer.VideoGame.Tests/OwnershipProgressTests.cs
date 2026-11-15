@@ -6,6 +6,45 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed partial class ProgressivePlanningTests
 {
     [Fact]
+    public async Task ExplicitFutureOutcomeRemainsOpenWhileTheIndependentPocIsPublishedAndRefined()
+    {
+        var f = new Fixture(adaptive: true, independent: true);
+        var source = new GameOutcomeSource("approved", Guid.NewGuid(), Guid.NewGuid(), "digest", "Director", "Technical PoC followed by ten designed levels.");
+        var review = SpecialistAgent.BindOwnership(new([], [new("Ten designed levels", 0,
+            "Later level content needs an owner; it is not a prerequisite of the independent engine smoke experiment.") { Impact = "FutureWork" }]),
+            [source], f.Outline.DeliveryItems);
+        Assert.Equal("FutureWork", Assert.Single(review.Gaps).Impact);
+        Assert.Empty(review.Gaps[0].AffectedProposalKeys);
+        var first = await f.Advance(null, review);
+        Assert.Equal(2, f.Items.Count); Assert.Single(f.Starts); Assert.False(first.Complete);
+        var replay = await f.Advance(first.Progress, review);
+        Assert.Single(f.Starts); Assert.Equal(2, f.Items.Count); Assert.False(replay.Complete);
+        Assert.Single(review.Gaps); // Publication/refinement is not final acceptance or an issue resolution.
+    }
+
+    [Theory]
+    [InlineData("Scoped")]
+    [InlineData("Unassessed")]
+    public async Task ConcreteOrUnknownPrerequisiteStillHoldsItsConsumers(string impact)
+    {
+        var f = new Fixture(adaptive: true);
+        var source = new GameOutcomeSource("approved", Guid.NewGuid(), Guid.NewGuid(), "digest", "Director", "The core must be feasible.");
+        var review = SpecialistAgent.BindOwnership(new([], [new("Core feasibility", 0, "The missing capability affects the actual experiment.") {
+            Impact = impact, AffectedEpicIndexes = impact == "Scoped" ? [0] : [] }]), [source], f.Outline.DeliveryItems);
+        var result = await f.Advance(null, review);
+        Assert.Empty(f.Starts); Assert.False(result.Complete); Assert.NotEmpty(SpecialistAgent.OwnershipHolds(f.Outline.DeliveryItems, review));
+    }
+
+    [Fact]
+    public void FutureClassificationCannotAlsoClaimAnAffectedCurrentEpic()
+    {
+        var f = new Fixture(adaptive: true);
+        var source = new GameOutcomeSource("approved", Guid.NewGuid(), Guid.NewGuid(), "digest", "Director", "Preserve scope.");
+        Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.BindOwnership(new([], [new("Future content", 0, "Contradictory impact") {
+            Impact = "FutureWork", AffectedEpicIndexes = [0] }]), [source], f.Outline.DeliveryItems));
+    }
+
+    [Fact]
     public void ConstraintsAndDecisionsOwnObligationsWithoutDuplicatingEpicCriteria()
     {
         var f = new Fixture(adaptive: true);

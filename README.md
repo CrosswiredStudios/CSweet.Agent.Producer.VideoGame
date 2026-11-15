@@ -1,6 +1,6 @@
-# Producer 6.15.0
+# Producer 6.16.0
 
-Typed planning replies, current staffing/resource approvals and recovery of retained planning work. See [release notes](releases/6.15.0.md).
+Shared durable manager recovery and scoped ownership review let independent work proceed while later obligations remain open. Current staffing/resource evidence informs the review. Subscribe to the standard communication-mention event for prompt recovery wakes; normal attention review discovers missed notifications. See [release notes](releases/6.16.0.md).
 
 # Producer 6.13.0
 
