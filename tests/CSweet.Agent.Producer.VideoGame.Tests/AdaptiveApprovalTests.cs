@@ -7,6 +7,33 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class AdaptiveApprovalTests
 {
+    [Theory]
+    [InlineData("refine")]
+    [InlineData("wait")]
+    public async Task NonterminalReviewWithNoOwnedDependencyDispatchesOneSourceBoundQuestion(string disposition)
+    {
+        var project=Guid.NewGuid();var team=Guid.NewGuid();var self=Guid.NewGuid();var specialist=Guid.NewGuid();
+        var cycle=new GameProductionPlanningCycleV1(project,team,1,Guid.NewGuid(),"profile",Guid.NewGuid(),1,"package","production","prototype","scope");
+        var handoff=new ProducerAcceptedHandoff(project,Guid.NewGuid(),Guid.NewGuid(),"brief","handoff",Guid.NewGuid(),cycle.ApprovedPackageId,1,DateTimeOffset.UtcNow);
+        var member=new AgentTeammate(specialist.ToString(),"Qualified planner","Agent",null,null,"Team","Available") {AgentInstallationId=Guid.NewGuid(),RuntimeEligibility="Eligible",DeclaredRoleKeys=["game-technical-director"]};
+        var roster=new AgentTeamContext(team.ToString(),"game","Game",1,self.ToString(),"Producer",[member],[],1,false);
+        var states=new Dictionary<string,AgentOperatingStateResponse>();var starts=0;var cards=0;
+        var runtime=new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest,AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,(r,_)=>Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(r.StateKey))))
+            .RegisterCapability<AgentOperatingStateWriteRequest,AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,(r,_)=>Task.FromResult(states[r.StateKey]=new(Guid.NewGuid(),r.StateKey,r.SchemaId,r.SchemaVersion,r.Status,r.SourceRevisions,r.ConditionCodes,r.DecisionFingerprint,r.OpenCommitmentCorrelations,r.AttentionReviewId,r.Payload,(states.GetValueOrDefault(r.StateKey)?.Revision??0)+1,DateTimeOffset.UtcNow,DateTimeOffset.UtcNow)))
+            .RegisterCapability<StartBoardCoordinationRequest,AgentCoordinationSession>(CommunicationCapabilities.CoordinationStartBoard,(r,_)=> {
+                starts++;Assert.Equal(WorkContributions.RequestType,r.Artifact!.Type);
+                return Task.FromResult(new AgentCoordinationSession(Guid.NewGuid(),Guid.NewGuid(),Guid.NewGuid(),Guid.NewGuid(),Guid.NewGuid(),new(self,Guid.NewGuid(),"Owner","Producer"),new(specialist,member.AgentInstallationId!.Value,"Planner","Contributor"),"Refinement","Current uncertainty",[],"Active",1,0,specialist,false,null,DateTimeOffset.UtcNow,DateTimeOffset.UtcNow,[]) {BoardSource=new(cycle.BoardId)});
+            })
+            .RegisterCapability<AddPersonalTodoItemRequest,PersonalTodoItem>(PersonalTodoCapabilities.Add,(r,_)=> {cards++;Assert.Equal(PersonalWorkPurposes.CollaborationTracking,r.WorkContext!.Purpose);return Task.FromResult(JsonSerializer.Deserialize<PersonalTodoItem>("{}")!);});
+        var decision=new SpecialistAgent.ReviewChoice("Resolve the current uncertainty",null,false,false,"Contributor supplies scoped evidence","No invented observations",[]) {Disposition=disposition};
+        var receipt=new SpecialistAgent.ReviewReceipt("review",null,decision,[new("brief",handoff.ArtifactId,"accepted","Approved outcome")],["game-technical-director"],DateTimeOffset.UtcNow,"current-evidence");
+        var context=runtime.CreateContext(identity:new(self.ToString(),"Owner",null,null,null,[],null,null,null));
+        await SpecialistAgent.ApplyReviewEffectsAsync(receipt,cycle,roster,handoff,context,default);
+        await SpecialistAgent.ApplyReviewEffectsAsync(receipt,cycle,roster,handoff,context,default);
+        Assert.Equal(1,starts);Assert.Equal(1,cards);runtime.AssertCollaborationsTracked();
+    }
+
     [Fact]
     public async Task Replayed_review_reuses_the_pending_hire_and_reads_its_authorized_result()
     {

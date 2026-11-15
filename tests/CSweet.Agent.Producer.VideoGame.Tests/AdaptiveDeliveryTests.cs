@@ -6,6 +6,29 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class AdaptiveDeliveryTests
 {
     [Fact]
+    public async Task FailedContributionReadDoesNotSuppressRetainedPlanningRecoveryAndBothFailuresRemainVisible()
+    {
+        var owner=Guid.NewGuid(); var board=System.Text.Json.JsonSerializer.Deserialize<WorkBoardSummary>("{}")! with {
+            Id=Guid.NewGuid(),ManagerOrganizationUserId=owner,WorkstreamId=Guid.NewGuid() };
+        var continued=false;
+        var runtime=new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest,AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,(r,_)=> {
+                if(r.StateKey=="producer-scope-amendment-recovery:v1") { continued=true; throw new IOException("Retained planning recovery reached its own unavailable dependency"); }
+                return Task.FromResult(new AgentOperatingStateReadResponse(null));
+            })
+            .RegisterCapability<ReadPortfolioRequest,PortfolioResponse>(WorkstreamCapabilityNames.PortfolioReadV1,(_,_)=>Task.FromResult(
+                new PortfolioResponse([new(System.Text.Json.JsonSerializer.Deserialize<WorkstreamDetail>("{}")!,null,[],[])])))
+            .RegisterCapability<WorkBoardListRequest,IReadOnlyList<WorkBoardSummary>>(WorkBoardCapabilities.Read,(_,_)=>Task.FromResult<IReadOnlyList<WorkBoardSummary>>([board]))
+            .RegisterCapability<ReadWorkIssuesRequest,WorkIssueDirectory>(WorkIssueCapabilities.Read,(_,_)=>throw new UnauthorizedAccessException("Contribution source is currently unreadable"));
+        var context=runtime.CreateContext(identity:new(owner.ToString(),"Owner",null,null,null,[],null,null,null));
+        var entry=typeof(SpecialistAgent).GetMethod("HandleManagerAttentionReviewAsync",System.Reflection.BindingFlags.NonPublic|System.Reflection.BindingFlags.Instance)!;
+        var error=await Assert.ThrowsAsync<AggregateException>(()=>(Task)entry.Invoke(new SpecialistAgent(),
+            [new AgentAttentionReviewContext(Guid.NewGuid(),DateTimeOffset.UtcNow,DateTimeOffset.UtcNow.AddMinutes(5),"work.issues"),context,CancellationToken.None])!);
+        Assert.True(continued);
+        Assert.Contains(error.InnerExceptions,e=>e.Message.Contains("Contribution source"));
+        Assert.Contains(error.InnerExceptions,e=>e.Message.Contains("Retained planning recovery"));
+    }
+    [Fact]
     public void Initial_delivery_proposal_covers_technical_direction_implementation_and_qa()
     {
         var requirements = SpecialistAgent.InitialDeliveryRequirements();

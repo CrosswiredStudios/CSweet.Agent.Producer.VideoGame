@@ -1,4 +1,4 @@
-﻿using CrosswiredStudios.VideoGame.AgentKit;
+using CrosswiredStudios.VideoGame.AgentKit;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 using CSweet.Agent.SDK.VideoGame.Contracts;
@@ -67,6 +67,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (ScopedWorkRefinement.IsReply(request)) return await ScopedWorkRefinement.ReceiveAsync(request, context, cancellationToken);
         if (WorkContributions.IsReply(request))
             return await WorkContributions.ReceiveAsync(request, context, cancellationToken);
         if (request.Transcript.Any(t => t.SpeakerOrganizationUserId == request.Counterpart.OrganizationUserId &&
@@ -271,197 +272,205 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return;
         }
         var boards = await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken);
-        await RecoverPendingScopeAmendmentsAsync(context, cancellationToken, boards);
-        var snapshots = new List<ProducerMetricSnapshot>();
-        var phases = new Dictionary<Guid, ProducerManagementPhase>();
-        var commitments = new List<string>();
-        var risks = new List<string>();
+        var contributionReviews = boards.Where(b => !b.IsArchived && b.ManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId)
+            .Select(board => new Func<CancellationToken, Task>(ct => WorkIssueContributions.ReviewAsync(board.Id, context,
+                (contribution, token) => AssessWorkIssueContributionAsync(contribution, context, token), ct)));
+        await IndependentWork.RunAsync(contributionReviews.Append(ContinuePlanningAsync), cancellationToken);
 
-        foreach (var entry in portfolio.Workstreams)
+        async Task ContinuePlanningAsync(CancellationToken planningToken)
         {
-            var workstream = entry.Workstream;
-            if (workstream.AccountableManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId && !RecoveryProjects(context).Contains(workstream.Id))
-                await ReconcileDeliveryCorrectionAsync(workstream.Id, context, cancellationToken);
-            var recoveryBoard = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
-            if (recoveryBoard is not null)
-                await QueueWorkflowRecoveryAsync(recoveryBoard, workstream.ProfileDefinitionDigest ?? "", context, cancellationToken);
-            if (workstream.ProfileKey == "video-game-manager-brief.v1" && workstream.AccountableManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId)
+            await RecoverPendingScopeAmendmentsAsync(context, planningToken, boards);
+            var snapshots = new List<ProducerMetricSnapshot>();
+            var phases = new Dictionary<Guid, ProducerManagementPhase>();
+            var commitments = new List<string>();
+            var risks = new List<string>();
+
+            foreach (var entry in portfolio.Workstreams)
             {
-                _ = await EnsureManagerDeliveryAsync(workstream, context, cancellationToken, wake: review.Reason != AgentAttentionReasons.Periodic);
-                phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
-                var deliveryState = await context.Platform.ReadOperatingStateAsync<ManagerDeliveryState>(ManagerDeliveryPrefix + workstream.Id.ToString("N"), cancellationToken);
-                commitments.Add($"{workstream.Name}: {deliveryState?.Payload.LastStatus ?? "Delivery setup is queued."}");
-                var deliveryBoard = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
-                if (deliveryBoard is not null)
+                var workstream = entry.Workstream;
+                if (workstream.AccountableManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId && !RecoveryProjects(context).Contains(workstream.Id))
+                    await ReconcileDeliveryCorrectionAsync(workstream.Id, context, planningToken);
+                var recoveryBoard = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
+                if (recoveryBoard is not null)
+                    await QueueWorkflowRecoveryAsync(recoveryBoard, workstream.ProfileDefinitionDigest ?? "", context, planningToken);
+                if (workstream.ProfileKey == "video-game-manager-brief.v1" && workstream.AccountableManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId)
                 {
-                    var deliveryMetrics = await context.Platform.Work.ReadFlowMetricsAsync(new(deliveryBoard.Id)
-                        { TeamId = entry.ActiveTeam?.TeamId, WorkstreamId = workstream.Id, WindowStart = review.OccurredAt.AddDays(-28), WindowEnd = review.OccurredAt, CompletedSprintLimit = 6 }, cancellationToken);
-                    snapshots.Add(new(workstream.Id, deliveryBoard.Id, deliveryMetrics.SourceRevision, deliveryMetrics.GeneratedAt,
-                        deliveryMetrics.Team, deliveryMetrics.Principals, deliveryMetrics.ConditionCodes));
-                    risks.AddRange(BuildMetricRisks(workstream.Name, deliveryMetrics));
-                }
-                continue;
-            }
-            phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
-            var board = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
-            if (entry.ActiveTeam is not null &&
-                accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var planningHandoff) == true)
-            {
-                _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board?.Id,
-                    planningHandoff.CoordinationSessionId, planningHandoff.HandoffDigest, context, cancellationToken);
-                await EnsureStaffingCorrectionCommitmentsAsync(workstream.Id, entry.ActiveTeam.TeamId, board?.Id, context, cancellationToken);
-                var staffingRoster = (await context.Platform.ReadTeamRosterAsync(
-                    new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), cancellationToken)).Team;
-                if (staffingRoster is not null && SelectRoleMember(staffingRoster, VideoGameRoleKeys.TechnicalDirector) is not null)
-                    board ??= await EnsureProductionBoardAsync(workstream, entry.ActiveTeam.TeamId, context, cancellationToken);
-            }
-            if (board is null)
-            {
-                commitments.Add($"{workstream.Name}: complete documentation and initial hiring before the Technical Director and Producer plan the team board.");
-                continue;
-            }
-
-            await RetryCorrectableDeliveryFailuresAsync(board, context, cancellationToken);
-            await EscalateDecisionBlockersAsync(board, context, cancellationToken);
-            await ReviewBoardDeliveriesAsync(board, context, cancellationToken);
-
-            if (!string.IsNullOrWhiteSpace(workstream.ProfileDefinitionDigest))
-            {
-                _ = await context.Platform.Work.ConfigureProfileOrchestrationAsync(
-                    new ConfigureProfileOrchestrationRequest(workstream.Id, board.Id, board.Revision,
-                        workstream.ProfileDefinitionDigest,
-                        $"producer-profile:{workstream.Id:N}:{workstream.ProfileDefinitionDigest}"), cancellationToken);
-            }
-
-
-            if (entry.ActiveTeam is not null &&
-                accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var handoff) == true)
-            {
-                var activeRoster = (await context.Platform.ReadTeamRosterAsync(
-                    new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), cancellationToken)).Team;
-                if (activeRoster is not null)
-                {
-                    await BindAvailableWorkAsync(board.Id, activeRoster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
-                    if (accepted.Payload.PlanningCycles.TryGetValue(workstream.Id, out var reviewCycle))
-                        await RecoverSprintReviewsAsync(reviewCycle, handoff, activeRoster, context, cancellationToken);
-                }
-                _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board.Id,
-                    handoff.CoordinationSessionId, handoff.HandoffDigest, context, cancellationToken);
-            }
-
-            if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var blockedCycle) == true &&
-                accepted.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var decisionHandoff) &&
-                blockedCycle.OutstandingAuthorityQuestions.Count > 0)
-                await EnsurePlanningDecisionsAsync(workstream.Id, board.Id, blockedCycle.PlanningFingerprint,
-                    blockedCycle.OutstandingAuthorityQuestions, decisionHandoff, context, cancellationToken);
-            var metrics = await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(board.Id)
-            {
-                TeamId = entry.ActiveTeam?.TeamId,
-                WorkstreamId = workstream.Id,
-                WindowStart = review.OccurredAt.AddDays(-28),
-                WindowEnd = review.OccurredAt,
-                CompletedSprintLimit = 6
-            }, cancellationToken);
-            snapshots.Add(new ProducerMetricSnapshot(workstream.Id, board.Id, metrics.SourceRevision,
-                metrics.GeneratedAt, metrics.Team, metrics.Principals, metrics.ConditionCodes));
-            risks.AddRange(BuildMetricRisks(workstream.Name, metrics));
-
-            var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, cancellationToken);
-            if (!sprints.Any(x => x.Status.Equals("Active", StringComparison.OrdinalIgnoreCase)))
-            {
-                var planned = PlannedSprint(sprints);
-                if (planned is not null && planned.CapacityPoints > 0 && (await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken)).Items.Any(x => x.SprintId == planned.Id))
-                {
-                    var planningRevision = (await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken))
-                        .Items.Where(x => x.SprintId == planned.Id).Select(x => x.PlanningRevision).DefaultIfEmpty(0).Max();
-                    _ = await EnsureCommitmentAsync(
-                        $"{SprintReadinessCommitmentPrefix}{planned.Id:N}:{planningRevision}",
-                        $"Preflight sprint {planned.Name}",
-                        "Verify any required review, exact staffing and assignment evidence, capacity, estimates, dependencies, and the approved artifact package before starting execution.",
-                        WorkPriorities.Critical,
-                        new PersonalTodoWorkContext
-                        {
-                            WorkstreamId = workstream.Id,
-                            TeamId = entry.ActiveTeam?.TeamId,
-                            BoardId = board.Id,
-                            SprintId = planned.Id,
-                            SourceFingerprint = $"{planned.Revision}:{planningRevision}"
-                        },
-                        context, cancellationToken);
-                }
-                if (!(planned?.CapacityPoints > 0) &&
-                         accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
-                         !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest))
-                {
-                    var detail = await context.Platform.Work.ReadBoardAsync(board.Id, cancellationToken);
-                    // A pending decision is work to track, not evidence that no work remains.
-                    // The execution callback still enforces the planning-decision gate.
-                    var candidateExists = PendingSprintCandidates(detail.Items, sprints).Any(HasStaffedExecution);
-                    if (candidateExists)
+                    _ = await EnsureManagerDeliveryAsync(workstream, context, planningToken, wake: review.Reason != AgentAttentionReasons.Periodic);
+                    phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
+                    var deliveryState = await context.Platform.ReadOperatingStateAsync<ManagerDeliveryState>(ManagerDeliveryPrefix + workstream.Id.ToString("N"), planningToken);
+                    commitments.Add($"{workstream.Name}: {deliveryState?.Payload.LastStatus ?? "Delivery setup is queued."}");
+                    var deliveryBoard = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
+                    if (deliveryBoard is not null)
                     {
-                        var nextSequence = PlanningSprintSequence(sprints);
+                        var deliveryMetrics = await context.Platform.Work.ReadFlowMetricsAsync(new(deliveryBoard.Id)
+                            { TeamId = entry.ActiveTeam?.TeamId, WorkstreamId = workstream.Id, WindowStart = review.OccurredAt.AddDays(-28), WindowEnd = review.OccurredAt, CompletedSprintLimit = 6 }, planningToken);
+                        snapshots.Add(new(workstream.Id, deliveryBoard.Id, deliveryMetrics.SourceRevision, deliveryMetrics.GeneratedAt,
+                            deliveryMetrics.Team, deliveryMetrics.Principals, deliveryMetrics.ConditionCodes));
+                        risks.AddRange(BuildMetricRisks(workstream.Name, deliveryMetrics));
+                    }
+                    continue;
+                }
+                phases[workstream.Id] = ProducerPhaseResolver.Derive(workstream, entry.Gates);
+                var board = boards.SingleOrDefault(x => x.WorkstreamId == workstream.Id && !x.IsArchived);
+                if (entry.ActiveTeam is not null &&
+                    accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var planningHandoff) == true)
+                {
+                    _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board?.Id,
+                        planningHandoff.CoordinationSessionId, planningHandoff.HandoffDigest, context, planningToken);
+                    await EnsureStaffingCorrectionCommitmentsAsync(workstream.Id, entry.ActiveTeam.TeamId, board?.Id, context, planningToken);
+                    var staffingRoster = (await context.Platform.ReadTeamRosterAsync(
+                        new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), planningToken)).Team;
+                    if (staffingRoster is not null && SelectRoleMember(staffingRoster, VideoGameRoleKeys.TechnicalDirector) is not null)
+                        board ??= await EnsureProductionBoardAsync(workstream, entry.ActiveTeam.TeamId, context, planningToken);
+                }
+                if (board is null)
+                {
+                    commitments.Add($"{workstream.Name}: complete documentation and initial hiring before the Technical Director and Producer plan the team board.");
+                    continue;
+                }
+
+                await RetryCorrectableDeliveryFailuresAsync(board, context, planningToken);
+                await EscalateDecisionBlockersAsync(board, context, planningToken);
+                await ReviewBoardDeliveriesAsync(board, context, planningToken);
+
+                if (!string.IsNullOrWhiteSpace(workstream.ProfileDefinitionDigest))
+                {
+                    _ = await context.Platform.Work.ConfigureProfileOrchestrationAsync(
+                        new ConfigureProfileOrchestrationRequest(workstream.Id, board.Id, board.Revision,
+                            workstream.ProfileDefinitionDigest,
+                            $"producer-profile:{workstream.Id:N}:{workstream.ProfileDefinitionDigest}"), planningToken);
+                }
+
+
+                if (entry.ActiveTeam is not null &&
+                    accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var handoff) == true)
+                {
+                    var activeRoster = (await context.Platform.ReadTeamRosterAsync(
+                        new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), planningToken)).Team;
+                    if (activeRoster is not null)
+                    {
+                        await BindAvailableWorkAsync(board.Id, activeRoster, workstream.ProfileDefinitionDigest ?? string.Empty, context, planningToken);
+                        if (accepted.Payload.PlanningCycles.TryGetValue(workstream.Id, out var reviewCycle))
+                            await RecoverSprintReviewsAsync(reviewCycle, handoff, activeRoster, context, planningToken);
+                    }
+                    _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board.Id,
+                        handoff.CoordinationSessionId, handoff.HandoffDigest, context, planningToken);
+                }
+
+                if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var blockedCycle) == true &&
+                    accepted.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var decisionHandoff) &&
+                    blockedCycle.OutstandingAuthorityQuestions.Count > 0)
+                    await EnsurePlanningDecisionsAsync(workstream.Id, board.Id, blockedCycle.PlanningFingerprint,
+                        blockedCycle.OutstandingAuthorityQuestions, decisionHandoff, context, planningToken);
+                var metrics = await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(board.Id)
+                {
+                    TeamId = entry.ActiveTeam?.TeamId,
+                    WorkstreamId = workstream.Id,
+                    WindowStart = review.OccurredAt.AddDays(-28),
+                    WindowEnd = review.OccurredAt,
+                    CompletedSprintLimit = 6
+                }, planningToken);
+                snapshots.Add(new ProducerMetricSnapshot(workstream.Id, board.Id, metrics.SourceRevision,
+                    metrics.GeneratedAt, metrics.Team, metrics.Principals, metrics.ConditionCodes));
+                risks.AddRange(BuildMetricRisks(workstream.Name, metrics));
+
+                var sprints = await context.Platform.Work.ListSprintsAsync(board.Id, planningToken);
+                if (!sprints.Any(x => x.Status.Equals("Active", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var planned = PlannedSprint(sprints);
+                    if (planned is not null && planned.CapacityPoints > 0 && (await context.Platform.Work.ReadBoardAsync(board.Id, planningToken)).Items.Any(x => x.SprintId == planned.Id))
+                    {
+                        var planningRevision = (await context.Platform.Work.ReadBoardAsync(board.Id, planningToken))
+                            .Items.Where(x => x.SprintId == planned.Id).Select(x => x.PlanningRevision).DefaultIfEmpty(0).Max();
                         _ = await EnsureCommitmentAsync(
-                            SprintEstimationCorrelation(board.Id, planningCycle.ReconciledDigest, nextSequence),
-                            $"Prepare candidate scope for Production Sprint {nextSequence}",
-                            "Estimate draft work, reconcile the actual roster, then assess readiness for the staffed scope.",
+                            $"{SprintReadinessCommitmentPrefix}{planned.Id:N}:{planningRevision}",
+                            $"Preflight sprint {planned.Name}",
+                            "Verify any required review, exact staffing and assignment evidence, capacity, estimates, dependencies, and the approved artifact package before starting execution.",
                             WorkPriorities.Critical,
                             new PersonalTodoWorkContext
                             {
                                 WorkstreamId = workstream.Id,
                                 TeamId = entry.ActiveTeam?.TeamId,
                                 BoardId = board.Id,
-                                SourceFingerprint = planningCycle.ReconciledDigest
-                            }, context, cancellationToken);
+                                SprintId = planned.Id,
+                                SourceFingerprint = $"{planned.Revision}:{planningRevision}"
+                            },
+                            context, planningToken);
+                    }
+                    if (!(planned?.CapacityPoints > 0) &&
+                             accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var planningCycle) == true &&
+                             !string.IsNullOrWhiteSpace(planningCycle.ReconciledDigest))
+                    {
+                        var detail = await context.Platform.Work.ReadBoardAsync(board.Id, planningToken);
+                        // A pending decision is work to track, not evidence that no work remains.
+                        // The execution callback still enforces the planning-decision gate.
+                        var candidateExists = PendingSprintCandidates(detail.Items, sprints).Any(HasStaffedExecution);
+                        if (candidateExists)
+                        {
+                            var nextSequence = PlanningSprintSequence(sprints);
+                            _ = await EnsureCommitmentAsync(
+                                SprintEstimationCorrelation(board.Id, planningCycle.ReconciledDigest, nextSequence),
+                                $"Prepare candidate scope for Production Sprint {nextSequence}",
+                                "Estimate draft work, reconcile the actual roster, then assess readiness for the staffed scope.",
+                                WorkPriorities.Critical,
+                                new PersonalTodoWorkContext
+                                {
+                                    WorkstreamId = workstream.Id,
+                                    TeamId = entry.ActiveTeam?.TeamId,
+                                    BoardId = board.Id,
+                                    SourceFingerprint = planningCycle.ReconciledDigest
+                                }, context, planningToken);
+                        }
                     }
                 }
             }
+
+            var personalDirectory = await context.Platform.PersonalTodo.ListAsync(planningToken);
+            await PrioritizeCommitmentsAsync(personalDirectory, context, planningToken);
+            personalDirectory = await context.Platform.PersonalTodo.ListAsync(planningToken);
+            var personalItems = personalDirectory.Boards
+                .Where(x => x.OwnerOrganizationUserId == personalDirectory.CurrentOrganizationUserId)
+                .SelectMany(x => x.Items).Where(x => x.ArchivedAt is null &&
+                    x.Status is not PersonalTodoStatuses.Completed).ToList();
+            var personalSnapshot = new ProducerCommitmentSnapshot(
+                personalItems.Count,
+                personalItems.Count(x => x.Status == PersonalTodoStatuses.Ready),
+                personalItems.Count(x => x.Status == PersonalTodoStatuses.Running && x.Wait is null),
+                personalItems.Count(x => x.Status == PersonalTodoStatuses.Blocked),
+                personalItems.Count(x => x.Wait is not null),
+                personalItems.Count(x => review.OccurredAt - x.CreatedAt >= TimeSpan.FromDays(7)));
+
+            var prior = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
+                ProjectStateKeys.Portfolio("producer"), planningToken);
+            var weeklyDigestDue = ShouldPublishWeekly(prior?.Payload.LastWeeklyDigestAt, review.OccurredAt);
+            var risksChanged = !risks.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(
+                (prior?.Payload.OpenRisks ?? []).OrderBy(x => x, StringComparer.Ordinal));
+            var stateStore = new RevisionSafeProjectState(context.Platform);
+            var written = await stateStore.MergeAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"),
+                "com.csweet.video-game.producer-operating-state.v1", 1,
+                current => new ProducerOperatingState
+                {
+                    Phase = phases.Count == 0 ? ProducerManagementPhase.HandoffAndCharterValidation : phases.Values.Min(),
+                    WorkstreamPhases = phases,
+                    AcceptedVisionDigests = current?.AcceptedVisionDigests ?? new Dictionary<Guid, string>(),
+                    AcceptedHandoffs = current?.AcceptedHandoffs ?? new Dictionary<Guid, ProducerAcceptedHandoff>(),
+                    PlanningCycles = current?.PlanningCycles ?? new Dictionary<Guid, ProducerPlanningCycleState>(),
+                    MetricSnapshots = snapshots,
+                    OpenRisks = risks.Distinct(StringComparer.Ordinal).ToList(),
+                    PhaseCommitments = commitments,
+                    DecisionFingerprints = current?.DecisionFingerprints ?? [],
+                    PersonalCommitments = personalSnapshot,
+                    LastWeeklyDigestAt = ShouldPublishWeekly(current?.LastWeeklyDigestAt, review.OccurredAt)
+                        ? review.OccurredAt : current?.LastWeeklyDigestAt,
+                    UpdatedAt = review.OccurredAt
+                },
+                snapshots.ToDictionary(x => x.BoardId.ToString("D"), x => x.SourceRevision),
+                $"producer-attention:{review.ReviewId:N}", planningToken);
+            if (weeklyDigestDue || risksChanged)
+                _ = await context.Platform.InvokeAsync<ManagementStatusReport, JsonElement>(
+                    "platform.management.status-report.v1",
+                    BuildManagementReport(Guid.NewGuid(), null, written.Payload), planningToken);
         }
-
-        var personalDirectory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
-        await PrioritizeCommitmentsAsync(personalDirectory, context, cancellationToken);
-        personalDirectory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
-        var personalItems = personalDirectory.Boards
-            .Where(x => x.OwnerOrganizationUserId == personalDirectory.CurrentOrganizationUserId)
-            .SelectMany(x => x.Items).Where(x => x.ArchivedAt is null &&
-                x.Status is not PersonalTodoStatuses.Completed).ToList();
-        var personalSnapshot = new ProducerCommitmentSnapshot(
-            personalItems.Count,
-            personalItems.Count(x => x.Status == PersonalTodoStatuses.Ready),
-            personalItems.Count(x => x.Status == PersonalTodoStatuses.Running && x.Wait is null),
-            personalItems.Count(x => x.Status == PersonalTodoStatuses.Blocked),
-            personalItems.Count(x => x.Wait is not null),
-            personalItems.Count(x => review.OccurredAt - x.CreatedAt >= TimeSpan.FromDays(7)));
-
-        var prior = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
-            ProjectStateKeys.Portfolio("producer"), cancellationToken);
-        var weeklyDigestDue = ShouldPublishWeekly(prior?.Payload.LastWeeklyDigestAt, review.OccurredAt);
-        var risksChanged = !risks.OrderBy(x => x, StringComparer.Ordinal).SequenceEqual(
-            (prior?.Payload.OpenRisks ?? []).OrderBy(x => x, StringComparer.Ordinal));
-        var stateStore = new RevisionSafeProjectState(context.Platform);
-        var written = await stateStore.MergeAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"),
-            "com.csweet.video-game.producer-operating-state.v1", 1,
-            current => new ProducerOperatingState
-            {
-                Phase = phases.Count == 0 ? ProducerManagementPhase.HandoffAndCharterValidation : phases.Values.Min(),
-                WorkstreamPhases = phases,
-                AcceptedVisionDigests = current?.AcceptedVisionDigests ?? new Dictionary<Guid, string>(),
-                AcceptedHandoffs = current?.AcceptedHandoffs ?? new Dictionary<Guid, ProducerAcceptedHandoff>(),
-                PlanningCycles = current?.PlanningCycles ?? new Dictionary<Guid, ProducerPlanningCycleState>(),
-                MetricSnapshots = snapshots,
-                OpenRisks = risks.Distinct(StringComparer.Ordinal).ToList(),
-                PhaseCommitments = commitments,
-                DecisionFingerprints = current?.DecisionFingerprints ?? [],
-                PersonalCommitments = personalSnapshot,
-                LastWeeklyDigestAt = ShouldPublishWeekly(current?.LastWeeklyDigestAt, review.OccurredAt)
-                    ? review.OccurredAt : current?.LastWeeklyDigestAt,
-                UpdatedAt = review.OccurredAt
-            },
-            snapshots.ToDictionary(x => x.BoardId.ToString("D"), x => x.SourceRevision),
-            $"producer-attention:{review.ReviewId:N}", cancellationToken);
-        if (weeklyDigestDue || risksChanged)
-            _ = await context.Platform.InvokeAsync<ManagementStatusReport, JsonElement>(
-                "platform.management.status-report.v1",
-                BuildManagementReport(Guid.NewGuid(), null, written.Payload), cancellationToken);
     }
 
     protected override async Task<AgentWorkResult> ExecuteCapabilityCoreAsync(

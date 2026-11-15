@@ -295,11 +295,19 @@ public sealed partial class SpecialistAgent
     internal static async Task ApplyReviewEffectsAsync(ReviewReceipt receipt, GameProductionPlanningCycleV1 cycle,
         AgentTeamContext roster, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token)
     {
+        if (receipt.Decision.Disposition is "refine" or "wait" && !receipt.Decision.Actions.Any(a => a.Kind is "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
+        {
+            // A wait with no declared dependency has no wake path. Assign diagnosis of the named uncertainty,
+            // rather than promising to wait for an event that nobody has been asked to produce.
+            receipt = receipt with { Decision = receipt.Decision with { Actions = receipt.Decision.Actions.Append(
+                new ReviewAction("refine", receipt.Decision.NextGoal + " " + receipt.Decision.RevisitWhen, null,
+                    Enumerable.Range(0, receipt.Evidence.Count).ToArray())).ToArray() } };
+        }
         for (int i = 0; i < receipt.Decision.Actions.Count; i++)
         {
             var action = receipt.Decision.Actions[i];
             var key = $"review-action:{receipt.Digest}:{i}";
-            if (action.Kind is "proceed" or "resequence" or "refine") continue;
+            if (action.Kind is "proceed" or "resequence") continue;
             var refs = action.EvidenceIndexes.Select(index => receipt.Evidence[index]).ToArray();
             var journal = new RevisionSafeProjectState(context.Platform);
             var recorded = await context.Platform.ReadOperatingStateAsync<ReviewActionReceipt>(key, token);
@@ -334,8 +342,8 @@ public sealed partial class SpecialistAgent
                     context, token, handoff.RevisionDigest);
                 if (staffing != null) await Record(staffing.Id, staffing.Status);
             }
-            else if (action.Kind == "consult" &&
-                SelectRoleMember(roster, role!) is { } member)
+            else if ((action.Kind is "consult" or "refine") &&
+                SelectRoleMember(roster, action.Kind == "refine" ? VideoGameRoleKeys.TechnicalDirector : role!) is { } member)
             {
                 var scope = receipt.Story ?? "project";
                 var question = new WorkContributionRequest(cycle.WorkstreamId,cycle.BoardId,scope,action.Rationale,
@@ -351,6 +359,14 @@ public sealed partial class SpecialistAgent
                     prior=>new((prior?.Requests??[]).Append(new(session.Id,scope,Guid.Parse(member.EmployeeId),key)).DistinctBy(w=>w.ArtifactKey).ToArray()),
                     new Dictionary<string,string>(),key+":watch",token);
                 await Record(session.Id,session.Status);
+            }
+            else if (action.Kind == "refine")
+            {
+                var staffing = await ProposeCoverageAsync(cycle.WorkstreamId, cycle.BoardId, roster,
+                    [new("planning", VideoGameRoleKeys.TechnicalDirector, ["work.execution.run"], null, true,
+                        "A qualified contributor is needed for this retained planning question: " + action.Rationale)], context, token, handoff.RevisionDigest);
+                if (staffing is null) throw new InvalidOperationException("The retained refinement needs qualified planning coverage or an owner revision of the affected approach.");
+                await Record(staffing.Id, staffing.Status);
             }
             else if (action.Kind == "spend")
             {

@@ -42,9 +42,8 @@ public sealed partial class SpecialistAgent
             },context,ct);
             if (!assessment.ScopeSufficient)
             {
-                await EnsurePlanningDecisionsAsync(cycle.WorkstreamId,cycle.BoardId,cycle.PlanningFingerprint,
-                    assessment.RemainingWork.Count>0?assessment.RemainingWork:[assessment.Rationale],handoff,context,ct);
-                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),"Scope refinement remains owned by Gabriel and the requested planning decision: "+assessment.Rationale);
+                return await RefineRemainingApprovedWorkAsync(cycle, handoff, basis,
+                    assessment.Rationale + " " + string.Join(" ", assessment.RemainingWork), context, ct);
             }
             var roots=accepted.SelectMany(p=>p.Scopes.Where(s=>s.Scope==WorkExecutionScopes.Release).Select(s=>(Plan:p,Scope:s))).ToArray();
             if (roots.Length==0) return PersonalTodoResult.Blocked("Final preparation needs accepted delivery evidence; an empty candidate list is insufficient.");

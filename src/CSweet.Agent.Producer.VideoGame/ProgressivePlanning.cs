@@ -285,6 +285,10 @@ public sealed partial class SpecialistAgent
                     throw new InvalidOperationException("The remaining approved Stories have unresolved dependencies.");
                 if (ownership?.Gaps.Count > 0)
                     return new(progress, Waiting: "Planning reconciliation remains with Gabriel and Victor for affected work. Independent work continues; outstanding obligations prevent final completion. No user decision is requested.");
+                // A source-bound additive amendment can introduce future work after the original roadmap's
+                // increments finish. Schedule those current board tasks through the same normal delivery path.
+                if (currentSession is not null && board.Items.Any(i => i.ExecutionMode == WorkItemExecutionModes.Executable &&
+                    i.Status is not ("Done" or "Completed" or "Cancelled"))) return new(progress, currentSession);
                 return new(progress, Complete: true);
             }
             if (evidence.Adaptive && !candidates.Any(c => c.ProposalKey == next))
