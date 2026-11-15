@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using CrosswiredStudios.VideoGame.PitchCollaboration;
 using CrosswiredStudios.VideoGame.AgentKit;
@@ -13,12 +13,16 @@ public sealed partial class SpecialistAgent
     internal sealed record ReviewedCommitment(string Statement, IReadOnlyList<int> Sources, IReadOnlyList<int> EvidenceIndexes)
     {
         public IReadOnlyList<int> ProposedIndexes { get; init; } = [];
+        public int? ExistingObligationIndex { get; init; }
     }
     internal sealed record OwnershipGap(string Statement, int SourceIndex, string Reason)
     {
         public IReadOnlyList<int> ProposedIndexes { get; init; } = [];
+        public int? ExistingObligationIndex { get; init; }
         public IReadOnlyList<int> AffectedEpicIndexes { get; init; } = [];
         public IReadOnlyList<int> ConflictEvidenceIndexes { get; init; } = [];
+        public string? BriefTitle { get; init; }
+        public string? BriefSummary { get; init; }
     }
     internal sealed record OwnershipDraft(IReadOnlyList<ReviewedCommitment> Commitments, IReadOnlyList<OwnershipGap> Gaps);
     internal sealed record BoundOwner(string Epic, string Criterion)
@@ -26,20 +30,29 @@ public sealed partial class SpecialistAgent
         public PlanningOwnershipEvidence? Evidence { get; init; }
         [JsonIgnore] public IReadOnlyList<string> ScopeKeys => Evidence?.ScopeKeys ?? [Epic];
     }
-    internal sealed record OwnedCommitment(string Statement, IReadOnlyList<string> Citations, IReadOnlyList<BoundOwner> Owners);
+    internal sealed record OwnedCommitment(string Statement, IReadOnlyList<string> Citations, IReadOnlyList<BoundOwner> Owners)
+    { public string? ObligationKey { get; init; } }
     internal sealed record BoundOwnershipGap(string Statement, string Reason, IReadOnlyList<string> AffectedProposalKeys)
     {
         public IReadOnlyList<PlanningOwnershipEvidence> ConflictEvidence { get; init; } = [];
+        public string? ObligationKey { get; init; }
+        public IReadOnlyList<string> Citations { get; init; } = [];
+        public string? BriefTitle { get; init; }
+        public string? BriefSummary { get; init; }
     }
     internal sealed record OwnershipReview(IReadOnlyList<OwnedCommitment> Commitments, IReadOnlyList<BoundOwnershipGap> Gaps)
     {
+        public IReadOnlyList<PlanningObligationIdentity> Obligations { get; init; } = [];
         [JsonIgnore] public IReadOnlyList<ProgressiveCoverage> Coverage => Commitments.Select(c => new ProgressiveCoverage(
             c.Statement, c.Owners.SelectMany(o => o.ScopeKeys).Distinct().ToArray()))
             .Concat(Gaps.Select(g => new ProgressiveCoverage(g.Statement, []))).ToArray();
     }
 
+    internal sealed record ObligationRegistry(string ApprovedDigest, IReadOnlyList<PlanningObligationIdentity> Entries);
+    private static string ObligationRegistryKey(Guid workstream) => AgentOperatingStateKey.Create("approved-obligations:v1", new { workstream });
+
     private static string OwnershipKey(GameProductionPlanningCycleV1 cycle, ProgressiveEvidence roadmap) =>
-        AgentOperatingStateKey.Create("producer-roadmap-ownership.v2", new { cycle.WorkstreamId, cycle.ApprovedPackageDigest,
+        AgentOperatingStateKey.Create("producer-roadmap-ownership.v3", new { cycle.WorkstreamId, cycle.ApprovedPackageDigest,
             roadmap.ScopeKey, roadmap.OutlineDigest, directions = roadmap.ReviewedDirectionsDigest ?? roadmap.DirectionsDigest });
 
     internal static IReadOnlyList<PlanningOwnershipEvidence> OwnershipCatalog(IReadOnlyList<GameProposedWorkItemV1> epics,
@@ -68,13 +81,17 @@ public sealed partial class SpecialistAgent
         ValidateProgressiveProposal(proposal, roadmap with { Phase = "Outline", DetailedStoryKeys = [] },
             proposal, roadmap with { Phase = "Outline", DetailedStoryKeys = [] }, [], null);
         var epics = proposal.DeliveryItems.Where(e => e.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone).ToArray();
-        var catalog = OwnershipCatalog(epics, proposal.TechnicalConstraints, directions).Concat(contributions ?? []).ToArray();
+        var registry = await context.Platform.ReadOperatingStateAsync<ObligationRegistry>(ObligationRegistryKey(cycle.WorkstreamId), token);
+        var existing = registry?.Payload.Entries ?? [];
+        var previous = await context.Platform.ReadOperatingStateAsync<OwnershipReview>(OwnershipKey(cycle, roadmap), token);
+        var retained = previous?.Payload.Commitments.SelectMany(c => c.Owners).Where(o => o.Evidence is not null).Select(o => o.Evidence!) ?? [];
+        var catalog = OwnershipCatalog(epics, proposal.TechnicalConstraints, directions).Concat(retained).Concat(contributions ?? []).DistinctBy(e => e.Key).ToArray();
         var sourceIndexes = sources.Select((s, index) => (s.Key, index)).ToDictionary(x => x.Key, x => x.index);
         var proposed = roadmap.ScopeCoverage.Where(c => c.Statement != null).Select((c, index) => new {
             index, c.Statement, sources = (c.Citations ?? []).Select(k => sourceIndexes.TryGetValue(k, out var i) ? i :
                 throw new InvalidOperationException("Roadmap commitment cites a source outside the accepted package.")).ToArray(), c.ProposalKeys }).ToArray();
         // Contributions change the review basis; old criterion-only reviews cannot be replayed.
-        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v2", new { projection = OwnershipKey(cycle, roadmap), catalog });
+        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v3", new { projection = OwnershipKey(cycle, roadmap), catalog, retainedIdentities = existing.Select(e => new { e.Key, e.IsCurrent }) });
         var reviewed = await PitchProtocol.CachedAsync(key, context, async () => {
             using var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
                 throw new InvalidOperationException("Configure the Producer planning provider."), Settings.GetString("llmModel"), new(InvocationKind: "producer-roadmap-ownership")));
@@ -88,6 +105,8 @@ public sealed partial class SpecialistAgent
                 across work; it does not prove a feature was implemented or tested. Advice cannot grant changed scope or authority.
                 Inspect original sources for omissions. Return commitments with statement, sources and evidenceIndexes.
                 For genuine gaps return statement, sourceIndex, reason and affectedEpicIndexes; include dependent scope only if directly affected.
+                Include briefTitle and briefSummary for each gap: a short plain-language title and one sentence about its consequence.
+                Keep source details, technical diagnostics and internal references in the full reason and reference fields.
                 Statements and reasons explain the finding in human terms; keep internal keys and indexes in reference fields.
                 An empty affectedEpicIndexes means impact is unknown and must conservatively hold all scope, not silently clear work.
                 Include proposedIndexes on commitments and gaps, accounting for each proposed obligation exactly once.
@@ -95,14 +114,26 @@ public sealed partial class SpecialistAgent
                 is not evidence that it failed or is impossible. Do not invent observed measurements, participant studies or technical failures.
                 conflictEvidenceIndexes is empty for ordinary omissions/hypotheses. Use it only for established incompatible
                 binding constraints or decisions that actually require changed authority; cite the exact incompatible evidence.
+                Match each retained obligation by meaning using existingObligationIndex on commitments and gaps. Rewording is not a new obligation.
+                Account for every current retained obligation when approved sources are unchanged. Use null only for a genuinely distinct obligation.
+                Reviewed ownership remains meaningful evidence while its relevant approved constraints and sources remain applicable; do not reopen it for phrasing.
                 Empty gaps means every obligation has a meaningful owner; it never means all work is complete.
                 """), new(ChatRole.User, JsonSerializer.Serialize(new { sources = sources.Select((s, index) => new { index, s.ApprovedText }),
+                    existingObligations = existing.Select((e,index) => new { index,e.Statement,e.Sources,e.IsCurrent }),
+                    approvedBasisChanged = registry?.Payload.ApprovedDigest != cycle.ApprovedPackageDigest,
                     proposed, epics = epics.Select((e,index) => new { index,e.ProposalKey,e.Title }),
                     evidence = catalog.Select((e,index) => new { index,e.Kind,e.Text,e.ScopeKeys }) }))],
                 new AgentModelJsonRequest<OwnershipDraft>("approved scope ownership") { CorrectionLimit = 1, Options = ResponseOptions(),
-                    Normalize = value => { BindOwnership(value, sources, epics, proposed.Length, catalog); return value; } }, token);
-            return BindOwnership(draft, sources, epics, proposed.Length, catalog);
+                    Normalize = value => { BindOwnership(value, sources, epics, proposed.Length, catalog, existing, cycle.WorkstreamId.ToString("N"), registry?.Payload.ApprovedDigest != cycle.ApprovedPackageDigest); return value; } }, token);
+            return BindOwnership(draft, sources, epics, proposed.Length, catalog, existing, cycle.WorkstreamId.ToString("N"), registry?.Payload.ApprovedDigest != cycle.ApprovedPackageDigest);
         }, token);
+        await DurableAgentState.UpdateAsync<ObligationRegistry>(context.Platform, ObligationRegistryKey(cycle.WorkstreamId), "planning.obligations.v1", 1,
+            latest => {
+                if (latest is not null && JsonSerializer.Serialize(latest) != JsonSerializer.Serialize(registry?.Payload) &&
+                    !reviewed.Obligations.All(r => latest.Entries.Any(e => e.Key == r.Key && e.Statement == r.Statement)))
+                    throw new InvalidOperationException("The obligation catalog changed during review. Reassess against its retained identities before applying this judgment.");
+                return new(cycle.ApprovedPackageDigest, (latest?.Entries ?? []).Select(e => reviewed.Obligations.FirstOrDefault(r => r.Key == e.Key) ?? e with { IsCurrent = false })
+                .Concat(reviewed.Obligations.Where(r => !(latest?.Entries.Any(e => e.Key == r.Key) ?? false))).ToArray()); }, token);
         // Preserve the current projection for sprint review/reconnect discovery, without treating a cached judgment as authority.
         var state = new RevisionSafeProjectState(context.Platform);
         await state.MergeAsync<OwnershipReview>(OwnershipKey(cycle, roadmap), "game.scope-ownership.v2", 2, _ => reviewed,
@@ -111,7 +142,8 @@ public sealed partial class SpecialistAgent
     }
 
     internal static OwnershipReview BindOwnership(OwnershipDraft draft, IReadOnlyList<GameOutcomeSource> sources,
-        IReadOnlyList<GameProposedWorkItemV1> epics, int proposedCount = 0, IReadOnlyList<PlanningOwnershipEvidence>? suppliedCatalog = null)
+        IReadOnlyList<GameProposedWorkItemV1> epics, int proposedCount = 0, IReadOnlyList<PlanningOwnershipEvidence>? suppliedCatalog = null,
+        IReadOnlyList<PlanningObligationIdentity>? existing = null, string identityNamespace = "test", bool changedApprovedBasis = false)
     {
         var catalog = suppliedCatalog ?? OwnershipCatalog(epics, [], []);
         if (draft.Commitments == null || draft.Gaps == null || draft.Commitments.Count + draft.Gaps.Count == 0)
@@ -146,11 +178,18 @@ public sealed partial class SpecialistAgent
                     throw new AgentModelJsonException("An authority conflict must identify the incompatible binding constraints or decisions. Missing evidence is routine reconciliation.");
             }
             gaps.Add(new(g.Statement.Trim(), g.Reason.Trim(), (g.AffectedEpicIndexes.Count == 0 ? epics.Select(e => e.ProposalKey) :
-                g.AffectedEpicIndexes.Distinct().Select(i => epics[i].ProposalKey)).ToArray()) { ConflictEvidence = conflict });
+                g.AffectedEpicIndexes.Distinct().Select(i => epics[i].ProposalKey)).ToArray()) { ConflictEvidence = conflict, Citations = [sources[g.SourceIndex].Key] });
         }
         var accounted = draft.Commitments.SelectMany(c => c.ProposedIndexes ?? []).Concat(draft.Gaps.SelectMany(g => g.ProposedIndexes ?? [])).Order().ToArray();
         if (!accounted.SequenceEqual(Enumerable.Range(0, proposedCount))) throw new AgentModelJsonException("Account for every proposed commitment exactly once.");
-        return new(commitments, gaps);
+        IReadOnlyList<PlanningObligationIdentity> identities;
+        try {
+            identities = PlanningObligationCatalog.Bind(existing ?? [], draft.Commitments.Select(c => new PlanningObligationJudgment(c.Statement,
+                c.Sources.Select(i => sources[i].Key).ToArray(), c.ExistingObligationIndex)).Concat(draft.Gaps.Select(g =>
+                new PlanningObligationJudgment(g.Statement, [sources[g.SourceIndex].Key], g.ExistingObligationIndex))).ToArray(), identityNamespace, changedApprovedBasis);
+        } catch (ArgumentException ex) { throw new AgentModelJsonException(ex.Message); }
+        return new(commitments.Select((c,i) => c with { Statement = identities[i].Statement, ObligationKey = identities[i].Key }).ToArray(),
+            gaps.Select((g,i) => g with { BriefTitle = draft.Gaps[i].BriefTitle, BriefSummary = draft.Gaps[i].BriefSummary, Statement = identities[commitments.Count + i].Statement, ObligationKey = identities[commitments.Count + i].Key }).ToArray()) { Obligations = identities };
     }
 
     internal static IReadOnlySet<string> OwnershipHolds(IReadOnlyList<GameProposedWorkItemV1> items, OwnershipReview? review) =>

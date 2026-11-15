@@ -4,7 +4,7 @@
   "sourceRepository": "https://github.com/CrosswiredStudios/CSweet.Agent.CreativeDirector.VideoGame",
   "sourcePath": "extensions/video-game",
   "files": {
-    "VideoGameAgentKit.cs": "3c696453b76acaed6d1ac8f04c26881dba52dbfc3a9dea6df9c4b3bfb06c0631",
+    "VideoGameAgentKit.cs": "ad73dde5dc94db756b674bc8a33efc50acc2ee7a3ec5d4e6e3480bd88c68fea8",
     "README.md": "5ef8c9f4e3581c337fdb0eb43d604e1e0cb484dc46c64dbfdad281d6b4750424"
   },
   "localAdaptations": [

@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.13.0",
+  "version": "6.14.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -883,10 +883,26 @@
       "name": "platform.workstream.delivery.complete.v1",
       "purpose": "Record project delivery only after explicit final-product acceptance against the current approved source; does not authorize scope changes, spending or public launch.",
       "modelVisible": false
+    },
+    {
+      "name": "work.issues.read.v1",
+      "scope": "organization",
+      "purpose": "Coordinate source-bound issues and scoped advice within current board grants; no execution or acceptance authority."
+    },
+    {
+      "name": "work.issues.reconcile.v1",
+      "scope": "organization",
+      "purpose": "Coordinate source-bound issues and scoped advice within current board grants; no execution or acceptance authority."
+    },
+    {
+      "name": "work.issues.commission.v1",
+      "scope": "organization",
+      "purpose": "Coordinate source-bound issues and scoped advice within current board grants; no execution or acceptance authority."
     }
   ],
   "events": {
     "subscribes": [
+      "work.issues.changed.v1",
       "com.csweet.work.item.discussion.changed.v1",
       "com.csweet.calendar.reminder-due.v1",
       "com.csweet.user.message.received.v1",

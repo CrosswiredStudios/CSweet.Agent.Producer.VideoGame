@@ -162,26 +162,9 @@ public sealed class RevisionSafeProjectState(PlatformCapabilityClient platform)
         IReadOnlyDictionary<string, string> sourceRevisions, string idempotencyKey, CancellationToken token)
         where T : class
     {
-        for (var attempt = 0; attempt < 4; attempt++)
-        {
-            AgentOperatingState<T>? current;
-            try { current = await platform.ReadOperatingStateAsync<T>(stateKey, token); }
-            catch (PlatformCapabilityException exception) when (exception.Code == PlatformCapabilityErrorCode.NotFound)
-            { current = null; }
-            var payload = merge(current?.Payload);
-            try
-            {
-                var written = await platform.WriteOperatingStateAsync(new AgentOperatingStateWriteRequest(
-                    stateKey, schemaId, schemaVersion, "Active", sourceRevisions, [], Fingerprint(payload), [], Guid.NewGuid(),
-                    JsonSerializer.SerializeToElement(payload), current?.Revision, $"{idempotencyKey}:{attempt}"), token);
-                return new AgentOperatingState<T>(written.Id, written.StateKey, written.SchemaId, written.SchemaVersion,
-                    written.Status, written.SourceRevisions, written.ConditionCodes, written.DecisionFingerprint,
-                    written.OpenCommitmentCorrelations, written.AttentionReviewId,
-                    written.Payload.Deserialize<T>()!, written.Revision, written.CreatedAt, written.UpdatedAt);
-            }
-            catch (PlatformCapabilityException exception) when (exception.Code == PlatformCapabilityErrorCode.Conflict && attempt < 3) { }
-        }
-        throw new InvalidOperationException("Project state could not be merged after four revision conflicts.");
+        // Content-bound CAS and restart recovery are shared SDK behavior. The caller's
+        // old logical key is no longer reused for a different merged payload.
+        return await DurableAgentState.UpdateAsync(platform, stateKey, schemaId, schemaVersion, merge, token, sourceRevisions);
     }
 
     private static string Fingerprint<T>(T payload) =>

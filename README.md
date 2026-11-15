@@ -1,3 +1,7 @@
+﻿# Producer 6.14.0
+
+Durable issues, scoped reconciliation and concise current-state attention. See [release notes](releases/6.14.0.md).
+
 # Producer 6.13.0
 
 Grounded outcomes, criteria, constraints and approved decisions can own planning obligations. Scoped

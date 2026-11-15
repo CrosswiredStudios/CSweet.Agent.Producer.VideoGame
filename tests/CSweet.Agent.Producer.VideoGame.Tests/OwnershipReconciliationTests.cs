@@ -40,75 +40,83 @@ public sealed partial class ProgressivePlanningTests
     }
 
     [Fact]
-    public async Task ReconciliationReplaysOneCommissionBindsAdviceToAcceptedSourcesAndRetiresResolvedFindings()
+    public async Task RewordedFindingsShareOneCommissionAndAdviceNeedsAnOwnedResolutionBeforeRelease()
     {
         var f = new Fixture(adaptive: true, independent: true);
+        var registry = new IssueRegistry(f.Runtime);
         var state = new ProducerPlanningCycleState(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId,
             f.Cycle.PlanningFingerprint, null, null, null, null, f.Artifact.Digest, null, DateTimeOffset.UtcNow);
-        var handoff = new ProducerAcceptedHandoff(f.Cycle.WorkstreamId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff",
-            Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
-        var identity = new AgentIdentity(f.Person.OrganizationUserId.ToString(), "Gabriel", null, null, null, [], null, null, null);
-        AgentCoordinationSession? session = null; var starts = 0;
-        f.Runtime.RegisterCapability<StartBoardCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationStartBoard, (r, _) => {
-            starts++;
-            session = f.Session with { Id = Guid.NewGuid(), Status = AgentCoordinationStatuses.Active,
-                Turns = [new(Guid.NewGuid(), 1, f.Person.OrganizationUserId, "Reconcile", "Complete", DateTimeOffset.UtcNow,
-                    new(r.Artifact!.Type, r.Artifact.SchemaVersion, r.Artifact.Key, r.Artifact.PageOrdinal, r.Artifact.IsFinalPage, r.Artifact.Payload, "request"))] };
-            return Task.FromResult(session);
-        }).RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (_, _) => Task.FromResult(session!))
-          .RegisterCapability<AddPersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Add, (r, _) => {
-              Assert.Contains("No user decision is requested", r.Description);
-              Assert.Contains("Accountable: Victor", r.Description);
-              return Task.FromResult(JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with { Id = Guid.NewGuid() });
-          });
-        var review = new SpecialistAgent.OwnershipReview([], [new("Conditional escalation responsibility", "Confirm the existing owner.", ["final"])]);
-        var context = f.Runtime.CreateContext(identity: identity);
+        var handoff = new ProducerAcceptedHandoff(f.Cycle.WorkstreamId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
+        var legacy = new PlanningReconciliationReference("legacy", Guid.NewGuid(), Guid.Parse(f.Member.EmployeeId), f.Evidence.OutlineDigest, ["final"]);
+        state = state with { PlanningReconciliations = [legacy] };
+        var review = new SpecialistAgent.OwnershipReview([], [new("Conditional escalation responsibility", "Confirm the owner.", ["final"]) { ObligationKey = "escalation" }]);
+        var context = f.Runtime.CreateContext(identity: new AgentIdentity(f.Person.OrganizationUserId.ToString(), "Gabriel", null, null, null, [], null, null, null));
         state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, review, f.Outline, f.Member, handoff, context, default);
-        state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, review, f.Outline, f.Member, handoff, context, default);
-        Assert.Equal(1, starts); Assert.Single(state.PlanningReconciliations); f.Runtime.AssertCollaborationsTracked();
-        var reference = state.PlanningReconciliations[0];
-        session = session! with { Status = AgentCoordinationStatuses.Completed, Turns = [.. session!.Turns,
-            new(Guid.NewGuid(), 2, f.Person.OrganizationUserId, "Advice", "Complete", DateTimeOffset.UtcNow,
-                new(WorkContributions.AnswerType, "1.0", reference.Key, 1, true,
-                    JsonSerializer.SerializeToElement(new WorkContributionAnswer("Existing constraint owns it", "Victor evaluates feasibility and escalates an evidenced conflict.", "Measure only when the build exists.")), "advice"))] };
-        var advice = await SpecialistAgent.ReadOwnershipContributionsAsync(state, f.Evidence, handoff, context, default);
-        Assert.Equal("Responsibility", Assert.Single(advice).Kind); Assert.Equal(new[] { "final" }, advice[0].ScopeKeys);
-        Assert.Empty(await SpecialistAgent.ReadOwnershipContributionsAsync(state, f.Evidence, handoff with { AcceptedRevisionId = Guid.NewGuid() }, context, default));
-        Assert.Empty(await SpecialistAgent.ReadOwnershipContributionsAsync(state, f.Evidence with { OutlineDigest = "superseded" }, handoff, context, default));
-        DecisionRequest? followUp = null;
-        f.Runtime.RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead,
-            (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([]))
-            .RegisterCapability<DecisionRequest, DecisionRecord>(PlatformCapabilities.DecisionRequest, (r, _) => {
-                followUp = r; return Task.FromResult(JsonSerializer.Deserialize<DecisionRecord>("{}")! with { Id = Guid.NewGuid() });
-            });
-        state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, review, f.Outline, f.Member, handoff, context, default);
-        Assert.Contains(advice[0].Text, followUp!.Summary); Assert.Equal("work-planning", followUp.AuthorityRuleKey);
-        Assert.Equal(1, starts);
-        state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, new([], []), f.Outline, f.Member, handoff, context, default);
-        Assert.Empty(state.OwnershipHeldProposalKeys); Assert.False(state.PlanningReconciliations[0].Active);
-        Assert.Single(await SpecialistAgent.ReadOwnershipContributionsAsync(state, f.Evidence, handoff, context, default));
-        var portfolio = new ProducerOperatingState { PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> { [state.WorkstreamId] = state } };
-        f.Runtime.RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
-            (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(new(Guid.NewGuid(), r.StateKey, "portfolio", 1, "Active",
-                new Dictionary<string, string>(), [], "", [], Guid.NewGuid(), JsonSerializer.SerializeToElement(portfolio), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))));
-        session = session! with { Status = "Blocked" }; // Obsolete failures must not remain current issues.
-        var card = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with { Id = Guid.NewGuid(), Title = "Receive planning reconciliation",
-            CorrelationId = TrackedCollaboration.Correlation(session.Id), WorkContext = new(BoardId: state.BoardId) };
-        Assert.Equal(PersonalTodoResult.Completed("The planning finding was resolved or superseded; its advice remains in the audit history."),
-            await new SpecialistAgent().HandlePersonalTodoAsync(card, context, default));
+        state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence,
+            review with { Gaps = [review.Gaps[0] with { Statement = "Name who handles conditional escalation" }] }, f.Outline, f.Member, handoff, context, default);
+        Assert.Equal(1, registry.CommissionCalls); Assert.Single(registry.Issues);
+        Assert.Equal(new[] { legacy.SessionId }, registry.LastCommission!.SupersededSessionIds);
+        Assert.False(state.PlanningReconciliations[0].Active); Assert.Equal(new[] { "final" }, state.OwnershipHeldProposalKeys);
+        Assert.DoesNotContain("foundation", state.OwnershipHeldProposalKeys);
+        var commissioned = registry.Commissions.Single();
+        registry.Commissions[0] = commissioned with { Status = "AdviceReceived" };
+        var request = new WorkContributionRequest(state.WorkstreamId, state.BoardId, "issue-commission:" + commissioned.Id.ToString("N"), "Question", [new(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest)]);
+        var session = f.Session with { Id = commissioned.SessionId!.Value, Status = AgentCoordinationStatuses.Completed,
+            Initiator = f.Session.Initiator with { OrganizationUserId = f.Person.OrganizationUserId },
+            Target = f.Session.Target with { OrganizationUserId = Guid.Parse(f.Member.EmployeeId) },
+            BoardSource = new(state.BoardId), Turns = [
+                new(Guid.NewGuid(), 1, f.Person.OrganizationUserId, "Request", "Continue", DateTimeOffset.UtcNow,
+                    new(WorkContributions.RequestType, "1.0", request.ScopeKey, 1, true, JsonSerializer.SerializeToElement(request), "request")),
+                new(Guid.NewGuid(), 2, Guid.Parse(f.Member.EmployeeId), "Advice", "Complete", DateTimeOffset.UtcNow,
+                    new(WorkContributions.AnswerType, "1.0", request.ScopeKey, 1, true, JsonSerializer.SerializeToElement(new WorkContributionAnswer("Existing owner", "Victor owns evidenced escalation.", "Measure when available.")), "advice")) ] };
+        f.Runtime.RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (_, _) => Task.FromResult(session));
+        // Old and new references remain readable, but only an exact accepted source can supply current evidence.
+        var advice = await SpecialistAgent.ReadOwnershipContributionsAsync(state with { PlanningReconciliations = [] }, f.Evidence, handoff, context, default);
+        Assert.Single(advice);
+        Assert.Empty(await SpecialistAgent.ReadOwnershipContributionsAsync(state with { PlanningReconciliations = [] }, f.Evidence, handoff with { AcceptedRevisionId = Guid.NewGuid() }, context, default));
+        Assert.Equal("Open", registry.Issues.Single().Status); // Advice is not a resolution receipt.
+        var owned = new SpecialistAgent.OwnershipReview([new("Conditional escalation responsibility", ["approved"],
+            [new("final", "Named escalation responsibility")]) { ObligationKey = "escalation" }], []);
+        state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, owned, f.Outline, f.Member, handoff, context, default);
+        Assert.Equal("Resolved", registry.Issues.Single().Status); Assert.Empty(state.OwnershipHeldProposalKeys);
+        Assert.Equal(1, registry.CommissionCalls);
+    }
+
+    [Fact]
+    public async Task ExistingOwnedResponsibilityRetiresLegacyTrackingWithoutCommissioningAnotherConsultation()
+    {
+        var f = new Fixture(adaptive: true, independent: true); var registry = new IssueRegistry(f.Runtime);
+        var state = new ProducerPlanningCycleState(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId,
+            f.Cycle.PlanningFingerprint, null, null, null, null, f.Artifact.Digest, null, DateTimeOffset.UtcNow);
+        var handoff = new ProducerAcceptedHandoff(f.Cycle.WorkstreamId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
+        var legacy = new PlanningReconciliationReference("old-finding", Guid.NewGuid(), Guid.Parse(f.Member.EmployeeId), f.Evidence.OutlineDigest, ["final"]);
+        state = state with { PlanningReconciliations = [legacy] };
+        var original = new WorkContributionRequest(state.WorkstreamId, state.BoardId, legacy.Key, "Confirm who owns escalation", [new(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest)]);
+        var session = f.Session with { Id = legacy.SessionId, Status = AgentCoordinationStatuses.Failed, BoardSource = new(state.BoardId),
+            Initiator = f.Session.Initiator with { OrganizationUserId = f.Person.OrganizationUserId }, Target = f.Session.Target with { OrganizationUserId = legacy.SpecialistId },
+            Turns = [new(Guid.NewGuid(), 1, f.Person.OrganizationUserId, "Request", "Continue", DateTimeOffset.UtcNow,
+                new(WorkContributions.RequestType, "1.0", legacy.Key, 1, true, JsonSerializer.SerializeToElement(original), "request"))] };
+        f.Runtime.RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (_, _) => Task.FromResult(session));
+        var owned = new SpecialistAgent.OwnershipReview([new("Escalation responsibility", ["approved"], [new("final", "The Technical Director owns escalation")]) { ObligationKey = "escalation" }], []);
+        var context = f.Runtime.CreateContext(identity: new AgentIdentity(f.Person.OrganizationUserId.ToString(), "Gabriel", null, null, null, [], null, null, null));
+        state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, owned, f.Outline, f.Member, handoff, context, default);
+        Assert.False(state.PlanningReconciliations[0].Active); Assert.Empty(state.OwnershipHeldProposalKeys);
+        Assert.Equal(0, registry.CommissionCalls); Assert.Equal("Resolved", Assert.Single(registry.Issues).Status);
+        Assert.Equal(AgentCoordinationStatuses.Failed, session.Status); // Failure history is not rewritten as success.
     }
 
     [Fact]
     public async Task EvidencedConflictsGoToDelegatedManagementWithSpecificImpactAndIdempotentChoices()
     {
         var f = new Fixture(adaptive: true, independent: true);
+        var registry = new IssueRegistry(f.Runtime);
         var state = new ProducerPlanningCycleState(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId,
             f.Cycle.PlanningFingerprint, null, null, null, null, f.Artifact.Digest, null, DateTimeOffset.UtcNow);
         var handoff = new ProducerAcceptedHandoff(f.Cycle.WorkstreamId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff",
             Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
         var requirements = new PlanningOwnershipEvidence[] { new("one", "Constraint", "Use only provided audio.", ["final"]),
             new("two", "Decision", "Provided audio is forbidden.", ["final"]) };
-        var review = new SpecialistAgent.OwnershipReview([], [new("Resolve incompatible audio requirements", "Both requirements cannot hold.", ["final"]) { ConflictEvidence = requirements }]);
+        var review = new SpecialistAgent.OwnershipReview([], [new("Resolve incompatible audio requirements", "Both requirements cannot hold.", ["final"]) { ConflictEvidence = requirements, ObligationKey = "audio-conflict" }]);
         var requests = new Dictionary<string, DecisionRequest>();
         f.Runtime.RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead,
             (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([]))
@@ -146,4 +154,32 @@ public sealed partial class ProgressivePlanningTests
         Assert.Empty(SpecialistAgent.OwnershipHeldItems(state with { TechnicalProposalDigest = "obsolete" }, [root, child, consumer, independent]));
         Assert.Empty(SpecialistAgent.OwnershipHeldItems(state with { OwnershipHeldProposalKeys = [] }, [root, child, consumer, independent]));
     }
+    private sealed class IssueRegistry
+    {
+        public List<WorkIssueCaseResponse> Issues { get; } = [];
+        public List<WorkIssueCommissionResponse> Commissions { get; } = [];
+        public int CommissionCalls { get; private set; }
+        public CommissionWorkIssuesRequest? LastCommission { get; private set; }
+        public IssueRegistry(AgentTestRuntime runtime)
+        {
+            runtime.RegisterCapability<ReadWorkIssuesRequest, WorkIssueDirectory>(WorkIssueCapabilities.Read,
+                (_, _) => Task.FromResult(new WorkIssueDirectory(Issues.ToArray(), Commissions.ToArray())))
+            .RegisterCapability<ReconcileWorkIssuesRequest, WorkIssueDirectory>(WorkIssueCapabilities.Reconcile, (r, _) => {
+                foreach (var update in r.Issues) {
+                    var prior = Issues.SingleOrDefault(i => i.ObligationKey == update.ObligationKey);
+                    if (prior is not null) Assert.Equal(prior.Revision, update.ExpectedRevision);
+                    var next = new WorkIssueCaseResponse(prior?.Id ?? Guid.NewGuid(), r.BoardId, Guid.NewGuid(), update.ObligationKey,
+                        update.Statement, update.Detail, update.Status, update.Phase, Guid.NewGuid(), update.NextAction,
+                        r.Source, update.ScopeKeys, (prior?.Links ?? []).Concat(update.Links).Distinct().ToArray(), update.ResolutionEvidence, (prior?.Revision ?? 0) + 1, DateTimeOffset.UtcNow);
+                    Issues.RemoveAll(i => i.ObligationKey == update.ObligationKey); Issues.Add(next);
+                }
+                return Task.FromResult(new WorkIssueDirectory(Issues.ToArray(), Commissions.ToArray()));
+            }).RegisterCapability<CommissionWorkIssuesRequest, WorkIssueCommissionResponse>(WorkIssueCapabilities.Commission, (r, _) => {
+                CommissionCalls++; LastCommission = r;
+                var row = new WorkIssueCommissionResponse(Guid.NewGuid(), r.BoardId, r.TargetEmployeeId, r.IssueIds, r.Source, "Dispatched", Guid.NewGuid(), null, 1);
+                Commissions.Add(row); return Task.FromResult(row);
+            });
+        }
+    }
+
 }

@@ -1,4 +1,4 @@
-using CrosswiredStudios.VideoGame.AgentKit;
+﻿using CrosswiredStudios.VideoGame.AgentKit;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 using CSweet.Agent.SDK.VideoGame.Contracts;
@@ -766,7 +766,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             package = await context.Platform.Artifacts.GetPackageAsync(handoff.PlanningPackageId, cancellationToken);
             priorCycle = new ProducerPlanningCycleState(workstreamId, boardId, teamId,
                 source.SourceFingerprint, package.Id, null, null, null, null, null, DateTimeOffset.UtcNow);
-            await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
+            await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
         }
         else
             package = await context.Platform.Artifacts.GetPackageAsync(packageId, cancellationToken);
@@ -831,7 +831,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             TechnicalDirectorSessionId = technicalSession.Id,
             UpdatedAt = DateTimeOffset.UtcNow
         };
-        await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
+        await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
 
         if (designerSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled ||
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
@@ -876,7 +876,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             catch (InvalidOperationException ex) { return PersonalTodoResult.Blocked("Producer could not verify roadmap ownership: " + ex.Message); }
             priorCycle = await ReconcileOwnershipFindingsAsync(cycle, priorCycle, roadmap, ownership, technicalProposal,
                 technicalDirector, handoff, context, cancellationToken);
-            await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
+            var currentHeld = priorCycle.OwnershipHeldProposalKeys.Except(ownership.Gaps.SelectMany(g => g.AffectedProposalKeys)).ToArray();
+            if (currentHeld.Length > 0) ownership = ownership with { Gaps = [.. ownership.Gaps,
+                new BoundOwnershipGap("Recorded planning direction is being incorporated", "The issue remains open until its authoritative dependencies are satisfied.", currentHeld)] };
+            await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
 
         }
         if (progressiveMode && roleRepair is null && !separateDesignerBacklog)
@@ -886,7 +889,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (progress, choices, board, plans, sprints) => ReviewAdaptivePlanAsync(cycle, roster, progress, choices, board, plans, sprints, ReadProgressiveEvidence(technicalArtifact!)!, handoff, context, cancellationToken, ownership), ownership);
             priorCycle = priorCycle with { Progressive = advance.Progress, UpdatedAt = DateTimeOffset.UtcNow };
             if (advance.Session is null)
-                await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
+                await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
             if (advance.Blocker is not null) return PersonalTodoResult.Blocked(advance.Blocker);
             if (advance.Complete) return await ReconcileFinalProductAsync(cycle,handoff,ownership!,context,cancellationToken);
             if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), advance.Waiting);
@@ -955,7 +958,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 workstreamId, handoff.RevisionDigest),
             UpdatedAt = DateTimeOffset.UtcNow
         };
-        await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
+        await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
         await BindAvailableWorkAsync(boardId, roster, cycle.ProfileDigest, context, cancellationToken);
         await RefreshAmendedDeliveriesAsync(roleRepair, boardId, context, cancellationToken);
         await MarkScopeAppliedAsync(roleRepair, context, cancellationToken);
@@ -1000,7 +1003,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         }
         if (progressiveMode && priorCycle.Progressive is { } progress)
         {
-            await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle with {
+            await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle with {
                 Progressive = progress with { ScheduledArtifactDigest = technicalArtifact!.Digest, LastPublishedSessionId = technicalSession.Id,
                     ScheduledSprintSequence = PlanningSprintSequence(await context.Platform.Work.ListSprintsAsync(boardId, cancellationToken)) }, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken);
             if (questions.Count > 0) return PersonalTodoResult.Blocked(DescribePlanningBlocker(questions, currentPlanningDecisions,
@@ -1572,22 +1575,17 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     }
 
     private static async Task PersistPlanningCycleAsync(
-        RevisionSafeProjectState store,
+        PlatformCapabilityClient platform,
         ProducerOperatingState current,
         ProducerPlanningCycleState cycle,
         CancellationToken cancellationToken)
     {
-        await store.MergeAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"),
+        await DurableAgentState.UpdateAsync<ProducerOperatingState>(platform, ProjectStateKeys.Portfolio("producer"),
             "com.csweet.video-game.producer-operating-state.v1", 1,
-            latest => (latest ?? current) with
-            {
-                PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState>(latest?.PlanningCycles ??
-                    current.PlanningCycles) { [cycle.WorkstreamId] = cycle },
-                UpdatedAt = DateTimeOffset.UtcNow
-            },
-            new Dictionary<string, string> { [cycle.WorkstreamId.ToString("D")] = cycle.PlanningFingerprint },
-            PlanningStateMutationKey(cycle.WorkstreamId, cycle.PlanningFingerprint, cycle.UpdatedAt),
-            cancellationToken);
+            latest => (latest ?? current) with {
+                PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState>(latest?.PlanningCycles ?? current.PlanningCycles) { [cycle.WorkstreamId] = cycle },
+                UpdatedAt = cycle.UpdatedAt
+            }, cancellationToken);
     }
 
     internal static string PlanningStateMutationKey(Guid project, string fingerprint, DateTimeOffset updated) =>
