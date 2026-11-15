@@ -8,7 +8,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal const string OwnershipContractRevision = "durable-issues.v3";
+    internal const string OwnershipContractRevision = "current-planning-context.v4";
     internal sealed record PlanningContractReceipt(string Revision, DateTimeOffset ChangedAt);
 
     internal static async Task<DateTimeOffset> PlanningContractChangedAtAsync(Guid workstream, string fingerprint,
@@ -45,17 +45,14 @@ public sealed partial class SpecialistAgent
         {
             var session = await context.Platform.Communication.ReadCoordinationAsync(pending.SessionId, ct);
             if (session.BoardSource?.BoardId != state.BoardId || session.Initiator.OrganizationUserId.ToString() != context.Identity?.EmployeeId ||
-                session.Target.OrganizationUserId != pending.SpecialistId || session.Status != AgentCoordinationStatuses.Completed) continue;
-            var request = session.Turns.SingleOrDefault(t => t.SpeakerOrganizationUserId == session.Initiator.OrganizationUserId &&
-                t.Artifact?.Type == WorkContributions.RequestType && t.Artifact.Key == pending.Key)?.Artifact;
-            var reply = session.Turns.LastOrDefault(t => t.SpeakerOrganizationUserId == pending.SpecialistId &&
-                t.Artifact?.Type == WorkContributions.AnswerType && t.Artifact.Key == pending.Key)?.Artifact;
-            if (request is null || reply is null || request.Payload.Deserialize<WorkContributionRequest>(new JsonSerializerOptions(JsonSerializerDefaults.Web)) is not { } input ||
-                input.WorkstreamId != state.WorkstreamId || input.BoardId != state.BoardId || input.ScopeKey != pending.Key ||
-                input.Sources is not { Count: 1 } || input.Sources[0] != new WorkContributionSource(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest)) continue;
-            var answer = reply.Payload.Deserialize<WorkContributionAnswer>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            if (!string.IsNullOrWhiteSpace(answer?.ProposedChange))
-                evidence.Add(new(reply.Digest, "Responsibility", answer.ProposedChange, pending.ScopeKeys));
+                session.Target.OrganizationUserId != pending.SpecialistId || pending.OutlineDigest != roadmap.OutlineDigest ||
+                session.Status is not (AgentCoordinationStatuses.Completed or "Summarizing")) continue;
+            var reply = await WorkContributions.ReadAnswerAsync(session.Turns, session.Initiator.OrganizationUserId,
+                pending.SpecialistId, state.WorkstreamId, state.BoardId, context.Platform, ct);
+            if (reply is null || reply.Key != pending.Key || reply.Request.Sources is not { Count: 1 } ||
+                reply.Request.Sources[0] != new WorkContributionSource(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest)) continue;
+            if (!string.IsNullOrWhiteSpace(reply.Answer.ProposedChange))
+                evidence.Add(new(reply.Digest, "Responsibility", reply.Answer.ProposedChange, pending.ScopeKeys));
         }
         return evidence;
     }

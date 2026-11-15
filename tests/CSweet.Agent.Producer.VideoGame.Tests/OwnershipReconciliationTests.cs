@@ -42,7 +42,7 @@ public sealed partial class ProgressivePlanningTests
     [Fact]
     public async Task RewordedFindingsShareOneCommissionAndAdviceNeedsAnOwnedResolutionBeforeRelease()
     {
-        var f = new Fixture(adaptive: true, independent: true);
+        var f = new Fixture(adaptive: true, independent: true); var producer = Guid.NewGuid();
         var registry = new IssueRegistry(f.Runtime);
         var state = new ProducerPlanningCycleState(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId,
             f.Cycle.PlanningFingerprint, null, null, null, null, f.Artifact.Digest, null, DateTimeOffset.UtcNow);
@@ -50,7 +50,7 @@ public sealed partial class ProgressivePlanningTests
         var legacy = new PlanningReconciliationReference("legacy", Guid.NewGuid(), Guid.Parse(f.Member.EmployeeId), f.Evidence.OutlineDigest, ["final"]);
         state = state with { PlanningReconciliations = [legacy] };
         var review = new SpecialistAgent.OwnershipReview([], [new("Conditional escalation responsibility", "Confirm the owner.", ["final"]) { ObligationKey = "escalation" }]);
-        var context = f.Runtime.CreateContext(identity: new AgentIdentity(f.Person.OrganizationUserId.ToString(), "Gabriel", null, null, null, [], null, null, null));
+        var context = f.Runtime.CreateContext(identity: new AgentIdentity(producer.ToString(), "Gabriel", null, null, null, [], null, null, null));
         state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, review, f.Outline, f.Member, handoff, context, default);
         state = await SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence,
             review with { Gaps = [review.Gaps[0] with { Statement = "Name who handles conditional escalation" }] }, f.Outline, f.Member, handoff, context, default);
@@ -62,17 +62,26 @@ public sealed partial class ProgressivePlanningTests
         registry.Commissions[0] = commissioned with { Status = "AdviceReceived" };
         var request = new WorkContributionRequest(state.WorkstreamId, state.BoardId, "issue-commission:" + commissioned.Id.ToString("N"), "Question", [new(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest)]);
         var session = f.Session with { Id = commissioned.SessionId!.Value, Status = AgentCoordinationStatuses.Completed,
-            Initiator = f.Session.Initiator with { OrganizationUserId = f.Person.OrganizationUserId },
+            Initiator = f.Session.Initiator with { OrganizationUserId = producer },
             Target = f.Session.Target with { OrganizationUserId = Guid.Parse(f.Member.EmployeeId) },
             BoardSource = new(state.BoardId), Turns = [
-                new(Guid.NewGuid(), 1, f.Person.OrganizationUserId, "Request", "Continue", DateTimeOffset.UtcNow,
+                new(Guid.NewGuid(), 1, producer, "Request", "Continue", DateTimeOffset.UtcNow,
                     new(WorkContributions.RequestType, "1.0", request.ScopeKey, 1, true, JsonSerializer.SerializeToElement(request), "request")),
-                new(Guid.NewGuid(), 2, Guid.Parse(f.Member.EmployeeId), "Advice", "Complete", DateTimeOffset.UtcNow,
+                new(Guid.NewGuid(), 2, Guid.Parse(f.Member.EmployeeId), "Completed", "Advice", DateTimeOffset.UtcNow,
                     new(WorkContributions.AnswerType, "1.0", request.ScopeKey, 1, true, JsonSerializer.SerializeToElement(new WorkContributionAnswer("Existing owner", "Victor owns evidenced escalation.", "Measure when available.")), "advice")) ] };
         f.Runtime.RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (_, _) => Task.FromResult(session));
+        f.Runtime.RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(
+            new WorkBoardDetail(new(state.BoardId, "Game", "", false, false, 1, []) { WorkstreamId = state.WorkstreamId, ManagerOrganizationUserId = producer }, [], [])))
+            .RegisterCapability<object, ArtifactDocument>(PlatformCapabilities.ArtifactRead, (_, _) => Task.FromResult(
+                new ArtifactDocument(handoff.ArtifactId, "Brief", "scope", "Accepted", handoff.AcceptedRevisionId, null, handoff.AcceptedRevisionId, null, null,
+                    [new(handoff.AcceptedRevisionId, 1, null, "Approved scope", handoff.RevisionDigest, "Accepted", DateTimeOffset.UtcNow, null, null)]) { WorkstreamId = state.WorkstreamId }));
         // Old and new references remain readable, but only an exact accepted source can supply current evidence.
         var advice = await SpecialistAgent.ReadOwnershipContributionsAsync(state with { PlanningReconciliations = [] }, f.Evidence, handoff, context, default);
         Assert.Single(advice);
+        // The specialist's valid answer survived the old Producer's misrouted finalization.
+        session = session with { Turns = [.. session.Turns, new(Guid.NewGuid(), 3, producer, "Blocked",
+            "Pitch refinement requires the exact pitch, accepted GDD, project/team context and Video Game Director manager.", DateTimeOffset.UtcNow)] };
+        Assert.Single(await SpecialistAgent.ReadOwnershipContributionsAsync(state, f.Evidence, handoff, context, default));
         Assert.Empty(await SpecialistAgent.ReadOwnershipContributionsAsync(state with { PlanningReconciliations = [] }, f.Evidence, handoff with { AcceptedRevisionId = Guid.NewGuid() }, context, default));
         Assert.Equal("Open", registry.Issues.Single().Status); // Advice is not a resolution receipt.
         var owned = new SpecialistAgent.OwnershipReview([new("Conditional escalation responsibility", ["approved"],

@@ -1,6 +1,6 @@
-﻿# Producer 6.14.0
+# Producer 6.15.0
 
-Durable issues, scoped reconciliation and concise current-state attention. See [release notes](releases/6.14.0.md).
+Typed planning replies, current staffing/resource approvals and recovery of retained planning work. See [release notes](releases/6.15.0.md).
 
 # Producer 6.13.0
 

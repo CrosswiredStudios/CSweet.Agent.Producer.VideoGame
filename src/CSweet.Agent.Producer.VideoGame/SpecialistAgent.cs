@@ -67,6 +67,13 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentRuntimeContext context,
         CancellationToken cancellationToken)
     {
+        if (WorkContributions.IsReply(request))
+            return await WorkContributions.ReceiveAsync(request, context, cancellationToken);
+        if (request.Transcript.Any(t => t.SpeakerOrganizationUserId == request.Counterpart.OrganizationUserId &&
+            t.Artifact?.Type == WorkContributions.RequestType))
+            return await WorkContributions.ExecuteAsync(request, context,
+                new AgentLlmSelection(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the Producer planning provider."), Settings.GetString("llmModel")),
+                RolePrompt, ResponseOptions(), cancellationToken);
         if (request.Transcript.Any(x => x.Artifact?.Type == "video-game.project-foundation.request.v1"))
             return await ProposeProjectFoundationAsync(request, context, cancellationToken);
         if (request.Transcript.Any(x => x.SpeakerOrganizationUserId == request.Self.OrganizationUserId && x.Artifact?.Type == ProjectDeliveryPlanning.RequestType))

@@ -32,12 +32,14 @@ public sealed partial class SpecialistAgent
 
     // The model can propose, but cannot execute, protected actions. Receipts are read again
     // at the point of use. A pending proposal does not suspend unrelated planning.
-    private async Task<ReviewEffects> ReviewAdaptivePlanAsync(GameProductionPlanningCycleV1 cycle, AgentTeamContext roster,
+    internal async Task<ReviewEffects> ReviewAdaptivePlanAsync(GameProductionPlanningCycleV1 cycle, AgentTeamContext roster,
         ProgressivePlanningProgress progress, IReadOnlyList<GameProposedWorkItemV1> choices, WorkBoardDetail board,
         IReadOnlyList<WorkDeliveryPlanResponse> plans, IReadOnlyList<WorkSprint> sprints,
         ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, OwnershipReview? ownership = null)
     {
         var decisions = await context.Platform.ReadDecisionsAsync(new(WorkstreamId: cycle.WorkstreamId), token);
+        var resourceContext = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
+        roster = resourceContext.Roster ?? roster with { Members = [], RoleCoverage = [], TotalMemberCount = 0, HasMore = false };
         var roles = CoverageRoleCatalog(roster);
         var facts = new List<ReviewFact> { new("brief", handoff.ArtifactId, handoff.RevisionDigest, "Accepted production brief") };
         foreach (var item in board.Items.Where(i => i.ProposalProvenance != null).OrderBy(i => i.Id))
@@ -63,7 +65,7 @@ public sealed partial class SpecialistAgent
         var candidateKeys = choices.Select(c => c.ProposalKey).ToArray();
         var completed = sprints.Where(s => s.Status == "Completed").OrderBy(s => s.Sequence).ThenBy(s => s.Id).ToArray();
         var evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
-            modelContract = "named-capabilities.v2", cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
+            modelContract = "current-resources.v3", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
             material = facts.OrderBy(f => f.Kind).ThenBy(f => f.Id),
             candidateContent = choices, completed = completed.Select(s => s.Id) }));
         var store = new RevisionSafeProjectState(context.Platform);
@@ -121,9 +123,14 @@ public sealed partial class SpecialistAgent
                     If a Designer is already assigned consider a scoped contribution to the approaching work. Check prior proposals and their authoritative status before requesting further action. Extra spend and a change in QA
                     obligations require independent authority. A CEO hold needs a specific reserved decision and only otherwise ready affected item references.
                     A play invitation never holds work. Use proceed for experiments already authorized within delegated resources. Reserve spend for a specific additional cost with its amount, currency and purpose grounded in the supplied evidence. Prioritize repairing actual failures; keep useful draft detail when its assumptions survive.
+                    Select drafts for decomposition and estimation independently of permission to execute them. A brief's statement
+                    that it grants no staffing/build/spend authority is not a prohibition or a request for another blanket approval.
+                    Current staffing and resources are supplied separately: Pending is a proposal, Approved is approval, fulfilled
+                    roster membership is actual staffing, and only Ready resources establish verified capacity. Keep real declined,
+                    revoked or explicit owner restrictions. Propose only the missing capability and keep unaffected planning moving.
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { brief = acceptedBrief.Content, sprint = sprint?.Goal, candidates = choices.Select(c => new { c.Title,c.Description }),
-                    obligations=ownership?.Coverage??roadmap.ScopeCoverage,
+                    obligations=ownership?.Coverage??roadmap.ScopeCoverage, resourceContext,
                     provisionalStory = progress.DraftStoryKey, provisional = provisional?.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()?.DeliveryItems.Where(x => x.ParentProposalKey == progress.DraftStoryKey), evidence, roles, roster = roster.Members.Select(m => new { m.DisplayName, m.DeclaredRoleKeys,m.SpecializationKeys,m.IsAvailable }) }))
             ], new AgentModelJsonRequest<ReviewChoice>("game planning review") {
                 Options = ResponseOptions(), Normalize = value =>
@@ -169,6 +176,8 @@ public sealed partial class SpecialistAgent
         }
         var key = "game-plan-assessment:" + evidenceDigest;
         var current = latest?.Basis == evidenceDigest ? latest : await Decide(key, null);
+        if ((await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token)).Fingerprint != resourceContext.Fingerprint)
+            throw new InvalidOperationException("Staffing or resources changed during planning review; reassess current facts before applying proposals.");
         await ApplyReviewEffectsAsync(current, cycle, roster, handoff, context, token);
         return new(current.Story, current.Decision.DraftAhead, current.Decision.KeepDraft, current.Decision.NextGoal + " " +
             string.Join(" ", current.Decision.Actions.Select(a => a.Rationale)), current.Digest)
@@ -379,6 +388,9 @@ public sealed partial class SpecialistAgent
         foreach (var action in registry?.Payload.Actions ?? [])
         {
             string? status = action.Status;
+            var currentDecision = action.Kind is "escalate" or "ceo-hold" or "qa-disposition"
+                ? DecisionContinuations.Current(action.Id, project, decisions) : null;
+            if (action.Kind is "escalate" or "ceo-hold" or "qa-disposition") status = currentDecision?.Status;
             if (status is not ("Approved" or "Rejected" or "Decided" or "Cancelled" or "Superseded"))
             {
                 if (action.Kind == "hire")
@@ -400,7 +412,8 @@ public sealed partial class SpecialistAgent
                     old => new((old?.Actions ?? []).Select(p => p.Id == action.Id && p.Status == action.Status ? p with { Status = status } : p).ToArray()),
                     new Dictionary<string,string>(), action.ProposalKey + ":observed:" + status, token);
             }
-            facts.Add(new("proposal", action.Id, status ?? "Unavailable", action.Kind + " | " + action.Rationale));
+            facts.Add(new("proposal", currentDecision?.Id ?? action.Id, status ?? "Unavailable", action.Kind + " | " +
+                (currentDecision is null ? action.Rationale : currentDecision.Summary + " | " + currentDecision.Rationale)));
         }
         return facts;
     }
@@ -427,7 +440,16 @@ public sealed partial class SpecialistAgent
                 session.Target.OrganizationUserId != pending.SpecialistId || session.Initiator.OrganizationUserId != board.Board.ManagerOrganizationUserId ||
                 session.Turns.LastOrDefault(t => t.SpeakerOrganizationUserId == pending.SpecialistId &&
                     t.Artifact?.Type is "video-game.design.advice.v1" or WorkContributions.AnswerType && t.Artifact.Key == pending.ArtifactKey)?.Artifact is not { } reply) continue;
-            var advice = reply.Payload.Deserialize<WorkContributionAnswer>(new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+            WorkContributionAnswer? advice;
+            if (reply.Type == WorkContributions.AnswerType)
+            {
+                var verified = await WorkContributions.ReadAnswerAsync(session.Turns, session.Initiator.OrganizationUserId,
+                    pending.SpecialistId, project, board.Board.Id, context.Platform, token);
+                if (verified?.Key != pending.ArtifactKey) continue;
+                advice = verified.Answer;
+            }
+            else advice = reply.Payload.Deserialize<WorkContributionAnswer>(new JsonSerializerOptions(JsonSerializerDefaults.Web));
+            if (advice is null) continue;
             var detail = $"{session.Target.DisplayName} on {pending.Story}: {advice.Assessment} Proposed change: {advice.ProposedChange}. Evidence needed: {advice.EvidenceNeeded}";
             facts.Add(new("design", session.Id, reply.Digest, detail));
             var owner = board.Items.FirstOrDefault(t => t.ProposalProvenance?.ProposalItemKey == pending.Story) ??
