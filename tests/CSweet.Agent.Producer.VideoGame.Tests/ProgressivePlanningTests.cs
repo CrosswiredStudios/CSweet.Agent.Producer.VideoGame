@@ -229,7 +229,7 @@ public sealed partial class ProgressivePlanningTests
         GameOutcomeSource[] sources = new[] { "# History", "Paddle rebounds; score once per brick.", "Chromium desktop only." }
             .Select((text, index) => new GameOutcomeSource("source-" + index, Guid.NewGuid(), Guid.NewGuid(), "sha", "author", text)).ToArray();
         var draft = new SpecialistAgent.OwnershipDraft([
-            new("Paddle rebounds", [1], [new(0, 0)]), new("Score once per brick", [1], [new(1, 0)])],
+            new("Paddle rebounds", [1], [1]), new("Score once per brick", [1], [3])],
             [new("Chromium desktop only", 2, "Neither Epic specifies a target browser.")]);
         var review = SpecialistAgent.BindOwnership(draft, sources, f.Outline.DeliveryItems);
         Assert.Equal(3, review.Coverage.Count);
@@ -241,7 +241,7 @@ public sealed partial class ProgressivePlanningTests
         Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.BindOwnership(indexed, sources, f.Outline.DeliveryItems, 3));
         Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.BindOwnership(indexed with { Gaps = [draft.Gaps[0] with { ProposedIndexes = [1] }] }, sources, f.Outline.DeliveryItems, 2));
         SpecialistAgent.BindOwnership(indexed with { Gaps = [draft.Gaps[0] with { ProposedIndexes = [2] }] }, sources, f.Outline.DeliveryItems, 3);
-        var wrong = draft with { Commitments = [draft.Commitments[0] with { Owners = [new(0, 99)] }] };
+        var wrong = draft with { Commitments = [draft.Commitments[0] with { EvidenceIndexes = [99] }] };
         Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.BindOwnership(wrong, sources, f.Outline.DeliveryItems));
     }
 
@@ -263,7 +263,7 @@ public sealed partial class ProgressivePlanningTests
         public readonly List<StartBoardCoordinationRequest> Starts = [];
         private readonly Dictionary<Guid, AgentCoordinationSession> sessions = [];
         public readonly AgentTestRuntime Runtime;
-        public Fixture(bool adaptive = false)
+        public Fixture(bool adaptive = false, bool independent = false)
         {
             Cycle = new(Guid.NewGuid(), Guid.NewGuid(), 1, Guid.NewGuid(), new string('a',64), Guid.NewGuid(), 1, new string('b',64), "concept", "vision", new string('c',64));
             Member = new(Person.OrganizationUserId.ToString(), "Victor", "Agent", null, null, "Peer", "Online") { AgentInstallationId = Person.AgentInstallationId };
@@ -271,7 +271,7 @@ public sealed partial class ProgressivePlanningTests
             GameProposedWorkItemV1 Item(string key, string type, string? parent, string[] dependencies) =>
                 new(key, type, key, "Preserved agreed " + key, [key + " independently verified"], "game-technical-director", [], [], [], dependencies) { ParentProposalKey = parent };
             Outline = new(Cycle, [Item("prototype", VideoGameWorkItemTypeKeys.Milestone, null, []), Item("playable", VideoGameWorkItemTypeKeys.Feature, "prototype", []),
-                Item("final", VideoGameWorkItemTypeKeys.Milestone, null, ["prototype"]), Item("remaining", VideoGameWorkItemTypeKeys.Content, "final", [])], [], [], [], "outline");
+                Item("final", VideoGameWorkItemTypeKeys.Milestone, null, independent ? [] : ["prototype"]), Item("remaining", VideoGameWorkItemTypeKeys.Content, "final", [])], [], [], [], "outline");
             SpecialistAgent.ProgressiveCoverage[] coverage = [new("document-0:paragraph-0", ["playable"]), new("document-0:paragraph-1", ["remaining"])];
             if (adaptive)
             {
@@ -306,8 +306,8 @@ public sealed partial class ProgressivePlanningTests
                 .RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([]))
                 .RegisterCapability<ReadWorkDeliveryPlansRequest, IReadOnlyList<WorkDeliveryPlanResponse>>(WorkDeliveryCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkDeliveryPlanResponse>>(Plans));
         }
-        public Task<SpecialistAgent.ProgressiveAdvance> Advance(ProgressivePlanningProgress? progress) => SpecialistAgent.AdvanceProgressivePlanningAsync(
-            Cycle.BoardId, Roster, Cycle, [], Member, Session, Artifact, Outline, progress, Runtime.CreateContext(), default);
+        public Task<SpecialistAgent.ProgressiveAdvance> Advance(ProgressivePlanningProgress? progress, SpecialistAgent.OwnershipReview? ownership = null) => SpecialistAgent.AdvanceProgressivePlanningAsync(
+            Cycle.BoardId, Roster, Cycle, [], Member, Session, Artifact, Outline, progress, Runtime.CreateContext(), default, ownership: ownership);
         public async Task<SpecialistAgent.ProgressiveAdvance> Review(ProgressivePlanningProgress? progress, bool draft = true, bool keep = true)
         {
             return await SpecialistAgent.AdvanceProgressivePlanningAsync(Cycle.BoardId, Roster, Cycle, [], Member, Session, Artifact, Outline,

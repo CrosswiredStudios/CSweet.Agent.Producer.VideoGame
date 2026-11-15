@@ -200,6 +200,14 @@ public sealed partial class SpecialistAgent
             AgentCoordinationSession? currentSession = null;
             AgentCoordinationArtifact? currentArtifact = null;
             GameTechnicalDeliveryProposalV1 current = outline;
+            if (progress.PendingStoryKey is { } heldStory && ownership is not null &&
+                (OwnershipHolds(outline.DeliveryItems, ownership).Contains(heldStory) ||
+                 outline.DeliveryItems.Any(e => heldStory.StartsWith(e.ProposalKey + ".story-", StringComparison.Ordinal) && OwnershipHolds(outline.DeliveryItems, ownership).Contains(e.ProposalKey))))
+            {
+                // Retain affected draft work without admission; independent scope may advance.
+                progress = progress with { DraftSessionId = progress.RefinementSessionId, DraftStoryKey = heldStory,
+                    RefinementSessionId = progress.LastPublishedSessionId, PendingStoryKey = null, AdmissionReviewBasis = null };
+            }
             if (progress.RefinementSessionId is { } sessionId)
             {
                 currentSession = await context.Platform.Communication.ReadCoordinationAsync(sessionId, token);
@@ -220,8 +228,8 @@ public sealed partial class SpecialistAgent
                     var prior = progress.DetailedStoryKeys.ToHashSet();
                     var priorPlan = current.DeliveryItems.Where(i => IsScopeContainer(i) || i.ParentProposalKey != pending).ToArray();
                     var existingStories = priorPlan.Where(i => prior.Contains(i.ProposalKey)).Select(i => i.ParentProposalKey).ToHashSet();
-                    var eligible = SuccessorCandidates(priorPlan.Where(i => i.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone ||
-                        existingStories.Contains(i.ParentProposalKey)).ToArray(), prior);
+                    var eligible = OwnershipCandidates(SuccessorCandidates(priorPlan.Where(i => i.WorkItemTypeKey == VideoGameWorkItemTypeKeys.Milestone ||
+                        existingStories.Contains(i.ParentProposalKey)).ToArray(), prior), current.DeliveryItems, ownership);
                     var liveBoard = await context.Platform.Work.ReadBoardAsync(boardId, token);
                     var livePlans = await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token);
                     var liveSprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
@@ -252,7 +260,7 @@ public sealed partial class SpecialistAgent
             var plans = evidence.Adaptive ? await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token) : [];
             var sprints = evidence.Adaptive || progress.ScheduledSprintSequence.HasValue ? await context.Platform.Work.ListSprintsAsync(boardId, token) : [];
             var detailed = progress.DetailedStoryKeys.ToHashSet();
-            var candidates = evidence.Adaptive ? SuccessorCandidates(current.DeliveryItems, detailed) : [];
+            var candidates = evidence.Adaptive ? OwnershipCandidates(SuccessorCandidates(current.DeliveryItems, detailed), current.DeliveryItems, ownership) : [];
             var assessment = evidence.Adaptive && review != null ? await review(progress, candidates, board, plans, sprints) : null;
             if (progress.ScheduledSprintSequence.HasValue)
             {
@@ -275,8 +283,12 @@ public sealed partial class SpecialistAgent
                 if (!accepted) return new(progress, Waiting: "The final planned increment awaits independent acceptance.");
                 if (!evidence.Adaptive && detailed.Count != outline.DeliveryItems.Count(x => x.WorkItemTypeKey != VideoGameWorkItemTypeKeys.Milestone))
                     throw new InvalidOperationException("The remaining approved Stories have unresolved dependencies.");
+                if (ownership?.Gaps.Count > 0)
+                    return new(progress, Waiting: "Planning reconciliation remains with Gabriel and Victor for affected work. Independent work continues; outstanding obligations prevent final completion. No user decision is requested.");
                 return new(progress, Complete: true);
             }
+            if (evidence.Adaptive && !candidates.Any(c => c.ProposalKey == next))
+                return new(progress, Waiting: "The selected scope has an unresolved planning responsibility. Gabriel and Victor are reconciling it; independent work remains eligible.");
             var direction = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest;
             async Task<AgentCoordinationSession> RequestStoryAsync(string storyKey, string draftBasis)
             {
@@ -301,6 +313,8 @@ public sealed partial class SpecialistAgent
             {
                 foreach (var other in assessment.AdditionalDrafts)
                 {
+                    if (!candidates.Any(c => c.ProposalKey == other))
+                        throw new AgentModelJsonException("Additional drafts must refer to eligible planning scope.");
                     var extraBasis = BasisFor(other);
                     if (extras.TryGetValue(other, out var saved) && saved.Basis == extraBasis) continue;
                     var extra = await RequestStoryAsync(other, extraBasis);

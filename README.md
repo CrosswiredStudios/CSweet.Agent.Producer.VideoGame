@@ -1,10 +1,13 @@
-# Producer 6.12.4
+# Producer 6.13.0
+
+Grounded outcomes, criteria, constraints and approved decisions can own planning obligations. Scoped
+reconciliation keeps independent work moving and never invents an observed failure or user decision.
 
 Staffing discovery and sprint reviews select named capabilities from the supplied catalog. Code binds
 each choice to the published role; agents never count numeric role positions. Staffing and team size
 continue to follow the approaching work, available coverage, and management review.
 
-The Producer drafts approaching work, obtains accountable effort and capacity judgments, then reconciles the actual roster before preflight. Structural readiness is shared validation; the planning assessment commissions scoped semantic advice when needed. Exact approved amendments propagate into their dependent delivery inputs with retained digest evidence. Every sprint receives evaluation, followed by the remaining increment, a successor, or explicit final-product verification and delivery completion. Public launch retains its own authorization. See [release notes](releases/6.12.0.md).
+The Producer drafts approaching work, obtains accountable effort and capacity judgments, then reconciles the actual roster before preflight. Structural readiness is shared validation; the planning assessment commissions scoped semantic advice when needed. Exact approved amendments propagate into their dependent delivery inputs with retained digest evidence. Every sprint receives evaluation, followed by the remaining increment, a successor, or explicit final-product verification and delivery completion. Public launch retains its own authorization. See [release notes](releases/6.13.0.md).
 
 Corrective tickets now list every inherited finding and say the whole task is re-verified (CSweet.Agent.SDK 5.25.0). See `releases/6.8.0.md`.
 

@@ -87,7 +87,8 @@ public sealed partial class SpecialistAgent
         if (cycle.AdaptivePlanning && portfolio.AcceptedHandoffs.TryGetValue(cycle.WorkstreamId, out var adaptiveHandoff))
         {
             var current = await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: cycle.WorkstreamId), token);
-            cycle = cycle with { ConfirmedHoldItems = ConfirmedCeoHolds(cycle, board.Items, current, adaptiveHandoff) };
+            cycle = cycle with { ConfirmedHoldItems = ConfirmedCeoHolds(cycle, board.Items, current, adaptiveHandoff)
+                .Concat(OwnershipHeldItems(cycle, board.Items)).ToHashSet() };
         }
         if (cycle.OutstandingAuthorityQuestions.Count == 0 ||
             cycle.OutstandingAuthorityQuestions.Any(question => question.Trim() != FinalVisualStyleQuestion) ||
@@ -95,5 +96,19 @@ public sealed partial class SpecialistAgent
             board.Board.Id != cycle.BoardId || board.Board.WorkstreamId != cycle.WorkstreamId) return cycle;
         var decisions = await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: cycle.WorkstreamId), token);
         return ScopePlanningGates(cycle, board.Items, decisions, handoff.RevisionDigest);
+    }
+
+    internal static IReadOnlySet<Guid> OwnershipHeldItems(ProducerPlanningCycleState cycle, IReadOnlyList<WorkItem> items)
+    {
+        if (cycle.OwnershipHeldProposalKeys.Count == 0) return new HashSet<Guid>();
+        var known = items.Select(i => i.Id).ToHashSet();
+        // External prerequisites retain their normal readiness checks. Only this board's
+        // known descendants and consumers can inherit a local planning hold.
+        var graph = items.Select(i => new PlanningScopeDependency(i.Id.ToString(),
+            i.Planning?.DependencyItemIds.Where(known.Contains).Select(id => id.ToString()).ToArray() ?? [],
+            i.ParentItemId is Guid parent && known.Contains(parent) ? parent.ToString() : null)).ToArray();
+        var seeds = items.Where(i => i.ProposalProvenance is { } provenance && provenance.ArtifactDigest == cycle.TechnicalProposalDigest &&
+            cycle.OwnershipHeldProposalKeys.Contains(provenance.ProposalItemKey)).Select(i => i.Id.ToString());
+        return PlanningScopeOwnership.BlockedScopes(graph, seeds).Select(Guid.Parse).ToHashSet();
     }
 }

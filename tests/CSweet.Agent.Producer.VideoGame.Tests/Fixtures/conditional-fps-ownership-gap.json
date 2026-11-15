@@ -1,0 +1,13 @@
+{
+  "commitments": [],
+  "gaps": [
+    {
+      "statement": "If lightweight FPS observation is impossible without violating the no-profiling directive, escalate the conflict.",
+      "sourceIndex": 0,
+      "reason": "No Epic acceptance criterion explicitly requires escalation if the lightweight FPS observation is impossible under the no-profiling directive.",
+      "affectedEpicIndexes": [1],
+      "proposedIndexes": [],
+      "conflictEvidenceIndexes": []
+    }
+  ]
+}

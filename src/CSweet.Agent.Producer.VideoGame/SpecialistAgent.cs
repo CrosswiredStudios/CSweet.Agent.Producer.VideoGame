@@ -188,10 +188,18 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             var session=await context.Platform.Communication.ReadCoordinationAsync(sessionId,cancellationToken);
             if(session.Initiator.OrganizationUserId.ToString()!=context.Identity?.EmployeeId||session.BoardSource?.BoardId!=item.WorkContext?.BoardId)
                 return PersonalTodoResult.Blocked("The contribution no longer binds this manager's board.");
+            if (item.Title == "Receive planning reconciliation")
+            {
+                var portfolio = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), cancellationToken);
+                var reference = portfolio?.Payload.PlanningCycles.Values.SelectMany(c => c.PlanningReconciliations)
+                    .SingleOrDefault(r => r.SessionId == sessionId);
+                if (reference is { Active: false }) return PersonalTodoResult.Completed("The planning finding was resolved or superseded; its advice remains in the audit history.");
+            }
             var complete=session.Status==AgentCoordinationStatuses.Completed&&session.Turns.Any(t=>t.SpeakerOrganizationUserId==session.Target.OrganizationUserId&&
                 t.Artifact?.Type is WorkContributions.AnswerType or "video-game.game-design-consultation.v1");
             return await TrackedCollaboration.ReviewAsync(context,item,new(complete) {
-                OutcomeSummary="Scoped advice is retained for the current planning assessment; it grants no approval or execution authority."},cancellationToken);
+                OutcomeSummary="Scoped advice is retained for the current planning assessment; it grants no approval or execution authority.",
+                WaitingReason = item.Description ?? "The accountable agents are reconciling the planning responsibility." },cancellationToken);
         }
         if (item.CorrelationId?.StartsWith("producer-corrective-planning:",StringComparison.Ordinal)==true)
             return await ReconcileCorrectivePlanningAsync(item,context,cancellationToken);
@@ -533,14 +541,18 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             currentTeam == teamId && SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector) is not null;
         var continuation = leadershipReady && boardId is { } continuationBoard
             ? await ReadProgressiveContinuationAsync(workstream.Id, continuationBoard, fingerprint, context, cancellationToken) : null;
+        var correlation = $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}";
+        var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
+        var blocked = directory.Boards.SelectMany(b => b.Items).Any(i => i.ArchivedAt is null && i.CorrelationId == correlation && i.Status == PersonalTodoStatuses.Blocked);
+        var contractChangedAt = blocked ? await PlanningContractChangedAtAsync(workstream.Id, fingerprint, context, cancellationToken) : (DateTimeOffset?)null;
         return await EnsureCommitmentAsync(
-            $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}",
+            correlation,
             "Reconcile scope, technical backlog and delivery staffing",
             "Use the accepted production brief to propose the smallest justified delivery team to the Video Game Director, reconcile technical feasibility, and publish provenance-bound planning work.",
             "High", new PersonalTodoWorkContext {
                 WorkstreamId = workstream.Id, TeamId = teamId, BoardId = boardId,
                 CoordinationSessionId = sessionId, SourceFingerprint = fingerprint
-            }, context, cancellationToken, leadershipReady, continuation);
+            }, context, cancellationToken, leadershipReady, continuation, dependencyChangedAt: contractChangedAt);
     }
 
     internal static string CommitmentIdempotencyKey(string correlationId)
@@ -595,6 +607,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
             var dependencyChanged = dependencyChangedAt > existing.UpdatedAt && existing.WorkContext?.WorkstreamId == workContext.WorkstreamId &&
                 existing.WorkContext?.TeamId == workContext.TeamId && existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
+            if (existing.Status == PersonalTodoStatuses.Blocked && correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
+                dependencyChangedAt.HasValue && !dependencyChanged && !prerequisiteCleared) return existing;
             if (existing.Status == PersonalTodoStatuses.Blocked && correlationId.StartsWith("producer-staffing-correction:", StringComparison.Ordinal) && !dependencyChanged)
                 return existing;
             if (existing.Wait is { } wait && wait.NextReviewAt > DateTimeOffset.UtcNow && !dependencyChanged && !hiringCleared && !acceptanceCleared && !amendmentCleared && !prerequisiteCleared)
@@ -608,7 +622,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) ||
                  correlationId.StartsWith(EstimationCommitmentPrefix, StringComparison.Ordinal)) &&
                 existing.BlockReason?.Contains(PlanningDecisionBlockMarker, StringComparison.Ordinal) == true &&
-                !prerequisiteCleared && await PlanningDecisionsUnchangedAsync(existing, workContext, context, cancellationToken))
+                !prerequisiteCleared && !dependencyChanged && await PlanningDecisionsUnchangedAsync(existing, workContext, context, cancellationToken))
                 return existing;
             var waiting = existing.Status == PersonalTodoStatuses.Running && existing.Wait is not null;
             if (existing.Status is PersonalTodoStatuses.Backlog or PersonalTodoStatuses.Blocked || waiting)
@@ -781,9 +795,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             new ReadDecisionRequest(WorkstreamId: workstreamId), cancellationToken);
         IReadOnlyList<string> managerDirections = ResolvedPlanningDirections(planningDecisions, workstreamId, handoff.RevisionDigest)
             .Concat(await ReadAssetPlanningDirectionsAsync(planningDecisions, workstreamId, context, cancellationToken)).ToArray();
-        var ownershipBasis = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new { packageDigest, managerDirections }));
-        var correction = priorCycle?.OwnershipCorrectionBasis == ownershipBasis ? priorCycle.OwnershipCorrection : null;
-        if (correction is not null) managerDirections = [.. managerDirections, correction];
+        // Historical ownership-review feedback is retained in state for audit, but it is
+        // neither manager direction nor an approved requirement. Reassess it under the
+        // current ownership contract instead of replaying criterion-only instructions.
         var directionsDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(managerDirections));
         var reusePrior = roleRepair is null && priorCycle is not null &&
             (priorCycle.PlanningDirectionsDigest == directionsDigest || priorCycle.PlanningDirectionsDigest is null && managerDirections.Count == 0);
@@ -855,25 +869,15 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         OwnershipReview? ownership = null;
         if (adaptive && ReadProgressiveEvidence(technicalArtifact!) is { } roadmap)
         {
-            try { ownership = await ReviewOwnershipAsync(cycle, technicalProposal, roadmap, ledger, managerDirections, context, cancellationToken); }
-            catch (InvalidOperationException ex) { return PersonalTodoResult.Blocked("Producer could not verify roadmap ownership: " + ex.Message); }
-            if (ownership.Gaps.Count > 0)
-            {
-                var feedback = "Producer scope review: " + string.Join(" ", ownership.Gaps.Select(g => g.Statement + ": " + g.Reason));
-                if (correction is not null || priorCycle.Progressive is not null)
-                {
-                    await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, [feedback], handoff, context, cancellationToken);
-                    if (priorCycle.Progressive is null)
-                        return PersonalTodoResult.Blocked("The roadmap needs direction on uncovered approved scope. " + feedback);
-                    // A published roadmap keeps its authorized work; gaps stay in management review and are never reported as owned.
-                }
-                else
-                {
-                    await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle with { OwnershipCorrection = feedback,
-                        OwnershipCorrectionBasis = ownershipBasis, UpdatedAt = DateTimeOffset.UtcNow }, cancellationToken);
-                    return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.AddSeconds(1), "Victor's next roadmap request includes Gabriel's scope findings. " + feedback);
-                }
+            try {
+                var contributions = await ReadOwnershipContributionsAsync(priorCycle, roadmap, handoff, context, cancellationToken);
+                ownership = await ReviewOwnershipAsync(cycle, technicalProposal, roadmap, ledger, managerDirections, context, cancellationToken, contributions);
             }
+            catch (InvalidOperationException ex) { return PersonalTodoResult.Blocked("Producer could not verify roadmap ownership: " + ex.Message); }
+            priorCycle = await ReconcileOwnershipFindingsAsync(cycle, priorCycle, roadmap, ownership, technicalProposal,
+                technicalDirector, handoff, context, cancellationToken);
+            await PersistPlanningCycleAsync(stateStore, operatingState, priorCycle, cancellationToken);
+
         }
         if (progressiveMode && roleRepair is null && !separateDesignerBacklog)
         {
@@ -928,7 +932,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             technicalSession, technicalArtifact!, technicalProposal,
             context, cancellationToken, RetainedRoleRepairConstraints(roleRepair), ledger, ownership);
         if (adaptive && priorCycle.FirstExecutableTicketAt == null &&
-            technicalProposal.DeliveryItems.Any(i => !IsScopeContainer(i)))
+            technicalProposal.DeliveryItems.Any(i => !IsScopeContainer(i) && !OwnershipHolds(technicalProposal.DeliveryItems, ownership).Contains(i.ProposalKey)))
         {
             priorCycle = priorCycle with { FirstExecutableTicketAt = DateTimeOffset.UtcNow };
             await context.ReportProgressAsync(new { adaptivePlanning = "first executable tickets published", workstreamId, boardId,
@@ -940,6 +944,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         {
             DesignerProposalDigest = designerArtifact!.Digest,
             TechnicalProposalDigest = technicalArtifact!.Digest,
+            OwnershipHeldProposalKeys = OwnershipHolds(technicalProposal.DeliveryItems, ownership).ToArray(),
             ReconciledDigest = reconciledDigest,
             Progressive = reviewedAuthorityQuestions is not null && priorCycle.Progressive is not null
                 ? priorCycle.Progressive with { ReviewedDirectionsDigest = authorityReviewDirectionsDigest }
@@ -1616,13 +1621,15 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             for (var level = 0; level < 2 && root.ParentProposalKey is string parent && owners.TryGetValue(parent, out var ancestor); level++)
                 root = ancestor;
             if (ownership != null)
-                return constraints.Concat(ownership.Commitments.Where(c => c.Owners.Any(o => o.Epic == root.ProposalKey))
+                return constraints.Concat(ownership.Commitments.Where(c => c.Owners.Any(o => o.ScopeKeys.Contains(root.ProposalKey)))
                     .Select(c => c.Statement)).Distinct();
             var obligations = evidence.ScopeCoverage.Where(s => s.ProposalKeys.Contains(root.ProposalKey) && approved.ContainsKey(s.SourceKey))
                 .Select(s => approved[s.SourceKey]).Select(o => $"Approved {o.Key} ({o.AuthorRole}): {o.ApprovedText}");
             return constraints.Concat(obligations).Distinct();
         }
+        var held = OwnershipHolds(technical.DeliveryItems, ownership);
         var proposals = designer.PlayerOutcomes.Concat(technical.DeliveryItems)
+            .Where(i => IsScopeContainer(i) || !held.Contains(i.ProposalKey))
             .GroupBy(x => x.ProposalKey, StringComparer.Ordinal)
             .Select(group => group.Last()).ToList();
         if (proposals.Count == 0 || proposals.Any(x => string.IsNullOrWhiteSpace(x.ProposalKey) ||

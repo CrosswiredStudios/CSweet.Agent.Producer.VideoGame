@@ -88,6 +88,8 @@ public sealed record ProducerPlanningCycleState(
     public string? PlanningDirectionsDigest { get; init; }
     public string? OwnershipCorrectionBasis { get; init; }
     public string? OwnershipCorrection { get; init; }
+    public IReadOnlyList<PlanningReconciliationReference> PlanningReconciliations { get; init; } = [];
+    public IReadOnlyList<string> OwnershipHeldProposalKeys { get; init; } = [];
     public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
     public IReadOnlyList<string> EngineeringPrerequisiteKeys { get; init; } = [];
     public string? AuthorityDecisionFingerprint { get; init; }
@@ -96,6 +98,9 @@ public sealed record ProducerPlanningCycleState(
     public IReadOnlySet<string>? DecisionIndependentProposalKeys { get; init; }
     public ProgressivePlanningProgress? Progressive { get; init; }
 }
+
+public sealed record PlanningReconciliationReference(string Key, Guid SessionId, Guid SpecialistId, string OutlineDigest,
+    IReadOnlyList<string> ScopeKeys) { public bool Active { get; init; } = true; }
 
 public sealed record ProgressivePlanningProgress(string ScopeKey, string OutlineDigest, string DirectionsDigest,
     IReadOnlyList<string> DetailedStoryKeys, Guid? RefinementSessionId = null, string? PendingStoryKey = null,

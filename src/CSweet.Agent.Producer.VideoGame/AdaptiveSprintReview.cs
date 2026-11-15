@@ -256,8 +256,8 @@ public sealed partial class SpecialistAgent
             var deliveries = await context.Platform.Work.ReadDeliveryPlansAsync(new(state.WorkstreamId), token);
             var ownership = await context.Platform.ReadOperatingStateAsync<OwnershipReview>(OwnershipKey(plan.Cycle, roadmap), token);
             if (ownership?.Payload is not { } reviewed) return; // Normal planning records the reviewed owners first.
-            await ReviewAdaptivePlanAsync(plan.Cycle, roster, progress, SuccessorCandidates(plan.DeliveryItems,
-                roadmap.DetailedStoryKeys.ToHashSet()), board, deliveries, sprints, roadmap, handoff, context, token, reviewed);
+            await ReviewAdaptivePlanAsync(plan.Cycle, roster, progress, OwnershipCandidates(SuccessorCandidates(plan.DeliveryItems,
+                roadmap.DetailedStoryKeys.ToHashSet()), plan.DeliveryItems, reviewed), board, deliveries, sprints, roadmap, handoff, context, token, reviewed);
             return;
         }
     }
