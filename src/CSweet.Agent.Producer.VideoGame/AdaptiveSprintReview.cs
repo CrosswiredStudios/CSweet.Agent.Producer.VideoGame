@@ -89,7 +89,7 @@ public sealed partial class SpecialistAgent
                         var outcome = stage.LatestOutcome!;
                         evidence.Add(new(stage.StageKey == "quality" ? "qa" : "stage", stage.Id, outcome.AttemptId.ToString(),
                             JsonSerializer.Serialize(new { item.WorkItemId, stage.OrganizationUserId, stage.StageKey, outcome.Summary,
-                                outcome.OutcomeCode, evidence = outcome.Evidence.Select(e => new { e.Kind, e.Name, Value = e.Value.Truncate(500) }) })));
+                                outcome.OutcomeCode, evidence = outcome.Evidence.Select(e => new { e.Kind, e.Name, e.Value }) })));
                     }
                 }
             }

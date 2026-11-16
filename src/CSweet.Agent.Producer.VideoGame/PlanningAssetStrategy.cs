@@ -23,8 +23,7 @@ public sealed partial class SpecialistAgent
             if (document.WorkstreamId != project || document.DocumentType != evidence.TypeKey ||
                 document.AcceptedRevisionId != evidence.RevisionId || revision?.Status != "Accepted" ||
                 revision.ContentSha256 != evidence.Digest) continue;
-            if (decision.TypeData is not { ValueKind: JsonValueKind.Object } strategy ||
-                strategy.GetRawText().Length > 16000) continue;
+            if (decision.TypeData is not { ValueKind: JsonValueKind.Object } strategy) continue;
             var modes = strategy.EnumerateObject().Where(p => p.Name.Equals("mode", StringComparison.OrdinalIgnoreCase)).ToArray();
             if (modes.Length != 1 || modes[0].Value.ValueKind != JsonValueKind.String ||
                 modes[0].Value.GetString() != decision.SelectedOptionId) continue;

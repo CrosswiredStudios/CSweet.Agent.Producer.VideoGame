@@ -131,7 +131,6 @@ public sealed partial class SpecialistAgent
             !(outcome.Diagnostics ?? []).Contains(DecisionRequiredDiagnostic, StringComparer.Ordinal) ||
             string.IsNullOrWhiteSpace(outcome.Summary)) return null;
         var summary = outcome.Summary.Trim();
-        if (summary.Length > 2500) summary = summary[..2497] + "...";
         var id = item.ItemIdentifier;
         var content = $"{id} is blocked and needs your decision. Nothing more can be done on it in code or QA until you decide.\n\n" +
             $"{summary}\n\n" +
@@ -155,7 +154,6 @@ public sealed partial class SpecialistAgent
             !(outcome.Diagnostics ?? []).Contains(WorkExecutionDiagnostics.AgentDefect, StringComparer.Ordinal)) return null;
         var reason = new[] { outcome.Summary, stage.LastError, item.BlockedReason }
             .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "No reason was recorded on the stage.";
-        if (reason.Length > 2500) reason = reason[..2497] + "...";
         var id = item.ItemIdentifier;
         var content = $"{id} is stopped by a defect in its assigned agent's own processing at the {stage.StageKey} stage, not by the work itself.\n\n" +
             $"{reason}\n\n" +
@@ -175,7 +173,6 @@ public sealed partial class SpecialistAgent
             stage.AttemptCount != 0 || stage.PrincipalKind != "AgentInstallation") return null;
         var reason = (string.IsNullOrWhiteSpace(stage.LastError) ? item.BlockedReason : stage.LastError)?.Trim();
         if (string.IsNullOrWhiteSpace(reason)) return null;
-        if (reason.Length > 2500) reason = reason[..2497] + "...";
         var id = item.ItemIdentifier;
         var content = $"{id} can't start, and nothing on the team can clear it without you.\n\n{reason}\n\n" +
             "The platform didn't hand the ticket to its assignee, so no work or attempt was spent. " +
@@ -204,7 +201,6 @@ public sealed partial class SpecialistAgent
         if (CorrectableDeliveryRetry(boardId, executionId, stage) is not null) return null; // I retry those myself.
         var reason = new[] { stage.LatestOutcome?.Summary, stage.LastError, stage.LastSummary, item.BlockedReason }
             .FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "No reason was recorded on the stage.";
-        if (reason.Length > 2500) reason = reason[..2497] + "...";
         var id = item.ItemIdentifier;
         var state = stage.Status == "Failed" ? "marked failed" : "blocked";
         var content = $"{id} has been {state} since {stage.UpdatedAt:yyyy-MM-dd HH:mm} UTC, and none of my recovery steps apply, " +

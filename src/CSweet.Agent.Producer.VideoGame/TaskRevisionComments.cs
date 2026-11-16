@@ -24,7 +24,7 @@ internal static class TaskRevisionComments
         preserve history and valid work, redirect downstream dependencies and refresh readiness before starting
         replacement work. Do not claim tickets were created or closed. A recommendation grants no execution.
         A task with two independently deliverable outputs must be split, even if they are sequential.
-        Keep the combined fields under 5500 characters. Do not put protocol markers in any field.
+        Do not put protocol markers in any field.
         """;
 
     internal sealed record Reply(string Decision, string Supersedes, string Context, string Pseudocode,
@@ -36,7 +36,7 @@ internal static class TaskRevisionComments
             ?? throw new InvalidOperationException("Task revision reply is empty.");
         var fields = new[] { reply.Supersedes, reply.Context, reply.Pseudocode, reply.Assumptions, reply.Verification, reply.Reason };
         if (reply.Decision is not ("continue" or "replace" or "clarify") || string.IsNullOrWhiteSpace(reply.Reason) ||
-            fields.Sum(x => x?.Length ?? 0) > 5500 || fields.Any(x => x?.Contains("[task-revision:", StringComparison.Ordinal) == true) ||
+            fields.Any(x => x?.Contains("[task-revision:", StringComparison.Ordinal) == true) ||
             reply.Decision == "continue" && fields.Any(string.IsNullOrWhiteSpace) ||
             reply.Decision == "replace" && string.IsNullOrWhiteSpace(reply.Context))
             throw new InvalidOperationException("Task revision needs a valid decision and concrete correction or replacement evidence.");

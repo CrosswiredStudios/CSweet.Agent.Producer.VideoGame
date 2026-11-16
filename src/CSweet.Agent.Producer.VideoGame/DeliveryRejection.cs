@@ -28,7 +28,7 @@ public sealed partial class SpecialistAgent
     internal static (string Key, string Content) DeliveryRejectionEscalation(string? projectName, Guid boardId, string reason)
     {
         var project = string.IsNullOrWhiteSpace(projectName) ? "This project" : projectName.Trim();
-        var shown = reason.Length <= 500 ? reason : reason[..497] + "...";
+        var shown = reason;
         var content = $"{project} delivery is stuck: the platform rejects my delivery plan, so the planned sprint can't start. " +
             "Nothing I retry can fix this, so it needs your attention.\n\n" +
             $"Platform reason: {shown}\n\n" +

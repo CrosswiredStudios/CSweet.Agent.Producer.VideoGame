@@ -96,7 +96,7 @@ public sealed partial class SpecialistAgent
                     a sufficient delivery approach. It requires an empty questions array. Missing hires do not block
                     understanding. Avoid manufacturing specialist work. Until ready, ask questions and refine the draft.
                     Return only the working brief; the system retains exact sources separately. Never copy the
-                    pitch or GDD into the brief. Aim for 6,000–10,000 characters, state each requirement once,
+                    pitch or GDD into the brief. State each requirement once,
                     and use a compact decision table for resolved questions. Preserve every distinct requirement.
                     The complete Markdown must contain headings: ## Scope, ## Player experience, ## Non-goals,
                     ## Acceptance criteria, ## Deliverables, ## Constraints, ## Risks, ## Open questions.

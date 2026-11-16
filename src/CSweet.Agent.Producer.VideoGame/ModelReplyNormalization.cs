@@ -81,7 +81,6 @@ public sealed partial class SpecialistAgent
         {
             var missing = BriefHeadings.Where(h => !draft.Contains($"## {h}", StringComparison.OrdinalIgnoreCase)).ToArray();
             if (missing.Length > 0) problems.Add($"draftMarkdown is missing the headings {string.Join(", ", missing.Select(h => "## " + h))}");
-            if (draft.Length > 48000) problems.Add($"draftMarkdown has {draft.Length} characters; shorten it to at most 48000");
         }
         // Open questions outweigh a "ready" label: readiness requires none.
         var ready = review.Ready && questions.Length == 0;

@@ -49,7 +49,7 @@ internal static class PitchProtocol
     }
 
     public static bool CanPlan(ProducerReview review) => CollaborationActions.IsReady(review.Ready, review.Questions, [], review.Rationale) && ValidDocument(review.DraftMarkdown);
-    public static bool ValidDocument(string? markdown) => !string.IsNullOrWhiteSpace(markdown) && markdown.Length <= 192000 &&
+    public static bool ValidDocument(string? markdown) => !string.IsNullOrWhiteSpace(markdown) &&
         new[] { "Scope", "Player experience", "Non-goals", "Acceptance criteria", "Deliverables", "Constraints", "Risks", "Open questions" }
             .All(heading => markdown.Contains($"## {heading}", StringComparison.OrdinalIgnoreCase));
     public static bool Matches(PitchReview review, PitchReply reply) => review.PitchDigest == reply.PitchDigest && CollaborationActions.CanAcceptHandoff(

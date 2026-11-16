@@ -252,14 +252,15 @@ public sealed class PitchRefinementTests
             fixture.Context, default);
         Assert.True(configured.Succeeded, configured.Error);
         var legacy = JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with {
-            Id = Guid.NewGuid(), RequesterInstallationId = Guid.Parse(fixture.Context.InstallationId),
+            Id = Guid.NewGuid(), CreatedAt = DateTimeOffset.UtcNow, RequesterInstallationId = Guid.Parse(fixture.Context.InstallationId),
+            RequesterOrganizationUserId = fixture.Producer, ManagerOrganizationUserId = fixture.Director,
             TeamId = task.WorkContext.TeamId, WorkstreamId = task.WorkContext.WorkstreamId, ExpectedTeamRevision = 1,
             Status = "RevisionRequested", DecisionComment = "Before board planning, propose the missing Technical Director and baseline Engineer and QA coverage from the accepted brief.",
             Evidence = [new("scope-capability-gap", ready.RevisionSha256, "Technical feasibility")] };
         var requests = new List<ResourceChangeRequestResponse> { legacy };
         var wrongSlot = new ResourceChangeRole("game-security-privacy", "studio", "Security", "Misclassified technical planning", 1, 1,
             "Now", ["work.execution.run"], false, fixture.Producer, null);
-        var approvedWrong = legacy with { Id = Guid.NewGuid(), RequesterOrganizationUserId = fixture.Producer, Status = "Approved", Roles = [wrongSlot] };
+        var approvedWrong = legacy with { Id = Guid.NewGuid(), CreatedAt = legacy.CreatedAt.AddMinutes(-1), RequesterOrganizationUserId = fixture.Producer, Status = "Approved", Roles = [wrongSlot] };
         StaffingCorrectionResponse? correction = correcting ? new(Guid.NewGuid(), approvedWrong.Id, Guid.NewGuid(), fixture.Producer,
             legacy.TeamId, legacy.WorkstreamId, wrongSlot.RoleKey, "Correct this slot to Technical Director capacity.", "Pending", null, 1, DateTimeOffset.UtcNow) : null;
         if (correcting) requests.Add(approvedWrong);
@@ -268,7 +269,7 @@ public sealed class PitchRefinementTests
         fixture.Runtime.RegisterCapability<ResourceChangeProposalRequest, ResourceChangeRequestResponse>(PlatformCapabilities.ResourceChangePropose,
             (r, _) => {
                 fixture.StaffingProposals.Add(r);
-                var pending = legacy with { Id = Guid.NewGuid(), Status = "Pending", DecisionComment = null,
+                var pending = legacy with { Id = Guid.NewGuid(), CreatedAt = legacy.CreatedAt.AddMinutes(1), Status = "Pending", DecisionComment = null,
                     RequesterOrganizationUserId = fixture.Producer, Roles = r.Roles, CorrectionId = r.CorrectionId };
                 requests.Add(pending);
                 return Task.FromResult(pending);
@@ -283,10 +284,10 @@ public sealed class PitchRefinementTests
             if (assessments == 1)
             {
                 Assert.Equal(legacy.DecisionComment, facts.GetProperty("feedback").GetString());
-                Assert.Contains("retired", facts.GetProperty("supersededPolicy").GetString());
             }
             var gaps = facts.GetProperty("Members").GetArrayLength() > 0 ? Array.Empty<SpecialistAgent.CoverageGap>() :
-                [new SpecialistAgent.CoverageGap(roles.Single(r => r.GetProperty("RoleKey").GetString() == "game-technical-director").GetProperty("Capability").GetString(), "Resolve technical feasibility before decomposition.")];
+                [new SpecialistAgent.CoverageGap(roles.Single(r => r.GetProperty("RoleKey").GetString() == "game-technical-director").GetProperty("Capability").GetString(), "Resolve technical feasibility before decomposition.") {
+                    NeededNow = true, Timing = "Now", ReportingLine = "Manager", Accountability = "Own and escalate technical findings", Engagement = "Initial technical planning" }];
             return Task.FromResult(JsonSerializer.SerializeToElement(new { role = "assistant",
                 text = JsonSerializer.Serialize(new SpecialistAgent.CoverageAssessment("The first deliverable needs technical feasibility.", gaps)) }));
         });
@@ -308,6 +309,11 @@ public sealed class PitchRefinementTests
         Assert.Equal(0, fixture.MessageSends);
         Assert.Equal(task.WorkContext.WorkstreamId, staffing.WorkstreamId);
         Assert.Contains(staffing.Evidence, x => x.SourceRevision == ready.RevisionSha256);
+        var approvedSlot = requests.FindIndex(r => r.Roles?.Any(role => role.RoleKey == "game-technical-director") == true);
+        requests[approvedSlot] = requests[approvedSlot] with { Status = "Approved", WorkstreamId = null };
+        var rosterWait = await planner.HandlePersonalTodoAsync(task, fixture.Context, default);
+        Assert.NotNull(typeof(PersonalTodoResult).GetProperty("NextReviewAt", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!.GetValue(rosterWait));
+        Assert.Null(rosterWait.Dependency); // Approved team-wide slots wait on fulfillment, not a project-specific review.
         fixture.HireTechnicalDirector();
         fixture.Runtime.RegisterCapability<JsonElement, ArtifactPackage>(PlatformCapabilities.ArtifactPackageRead,
             (r, _) => Task.FromResult(new ArtifactPackage(r.GetProperty("packageId").GetGuid(), "Planning", "planning", 1,

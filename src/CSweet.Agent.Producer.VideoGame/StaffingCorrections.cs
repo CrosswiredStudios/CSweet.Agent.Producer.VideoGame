@@ -36,7 +36,8 @@ public sealed partial class SpecialistAgent
         var revised = await AssessKickoffCoverageAsync(handoff!, item.WorkContext?.BoardId, roster, context, token);
         return revised.Response is { Status: "Pending" } proposal
             ? PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                $"Staffing correction proposal {proposal.Id:D} is awaiting the accountable manager's review.", proposal.ManagerOrganizationUserId)
+                $"Staffing correction proposal {proposal.Id:D} is awaiting the accountable manager's review.", proposal.ManagerOrganizationUserId,
+                StaffingReviews.Dependency(proposal))
             : PersonalTodoResult.Blocked(DescribeKickoffState(revised.Response, revised.Reason));
     }
 }

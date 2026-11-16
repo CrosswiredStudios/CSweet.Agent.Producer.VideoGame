@@ -15,5 +15,6 @@
     <None Update="Fixtures/technical-director-4.2.1-outline.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/qfn-kickoff-positional-role.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/conditional-fps-ownership-gap.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="Fixtures/brickfall-staffing-return.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

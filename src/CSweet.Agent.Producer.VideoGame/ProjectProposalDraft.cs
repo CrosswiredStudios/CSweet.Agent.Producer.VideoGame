@@ -59,7 +59,7 @@ public sealed partial class SpecialistAgent
                     Prepare the project proposal as delivery lead using the accepted evidence and manager feedback.
                     Return a JSON object with only outcome, rationale, successCriteria, initialMilestones and profileData
                     at its root.
-                    outcome and rationale must be nonempty strings of at most 4000 characters; successCriteria must
+                    outcome and rationale must be nonempty strings; successCriteria must
                     be a nonempty array of nonempty strings. initialMilestones must contain one object per template milestone
                     with only its exact key and a name of at most 240 characters that describes delivery clearly.
                     Stages, dates, evidence types and reviewers are kept from the template in code; do not return them. Do not expand accepted scope or invent authority,

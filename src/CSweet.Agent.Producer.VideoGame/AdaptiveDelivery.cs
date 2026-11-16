@@ -68,7 +68,7 @@ public sealed partial class SpecialistAgent
 
     private static async Task<ResourceChangeRequestResponse?> ProposeCoverageAsync(Guid workstreamId, Guid? boardId, AgentTeamContext roster,
         IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null, Guid? correctionOf = null, string? assessmentReason = null,
-        bool reconcileCorrection = false)
+        bool reconcileCorrection = false, IReadOnlyDictionary<string, StaffingWorkDescription>? descriptions = null)
     {
         var missing = requirements.Where(r => RoleTaxonomy.SelectAssignment(roster.Members,
                 new WorkAssignmentRequirements(r.RequiredRoleKey, r.RequiredSpecializationKeys,
@@ -84,7 +84,8 @@ public sealed partial class SpecialistAgent
         var approved = requests.FirstOrDefault(x => x.Status == "Approved");
         var correction = current.Corrections.SingleOrDefault(x => x.SourceRequestId == approved?.Id && x.RequesterOrganizationUserId == producerId &&
             x.TeamId == Guid.Parse(roster.TeamId) && x.WorkstreamId == workstreamId && x.Status == "Pending");
-        if (requests.FirstOrDefault(x => x.RequesterOrganizationUserId == producerId && x.Status == "Pending") is { } pending)
+        if (requests.FirstOrDefault(x => x.RequesterOrganizationUserId == producerId && x.ManagerOrganizationUserId == directorId &&
+            x.WorkstreamId == workstreamId && x.Status == "Pending") is { } pending)
             return pending.WorkstreamId == workstreamId && pending.CorrectionId == correction?.Id && missing.All(g => pending.Roles.Any(r => r.RoleKey == g.Key)) ? pending : null;
         if (missing.Count == 0 && correction is null) return null;
         var roles = CorrectedBaseRoles(approved?.Roles ?? [], correction, roster).ToList();
@@ -93,15 +94,17 @@ public sealed partial class SpecialistAgent
         {
             // An approved unfulfilled slot remains the hiring system's responsibility, not another new hire.
             if (roles.Any(x => x.RoleKey == group.Key)) continue;
-            roles.Add(new ResourceChangeRole(group.Key, "video-game-team", group.Key,
-                $"Cover {group.Count()} scoped planning/delivery requirement(s): {string.Join("; ", group.Select(x => x.Rationale).Distinct()).Truncate(700)}",
+            var role = new ResourceChangeRole(group.Key, "video-game-team", group.Key,
+                string.Join("\n\n", group.Select(x => x.Rationale).Distinct()),
                 1, group.Key == VideoGameRoleKeys.TechnicalDirector ? 1 : 3, "Next planned increment",
                 group.SelectMany(x => x.RequiredCapabilityKeys).Append("work.execution.run").Distinct().ToList(),
                 false, producerId, null)
             {
                 TeamId = Guid.Parse(roster.TeamId), RoleCategoryKey = RoleTaxonomy.CoreRoleKey(group.Key),
                 PreferredSpecializationKeys = group.SelectMany(x => x.RequiredSpecializationKeys.Concat(x.PreferredSpecializationKeys)).Distinct().ToList()
-            });
+            };
+            roles.Add(descriptions?.TryGetValue(group.Key, out var description) == true
+                ? description.Apply(role, producerId, directorId) : role);
             proposed = true;
         }
         if (!proposed) return approved;
@@ -121,11 +124,12 @@ public sealed partial class SpecialistAgent
             new CreateCommunicationChat(null, "Private direct conversation.", true, true, [directorId]), token);
         var proposal = new ResourceChangeProposalRequest(chat.Id, Guid.Empty,
             "Deliver the accepted game scope with the smallest team that covers its work.",
-            assessmentReason?.Truncate(2048) ?? "Add one installation per uncovered capability. Retain the approved team; do not pre-hire unused disciplines.",
+            assessmentReason ?? "Add one installation per uncovered capability. Retain the approved team; do not pre-hire unused disciplines.",
             roster.Revision, roles, ["Initial coverage is based on accepted scope, not historical velocity."],
             ["Hiring and spending require their separate approvals.", "Execution retains ticket-level eligibility and readiness gates."],
             approved?.Id, $"producer-coverage:{fingerprint}")
         {
+            RevisesRequestId = correctionOf,
             TeamId = Guid.Parse(roster.TeamId), WorkstreamId = workstreamId, ExpectedTeamRevision = roster.Revision,
             CorrectionId = correction?.Id,
             Evidence = [new ResourceChangeEvidence("scope-capability-gap", evidenceRevision,
@@ -268,9 +272,4 @@ public sealed partial class SpecialistAgent
             if (removed == 0) return eligible;
         }
     }
-}
-
-internal static class StaffingText
-{
-    public static string Truncate(this string text, int length) => text.Length <= length ? text : text[..length];
 }

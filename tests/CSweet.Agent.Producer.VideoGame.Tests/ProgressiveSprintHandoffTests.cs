@@ -148,12 +148,13 @@ public sealed partial class ProgressivePlanningTests
             var completeTeam = roster;
             roster = roster with { Members = [engineer, manager], Revision = roster.Revision + 1 };
             // An already approved slot is still absent from this roster.
+            var producer = new AgentIdentity(manager.EmployeeId, "Gabriel", null, null, null, [], null, Guid.NewGuid().ToString(), "Marcus");
             var approved = JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with {
-                Id = Guid.NewGuid(), TeamId = f.Cycle.TeamId, Status = "Approved", Roles =
+                Id = Guid.NewGuid(), RequesterOrganizationUserId = Guid.Parse(producer.EmployeeId), ManagerOrganizationUserId = Guid.Parse(producer.ManagerEmployeeId!),
+                TeamId = f.Cycle.TeamId, Status = "Approved", Roles =
                     [new("game-quality-assurance", "team", "QA", "Verify output", 1, 1, "This sprint", ["work.execution.run"], false, null, null)] };
             f.Runtime.RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead,
                 (_, _) => Task.FromResult(new ResourceChangeReadResponse([approved])));
-            var producer = new AgentIdentity(manager.EmployeeId, "Gabriel", null, null, null, [], null, Guid.NewGuid().ToString(), "Marcus");
             await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(identity: producer), default);
             Assert.True(f.Items.Single(t => t.ProposalProvenance?.ProposalItemKey == task.ProposalKey).EstimatePoints > 0);
             Assert.Equal(0, qaConsults);

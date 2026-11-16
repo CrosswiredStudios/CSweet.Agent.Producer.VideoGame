@@ -1,4 +1,9 @@
-# Producer 6.17.0
+# Producer 6.18.0
+
+Staffing follows the newest applicable manager review, with full work descriptions, named reporting
+relationships and separate future activation. Exact resource dependencies and current-state recovery
+resume retained planning commitments after missed events or an update. The 700-character purpose
+cutoff is removed; invalid platform submissions receive one correction and an actionable owner.
 
 Use `work.recovery.read.v1` and the `work.recovery.changed.v1` wake for current owner-operation
 recovery. `work.issues.propose.v1` lets read-only contributors route findings to the owner;
@@ -9,7 +14,7 @@ public planning refinement protocol for missing approved future outcomes, then r
 work to ordinary estimates, current-roster staffing and readiness. Existing protected decisions
 and second judgments remain required by their actual operations.
 
-Shared durable manager recovery and scoped ownership review let independent work proceed while later obligations remain open. Current staffing/resource evidence informs the review. Subscribe to the standard communication-mention event for prompt recovery wakes; normal attention review discovers missed notifications. See [release notes](releases/6.17.0.md).
+Shared durable manager recovery and scoped ownership review let independent work proceed while later obligations remain open. Current staffing/resource evidence informs the review. Subscribe to the standard communication-mention event for prompt recovery wakes; normal attention review discovers missed notifications. See [release notes](releases/6.18.0.md).
 
 # Producer 6.13.0
 

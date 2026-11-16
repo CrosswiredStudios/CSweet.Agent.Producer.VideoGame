@@ -316,7 +316,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                     accepted?.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var planningHandoff) == true)
                 {
                     _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board?.Id,
-                        planningHandoff.CoordinationSessionId, planningHandoff.HandoffDigest, context, planningToken);
+                        planningHandoff.CoordinationSessionId, planningHandoff.HandoffDigest, context, planningToken, planningHandoff.RevisionDigest);
                     await EnsureStaffingCorrectionCommitmentsAsync(workstream.Id, entry.ActiveTeam.TeamId, board?.Id, context, planningToken);
                     var staffingRoster = (await context.Platform.ReadTeamRosterAsync(
                         new TeamRosterV2Request(entry.ActiveTeam.TeamId, workstream.Id, 1, 100), planningToken)).Team;
@@ -354,7 +354,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                             await RecoverSprintReviewsAsync(reviewCycle, handoff, activeRoster, context, planningToken);
                     }
                     _ = await EnsurePlanningCommitmentAsync(workstream, entry.ActiveTeam.TeamId, board.Id,
-                        handoff.CoordinationSessionId, handoff.HandoffDigest, context, planningToken);
+                        handoff.CoordinationSessionId, handoff.HandoffDigest, context, planningToken, handoff.RevisionDigest);
                 }
 
                 if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var blockedCycle) == true &&
@@ -545,7 +545,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 
     internal static async Task<PersonalTodoItem> EnsurePlanningCommitmentAsync(
         WorkstreamDetail workstream, Guid teamId, Guid? boardId, Guid sessionId, string handoffDigest,
-        AgentRuntimeContext context, CancellationToken cancellationToken)
+        AgentRuntimeContext context, CancellationToken cancellationToken, string? acceptedRevisionDigest = null)
     {
         var fingerprint = ProducerPolicyFingerprint.ForPlanning(
             workstream.Id, 0, workstream.ProfileDefinitionDigest ?? string.Empty, handoffDigest);
@@ -559,8 +559,23 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             ? await ReadProgressiveContinuationAsync(workstream.Id, continuationBoard, fingerprint, context, cancellationToken) : null;
         var correlation = $"{PlanningCommitmentPrefix}{workstream.Id:N}:{fingerprint}";
         var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
-        var blocked = directory.Boards.SelectMany(b => b.Items).Any(i => i.ArchivedAt is null && i.CorrelationId == correlation && i.Status == PersonalTodoStatuses.Blocked);
-        var contractChangedAt = blocked ? await PlanningContractChangedAtAsync(workstream.Id, fingerprint, context, cancellationToken) : (DateTimeOffset?)null;
+        var existing = directory.Boards.SelectMany(b => b.Items).SingleOrDefault(i => i.ArchivedAt is null && i.CorrelationId == correlation);
+        ResourceChangeRequestResponse? review = null;
+        if (existing is not null && Guid.TryParse(context.Identity?.EmployeeId, out var owner) &&
+            Guid.TryParse(context.Identity.ManagerEmployeeId, out var manager))
+        {
+            var resources = await context.Platform.ReadResourceChangeContextAsync(cancellationToken);
+            review = StaffingReviews.Latest(resources.Requests, owner, manager, teamId, workstream.Id,
+                r => acceptedRevisionDigest is null || r.Evidence.Any(e => e.Kind == "scope-capability-gap" && e.SourceRevision == acceptedRevisionDigest));
+        }
+        var returned = StaffingReviews.NeedsRevision(review);
+        var upgradeLegacyWait = returned && existing?.Wait is { Dependency: null };
+        var contractChangedAt = existing?.Status == PersonalTodoStatuses.Blocked || upgradeLegacyWait
+            ? await PlanningContractChangedAtAsync(workstream.Id, fingerprint, context, cancellationToken) : (DateTimeOffset?)null;
+        if (returned && review!.DecidedAt > contractChangedAt.GetValueOrDefault()) contractChangedAt = review.DecidedAt;
+        var referencedDecisionChanged = returned && existing?.Wait?.Dependency is { } dependency &&
+            dependency.Kind == PersonalTodoDependencyKinds.ResourceChange && dependency.ResourceId == review!.Id &&
+            dependency.ObservedVersion != review.Status;
         return await EnsureCommitmentAsync(
             correlation,
             "Reconcile scope, technical backlog and delivery staffing",
@@ -568,7 +583,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             "High", new PersonalTodoWorkContext {
                 WorkstreamId = workstream.Id, TeamId = teamId, BoardId = boardId,
                 CoordinationSessionId = sessionId, SourceFingerprint = fingerprint
-            }, context, cancellationToken, leadershipReady, continuation, dependencyChangedAt: contractChangedAt);
+            }, context, cancellationToken, leadershipReady, continuation, dependencyChangedAt: contractChangedAt,
+            resourceDependencyChanged: referencedDecisionChanged);
     }
 
     internal static string CommitmentIdempotencyKey(string correlationId)
@@ -588,7 +604,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         bool hiringDependencyReady = false,
         ProgressiveContinuation? progressiveContinuation = null,
         bool scopeAmendmentReady = false,
-        DateTimeOffset? dependencyChangedAt = null)
+        DateTimeOffset? dependencyChangedAt = null,
+        bool resourceDependencyChanged = false)
     {
         var directory = await context.Platform.PersonalTodo.ListAsync(cancellationToken);
         var existing = directory.Boards.SelectMany(x => x.Items).FirstOrDefault(x =>
@@ -621,7 +638,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existingContext.SourceFingerprint == workContext.SourceFingerprint;
             var amendmentCleared = scopeAmendmentReady && correlationId.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal) &&
                 existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
-            var dependencyChanged = dependencyChangedAt > existing.UpdatedAt && existing.WorkContext?.WorkstreamId == workContext.WorkstreamId &&
+            var dependencyChanged = (resourceDependencyChanged || dependencyChangedAt > existing.UpdatedAt) && existing.WorkContext?.WorkstreamId == workContext.WorkstreamId &&
                 existing.WorkContext?.TeamId == workContext.TeamId && existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
             if (existing.Status == PersonalTodoStatuses.Blocked && correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
                 dependencyChangedAt.HasValue && !dependencyChanged && !prerequisiteCleared) return existing;
@@ -755,7 +772,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 if (staffing.Response is null or { Status: "RevisionRequested" or "Rejected" })
                     return PersonalTodoResult.Blocked(reason);
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), reason,
-                    staffing.Response.Status == "Pending" ? staffing.Response.ManagerOrganizationUserId : null);
+                    staffing.Response.Status == "Pending" ? staffing.Response.ManagerOrganizationUserId : null,
+                    staffing.Response.Status == "Pending" ? StaffingReviews.Dependency(staffing.Response) : null);
             }
         }
 
@@ -1443,8 +1461,6 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (managerDirections.Count > 0)
             message += " Incorporate these recorded Video Game Director decisions into the proposal and close only the questions they resolve: " +
                 string.Join(" ", managerDirections);
-        if (objective.Length > 4096)
-            throw new InvalidOperationException("Planning coordination exceeds the host content limits; provide a bounded handoff without dropping scope.");
         var sessionKey = managerDirections.Count == 0
             ? $"producer-planning-session:{cycle.PlanningFingerprint}:{targetUserId:N}"
             : $"producer-planning-session:direction:{ProducerPolicyFingerprint.Digest(

@@ -12,7 +12,8 @@ public sealed class NamedStaffingChoiceTests
             Path.Combine(AppContext.BaseDirectory, "Fixtures", "qfn-kickoff-positional-role.json")), new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
         var catalog = SpecialistAgent.CoverageRoleCatalog(Array.Empty<string>());
         Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.ValidateCoverage(reply, catalog));
-        var corrected = reply with { Gaps = [new("TechnicalDirector", reply.Gaps[0].Work)] };
+        var corrected = reply with { Gaps = [new("TechnicalDirector", reply.Gaps[0].Work) {
+            NeededNow = true, Timing = "Now", ReportingLine = "Manager", Accountability = "Own technical decisions", Engagement = "Initial planning" }] };
         foreach (var choices in new[] { catalog, catalog.Reverse().ToArray() })
         {
             SpecialistAgent.ValidateCoverage(corrected, choices);

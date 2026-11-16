@@ -65,10 +65,11 @@ public sealed class DecisionEscalationTests
     }
 
     [Fact]
-    public void Long_decision_requests_are_bounded()
+    public void Long_decision_requests_preserve_the_actionable_tail()
     {
-        var stage = Stage([SpecialistAgent.DecisionRequiredDiagnostic], new string('x', 6000));
-        Assert.True(SpecialistAgent.DecisionEscalation(Item(stage), stage)!.Value.Content.Length < 3200);
+        var summary = new string('x', 12000) + " Critical decision and evidence at the end.";
+        var stage = Stage([SpecialistAgent.DecisionRequiredDiagnostic], summary);
+        Assert.Contains(summary, SpecialistAgent.DecisionEscalation(Item(stage), stage)!.Value.Content);
     }
 
     private const string DispatchReason = "Daniel Kim can't start VGF943299B17-6: project.assignment_required: The project must be active and the developer must be an explicit participant on its team. Ask the project manager to update membership.";

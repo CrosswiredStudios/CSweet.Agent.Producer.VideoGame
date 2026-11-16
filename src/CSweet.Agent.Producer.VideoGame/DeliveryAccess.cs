@@ -46,7 +46,7 @@ public sealed partial class SpecialistAgent
             }
             catch (JsonException) { }
         }
-        return text.Length <= 500 ? text : text[..497] + "...";
+        return text;
     }
 
     /// <summary>

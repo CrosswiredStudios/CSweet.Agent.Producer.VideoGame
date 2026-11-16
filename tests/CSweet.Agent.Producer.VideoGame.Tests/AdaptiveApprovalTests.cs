@@ -48,7 +48,7 @@ public sealed class AdaptiveApprovalTests
         var roster = new AgentTeamContext(team.ToString(), "game", "Game", 1, producer.ToString(), "Producer", [], [], 0, false);
         var identity = new AgentIdentity(producer.ToString(), "Gabriel", null, null, null, [], null, manager.ToString(), "Marcus");
         var hire = JsonSerializer.Deserialize<ResourceChangeRequestResponse>("{}")! with {
-            Id = Guid.NewGuid(), WorkstreamId = project, TeamId = team, RequesterOrganizationUserId = producer, Status = "Pending",
+            Id = Guid.NewGuid(), WorkstreamId = project, TeamId = team, RequesterOrganizationUserId = producer, ManagerOrganizationUserId = manager, Status = "Pending",
             Roles = [new ResourceChangeRole("game-designer", "studio", "Game Designer", "Tune interacting power-ups", 1, 1,
                 "next sprint", ["work.execution.run"], false, producer, null)] };
         var states = new Dictionary<string, AgentOperatingStateResponse>();
