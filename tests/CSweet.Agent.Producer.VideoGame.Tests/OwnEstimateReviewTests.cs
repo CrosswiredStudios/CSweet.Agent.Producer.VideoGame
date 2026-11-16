@@ -32,7 +32,7 @@ public sealed class OwnEstimateReviewTests
                 var now=DateTimeOffset.UtcNow;var value=new AgentOperatingStateResponse(Guid.NewGuid(),r.StateKey,r.SchemaId,r.SchemaVersion,r.Status,r.SourceRevisions,r.ConditionCodes,r.DecisionFingerprint,r.OpenCommitmentCorrelations,r.AttentionReviewId,r.Payload,1,now,now);
                 states[r.StateKey]=value;return Task.FromResult(value);
             }).RegisterCapability<JsonElement,object>(PlatformCapabilities.LlmChatStream,(_,_)=>Task.FromResult<object>(new {
-            text="{\"estimates\":[{\"points\":5,\"confidence\":\"medium\",\"rationale\":\"Several decision sources need reconciliation\"}],\"availableCapacity\":3,\"assumptions\":[\"Other management commitments remain\"],\"blockers\":[]}"
+            text="{\"estimates\":[{\"points\":5,\"confidence\":\"medium\",\"rationale\":\"Several decision sources need reconciliation\"}],\"capacityAssessment\":{\"offeredPoints\":3,\"rationale\":\"Other management commitments remain\"},\"assumptions\":[],\"blockers\":[]}"
         }));
         var agent=new SpecialistAgent();
         await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(),AgentConfigurationCapabilities.Update,JsonSerializer.SerializeToElement(
@@ -40,7 +40,7 @@ public sealed class OwnEstimateReviewTests
         var result = await agent.HandleCoordinationTurnAsync(Request(false,
             Turn(Producer, "video-game.production.role-estimate-request.v1", scope),
             Turn(Qa, "video-game.production.role-estimate-request.v1", scope)),
-            runtime.CreateContext(), default);
+            runtime.CreateContext(installationId: Producer.AgentInstallationId.ToString(), identity: new(Producer.OrganizationUserId.ToString(), "Producer", null, null, null, [], null, null, null)), default);
         Assert.Equal("Continue", result.Disposition);
         var proposal = result.Artifact!.Payload.Deserialize<GameRoleEstimateCapacityProposalV1>()!;
         Assert.Equal(VideoGameRoleKeys.Producer, proposal.RoleKey);

@@ -6,7 +6,23 @@ namespace CSweet.Agent.Producer.VideoGame;
 public sealed partial class SpecialistAgent
 {
     private sealed record EstimateProposalEvidence(string Key,string Digest,string? AssessmentStateKey);
-    internal sealed record SprintPreparation(string Scope, string Digest);
+    internal sealed record SprintPreparation(string Scope, string Digest)
+    {
+        public IReadOnlyList<CapacitySource> CapacitySources { get; init; } = [];
+    }
+    internal sealed record CapacitySource(Guid EmployeeId, Guid InstallationId, IReadOnlyList<Guid> ProposedItems, string AvailabilityBasis);
+
+    private static async Task<bool> CapacitySourcesCurrentAsync(Guid board, IReadOnlyList<CapacitySource> sources,
+        AgentTeamContext roster, AgentRuntimeContext context, CancellationToken ct)
+    {
+        foreach (var source in sources)
+        {
+            var owner = roster.Members.SingleOrDefault(m => m.EmployeeId == source.EmployeeId.ToString() && m.AgentInstallationId == source.InstallationId);
+            if (owner is null || (await WorkAvailabilityContext.ReadAsync(board, source.EmployeeId, source.InstallationId,
+                source.ProposedItems, context, owner, ct)).Fingerprint != source.AvailabilityBasis) return false;
+        }
+        return true;
+    }
     private static string PreparationKey(Guid sprint) => "producer-sprint-preparation:" + sprint.ToString("N");
     private static string PreparedScope(IEnumerable<WorkItem> tickets, long rosterRevision) =>
         ProducerPolicyFingerprint.Digest(System.Text.Json.JsonSerializer.Serialize(new { rosterRevision,

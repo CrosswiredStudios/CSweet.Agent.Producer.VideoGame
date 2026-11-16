@@ -7,6 +7,9 @@
       },
       "5.36.0": {
         "commit": "f90cc2e8255c4df7ca837ac45e546eedae336f42"
+      },
+      "5.37.0": {
+        "commit": "9af5a73c44f614404c4638d755a358b22772ef28"
       }
     },
     "CSweet.WorkManagement.Contracts": {

@@ -10,11 +10,12 @@ public sealed partial class ProgressivePlanningTests
     // One retained board, proposal, planning commitment and sprint history across
     // acceptance, recovery, refinement, estimates, QA readiness and real agent start callbacks.
     [Theory]
-    [InlineData(false, false, false)]
-    [InlineData(true, false, false)]
-    [InlineData(false, true, false)]
-    [InlineData(false, true, true)]
-    public async Task Accepted_increment_recovers_planning_and_starts_successor_once_across_restart_and_duplicate_wakes(bool pendingAuthority, bool documentOnly, bool verify)
+    [InlineData(false, false, false, false)]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, true, true, false)]
+    [InlineData(false, true, false, true)]
+    public async Task Accepted_increment_recovers_planning_and_starts_successor_once_across_restart_and_duplicate_wakes(bool pendingAuthority, bool documentOnly, bool verify, bool availabilityChanges)
     {
         var f = new Fixture();
         var initial = await f.Advance(null); f.CompleteRefinement();
@@ -95,6 +96,13 @@ public sealed partial class ProgressivePlanningTests
         var board = new WorkBoardSummary(f.Cycle.BoardId, "GAME", "Game", false, false, 1, []) { TeamId = f.Cycle.TeamId, WorkstreamId = f.Cycle.WorkstreamId, ManagerOrganizationUserId = Guid.Parse(manager.EmployeeId) };
         var sprint1 = new WorkSprint(Guid.NewGuid(), board.Id, "Production Sprint 1", "First increment", "Completed", null, null, null, now, null, 0, 0, 0, 0, 1) { Sequence = 1 };
         var sprints = new List<WorkSprint> { sprint1 }; var starts = 0; var preflightValid = false; var preflights = 0; var qaConsults = 0;
+        var calendarRevision = 1L; var calendarId = Guid.NewGuid();
+        f.Runtime.RegisterCapability<CalendarQuery, BusinessCalendarView>(CalendarCapabilities.Read, (r, _) => {
+            var entry = new CalendarEventInput("Existing commitment", r.From.UtcDateTime.AddHours(1), r.From.UtcDateTime.AddHours(2));
+            return Task.FromResult(new BusinessCalendarView("UTC", calendarRevision, Guid.Parse(manager.EmployeeId), true, true, [],
+                [new(calendarId, entry.StartLocal, r.From.AddHours(1), r.From.AddHours(2),
+                    new(calendarId, calendarRevision, Guid.Parse(engineer.EmployeeId), entry, false, true), entry)]));
+        });
         WorkItem Update(Guid id, Func<WorkItem, WorkItem> change) { var index = f.Items.FindIndex(x => x.Id == id); return f.Items[index] = change(f.Items[index]); }
         f.Runtime.RegisterCapability<WorkBoardReference, WorkBoardDetail>(WorkItemCapabilities.Read, (_, _) => Task.FromResult(new WorkBoardDetail(board,
             [new(ready, "Ready", "ToDo", 0, "None", null)], f.Items)));
@@ -178,6 +186,15 @@ public sealed partial class ProgressivePlanningTests
             await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(), default);
         }
         preflightValid = true;
+        if (availabilityChanges)
+        {
+            calendarRevision++;
+            await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);
+            Assert.Equal(0, starts);
+            Assert.Null(sprints[1].CapacityPoints);
+            await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(), default);
+            Assert.True(sprints[1].CapacityPoints > 0);
+        }
         await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);
         await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);
         Assert.Equal(1, starts); Assert.Equal(2, preflights); Assert.Equal(2, sprints.Count);

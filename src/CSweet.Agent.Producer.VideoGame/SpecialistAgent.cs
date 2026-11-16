@@ -1103,9 +1103,22 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 
         var planningRevision = candidates.Max(x => x.PlanningRevision);
         var planningDigest = source.SourceFingerprint;
+        var capacityDirection = await ReadCapacityDirectionAsync(item, workstreamId, boardId, planningDigest, context, cancellationToken);
+        if (capacityDirection is { Status: DecisionStatuses.Decided })
+        {
+            var follow = await RequirementDecisions.FollowThroughAsync(capacityDirection,
+                await ReadCapacityScopeAsync(workstreamId, planningState.Payload, context, cancellationToken),
+                JsonSerializer.SerializeToElement(new { candidates = candidates.Select(c => new { c.Id, c.Title, c.PlanningRevision }) }),
+                context, new(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the planning provider."),
+                    Settings.GetString("llmModel")), ResponseOptions(), cancellationToken);
+            if (follow.HoldAffectedWork)
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), follow.Summary,
+                    capacityDirection.DecidedByOrganizationUserId);
+        }
         var roleProposals = new List<(AgentCoordinationSession? Session, AgentCoordinationParticipant Author, EstimateProposalEvidence Evidence,
-            GameRoleEstimateCapacityProposalV1 Proposal)>();
+            GameRoleEstimateCapacityProposalV1 Proposal, WorkCapacityAssessment Capacity)>();
         var pendingRoles = new List<string>();
+        var capacitySources = new List<CapacitySource>();
         foreach (var group in candidates.GroupBy(x => (Role: PrimaryExecutionAssignment(x)!.Requirements!.RequiredRoleKey,
                      Installation: PrimaryExecutionAssignment(x)!.AgentInstallationId)).OrderBy(x => x.Key.Role).ThenBy(x => x.Key.Installation))
         {
@@ -1114,20 +1127,28 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             var teammate = roster.Members.SingleOrDefault(x => x.AgentInstallationId == installationId);
             if (teammate is null)
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), $"The selected {role} installation is no longer on the current roster.");
-            var requestFingerprint = ProducerPolicyFingerprint.Digest(string.Join("|", boardId, role, installationId,
-                sequence, planningRevision, planningDigest, string.Join(",", group.OrderBy(x => x.Id).Select(x => $"{x.Id}:{x.PlanningRevision}"))));
+            var availability = await WorkAvailabilityContext.ReadAsync(boardId, Guid.Parse(teammate.EmployeeId), installationId!.Value,
+                group.Select(c => c.Id).ToArray(), context, teammate, cancellationToken);
+            capacitySources.Add(new(Guid.Parse(teammate.EmployeeId), installationId.Value, group.Select(c => c.Id).ToArray(), availability.Fingerprint));
+            var requestFingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new { boardId, role, installationId,
+                sequence, planningRevision, planningDigest, contract = WorkPlanningJudgments.AssessmentContract, availability.Fingerprint,
+                direction = capacityDirection is null ? null : new { capacityDirection.Id, capacityDirection.Revision, capacityDirection.Status },
+                items = group.OrderBy(x => x.Id).Select(x => new { x.Id, x.PlanningRevision }) }));
             var estimationCandidates = group.Select(ToSprintCandidate).OrderBy(x => x.WorkItemId).ToList();
             var estimateRequest = new GameRoleEstimateCapacityRequestV1(boardId, role,
                 planningRevision, planningDigest, estimationCandidates, requestFingerprint);
+            var requestPayload = CapacityEstimatePayload(estimateRequest, capacityDirection);
             if(installationId?.ToString()==context.InstallationId)
             {
-                var payload=JsonSerializer.SerializeToElement(estimateRequest);
+                var payload=requestPayload;
                 var generated=await WorkPlanningJudgments.EstimateAsync(payload,requestFingerprint,context,
                     new AgentLlmSelection(Settings.GetGuid("llmProviderId")??throw new InvalidOperationException("Configure the planning provider."),Settings.GetString("llmModel")),ResponseOptions(),cancellationToken);
                 var submission=generated.Artifact??throw new InvalidOperationException("The owner assessment is unavailable.");
                 var selfProposal=submission.Payload.Deserialize<GameRoleEstimateCapacityProposalV1>()!;
-                var evidence=new EstimateProposalEvidence(submission.Key,selfProposal.ProposalDigest,WorkPlanningJudgments.EstimateStateKey(requestFingerprint,payload));
-                roleProposals.Add((null,new(Guid.Parse(teammate.EmployeeId),teammate.AgentInstallationId!.Value,teammate.DisplayName,role),evidence,selfProposal));
+                var assessmentKey = submission.Payload.GetProperty("AssessmentStateKey").GetString()!;
+                var evidence=new EstimateProposalEvidence(submission.Key,selfProposal.ProposalDigest,assessmentKey);
+                roleProposals.Add((null,new(Guid.Parse(teammate.EmployeeId),teammate.AgentInstallationId!.Value,teammate.DisplayName,role),evidence,selfProposal,
+                    WorkCapacityAssessment.FromEvidence(submission.Payload, selfProposal.AvailableSprintCapacity)));
                 continue;
             }
             var partner = EstimatePartner(teammate, roster, context.InstallationId);
@@ -1139,7 +1160,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 "Supply estimates, confidence, assumptions, blockers, and available sprint capacity for only the exact accountable-role items.",
                 ["Every requested item has a role-owned estimate.", "Planning revision and digest match.",
                     "Capacity and blockers are explicit."],
-                "video-game.production.role-estimate-request.v1", requestFingerprint, estimateRequest,
+                "video-game.production.role-estimate-request.v1", requestFingerprint, requestPayload,
                 $"producer-estimation-session:{requestFingerprint}:{partner.AgentInstallationId:N}", context, cancellationToken);
             if (session.Status != AgentCoordinationStatuses.Completed)
             {
@@ -1156,7 +1177,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 !proposal.Estimates.Select(x => x.WorkItemId).OrderBy(x => x).SequenceEqual(expectedIds) ||
                 proposal.Estimates.Any(x => x.EstimatePoints <= 0))
                 return PersonalTodoResult.Blocked($"The {role} estimate proposal is stale, incomplete, or not bound to the candidate scope.");
-            roleProposals.Add((session, author, new(artifact.Key,artifact.Digest,null), proposal));
+            roleProposals.Add((session, author, new(artifact.Key,artifact.Digest,null), proposal,
+                WorkCapacityAssessment.FromEvidence(artifact.Payload, proposal.AvailableSprintCapacity)));
         }
 
 
@@ -1217,15 +1239,18 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             else gaps.AddRange(missing);
         }
         var eligible = EligibleCandidateScope(staffed, board.Items);
-        var selectedCandidates = SelectCapacityBoundedScope(eligible, roleProposals.ToDictionary(x => (x.Proposal.RoleKey, (Guid?)x.Author.AgentInstallationId), x => x.Proposal.AvailableSprintCapacity));
+        var selectedCandidates = SelectCapacityBoundedScope(eligible, roleProposals.ToDictionary(x => (x.Proposal.RoleKey, (Guid?)x.Author.AgentInstallationId),
+            x => x.Proposal.Blockers.Count == 0 ? x.Capacity.OfferedPoints ?? 0 : 0));
         if (selectedCandidates.Count == 0)
         {
             if (gaps.Count == 0 && unspecified.Count > 0)
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                     "Assign an accountable role or revise the draft for: " + string.Join(", ", unspecified));
             if (gaps.Count == 0)
-                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                    "No dependency-consistent estimated work fits current capacity. The draft is available for resequencing.");
+                return await ResolveCapacityShortfallAsync(item, workstreamId, boardId, planningDigest,
+                    planningState.Payload, JsonSerializer.SerializeToElement(new { candidates = candidates.Select(c => new { c.Id, c.Title, c.EstimatePoints }),
+                        offers = roleProposals.Select(p => new { p.Author, p.Capacity, p.Proposal.Assumptions, p.Proposal.Blockers,
+                            sourceSession = p.Session?.Id, sourceDigest = p.Evidence.Digest }) }), context, cancellationToken);
             // A named manager must become available; adding another manager cannot fill that identity.
             var request = await ProposeCoverageAsync(workstreamId, boardId, actual, gaps.Where(g => g.RequiredRoleKey != "manager").ToArray(),
                 context, cancellationToken);
@@ -1278,7 +1303,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var beforeCommit = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var teamBeforeCommit = await ReadManagerTeamAsync(teamId, context, cancellationToken, workstreamId);
         if (teamBeforeCommit?.Revision != actual.Revision || selectedCandidates.Any(t => !beforeCommit.Items.Any(now =>
-            now.Id == t.Id && now.Revision == t.Revision && now.PlanningRevision == t.PlanningRevision)))
+            now.Id == t.Id && now.Revision == t.Revision && now.PlanningRevision == t.PlanningRevision)) ||
+            !await CapacitySourcesCurrentAsync(boardId, capacitySources, actual, context, cancellationToken))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 "The team or candidate tickets changed during review. Reconcile the draft again.");
         var readyColumn = board.Columns.SingleOrDefault(x => string.Equals(x.Name, "Ready", StringComparison.OrdinalIgnoreCase));
@@ -1331,13 +1357,15 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             PrimaryExecutionAssignment(t)!.AgentInstallationId)).ToHashSet();
         if (currentCycle.AdaptivePlanning)
         {
-            var receipt = new SprintPreparation(PreparedScope(selectedCandidates, actual.Revision), readinessDigest);
+            var receipt = new SprintPreparation(PreparedScope(selectedCandidates, actual.Revision), readinessDigest) {
+                CapacitySources = capacitySources.Where(s => selectedCandidates.Any(c => PrimaryExecutionAssignment(c)?.AgentInstallationId == s.InstallationId)).ToArray()
+            };
             await new RevisionSafeProjectState(context.Platform).MergeAsync<SprintPreparation>(PreparationKey(sprint.Id),
                 "producer.sprint-preparation.v1", 1, _ => receipt, new Dictionary<string, string>(),
                 $"prepare-scope:{sprint.Id:N}:{readinessDigest}:{sprint.Revision}", cancellationToken);
         }
         var totalCapacity = roleProposals.Where(p => selectedOwners.Contains((p.Proposal.RoleKey, p.Author.AgentInstallationId)))
-            .Sum(p => p.Proposal.AvailableSprintCapacity);
+            .Sum(p => p.Capacity.OfferedPoints ?? 0);
         if (sprint.CapacityPoints != totalCapacity)
             sprint = await context.Platform.Work.SetSprintCapacityAsync(new SetWorkSprintCapacityRequest(boardId,
                 sprint.Id, totalCapacity, sprint.Revision, $"producer-capacity:{sprint.Id:N}:{readinessDigest}"), cancellationToken);
@@ -1392,7 +1420,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             var scope = current.Items.Where(t => t.SprintId == sprintId && t.ExecutionMode == WorkItemExecutionModes.Executable).ToArray();
             if (team is null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "Waiting for the current project roster.");
             if (scope.Length == 0 || receipt?.Payload.Scope != PreparedScope(scope, team.Revision) ||
-                scope.Any(t => MissingSprintStaff(t, team, current.Board.ManagerOrganizationUserId, true).Count != 0))
+                scope.Any(t => MissingSprintStaff(t, team, current.Board.ManagerOrganizationUserId, true).Count != 0) ||
+                !await CapacitySourcesCurrentAsync(boardId, receipt.Payload.CapacitySources, team, context, cancellationToken))
             {
                 var renewed = await context.Platform.Work.SetSprintCapacityAsync(new(boardId, sprintId, null, sprint.Revision,
                     $"reassess-staff:{sprintId:N}:{sprint.Revision}"), cancellationToken);
