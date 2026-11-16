@@ -8,7 +8,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal const string OwnershipContractRevision = "scoped-planning-recovery.v6";
+    internal const string OwnershipContractRevision = "scoped-planning-recovery.v7";
     internal sealed record PlanningContractReceipt(string Revision, DateTimeOffset ChangedAt);
 
     internal static async Task<DateTimeOffset> PlanningContractChangedAtAsync(Guid workstream, string fingerprint,

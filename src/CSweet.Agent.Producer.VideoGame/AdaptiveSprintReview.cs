@@ -470,7 +470,8 @@ public sealed partial class SpecialistAgent
             facts.Add(new("design", session.Id, reply.Digest, detail));
             var owner = board.Items.FirstOrDefault(t => t.ProposalProvenance?.ProposalItemKey == pending.Story) ??
                 board.Items.FirstOrDefault(t => t.Kind == "Epic" && pending.Story.StartsWith(t.ProposalProvenance?.ProposalItemKey + ".story-", StringComparison.Ordinal));
-            if (owner != null) await context.Platform.Work.CommentAsync(new(board.Board.Id, owner.Id, detail, pending.ArtifactKey + ":advice"), token);
+            if (owner != null) await WorkContributionLinks.AssociateAsync(new(project, board.Board.Id, owner.Id,
+                session.Id, pending.SpecialistId, reply.Key, reply.Digest), context, token);
         }
         return facts;
     }
