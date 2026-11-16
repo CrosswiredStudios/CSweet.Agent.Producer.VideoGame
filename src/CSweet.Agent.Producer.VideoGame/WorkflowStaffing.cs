@@ -233,9 +233,21 @@ public sealed partial class SpecialistAgent
         }
         var current = await context.Platform.Work.ReadBoardAsync(boardId, token);
         if (gap is not null || current.Items.Any(t => t.Status is "Blocked" or "Failed"))
+        {
+            var todos = await context.Platform.PersonalTodo.ListAsync(token);
+            var dependency = todos.Boards.SelectMany(b => b.Items).FirstOrDefault(t => t.Id == commitment.Id)?.WorkContext?.DecisionId;
+            if (dependency is Guid decisionId)
+            {
+                var decision = (await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: project), token)).FirstOrDefault(d => d.Id == decisionId);
+                if (decision is not null && decision.Status != DecisionStatuses.Decided)
+                    return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(UnhandledBlockerGrace),
+                        $"Waiting for decision {decision.Id:D}: {decision.Summary}. Its decision-change event resumes this work; the scheduled check recovers missed wakes.",
+                        Guid.TryParse(context.Identity?.ManagerEmployeeId, out var owner) ? owner : null);
+            }
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(StaffingRecheckDelay(gap, UnhandledBlockerGrace)),
                 gap is null ? "Remaining blockers require their recorded retry or management decision; recovery will recheck current state."
                     : "Workflow staffing needs attention: " + gap);
+        }
         return PersonalTodoResult.Completed("Workflow assignments reconciled; completed work preserved and stopped stages reviewed.");
     }
 }

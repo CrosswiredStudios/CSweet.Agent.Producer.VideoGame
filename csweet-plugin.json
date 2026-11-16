@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.20.0",
+  "version": "6.21.0",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -913,6 +913,24 @@
       "name": "work.issues.commission.v1",
       "scope": "organization",
       "purpose": "Coordinate source-bound issues and scoped advice within current board grants; no execution or acceptance authority."
+    },
+    {
+      "name": "web.research.search.v1",
+      "purpose": "Discover primary public documentation for evidence-driven planning and independent review.",
+      "scope": "organization",
+      "modelVisible": false
+    },
+    {
+      "name": "web.research.read.v1",
+      "purpose": "Read bounded primary public documentation through the reviewed broker for evidence-driven work.",
+      "scope": "organization",
+      "modelVisible": false
+    },
+    {
+      "name": "web.fetch.v1",
+      "purpose": "Permit GET/HEAD transport used by the brokered public research reader.",
+      "scope": "organization",
+      "modelVisible": false
     }
   ],
   "events": {
@@ -992,7 +1010,8 @@
   ],
   "credentials": [],
   "webAccess": {
-    "mode": "None",
+    "mode": "AllPublic",
+    "purpose": "Read primary public documentation for assigned planning and independent evidence review. Research is brokered and read-only; private addresses and unapproved credentials remain prohibited.",
     "rules": []
   },
   "ui": [],

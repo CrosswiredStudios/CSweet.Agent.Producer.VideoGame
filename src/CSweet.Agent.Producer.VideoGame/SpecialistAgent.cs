@@ -361,7 +361,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                     accepted.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var decisionHandoff) &&
                     blockedCycle.OutstandingAuthorityQuestions.Count > 0)
                     await EnsurePlanningDecisionsAsync(workstream.Id, board.Id, blockedCycle.PlanningFingerprint,
-                        blockedCycle.OutstandingAuthorityQuestions, decisionHandoff, context, planningToken);
+                        blockedCycle.OutstandingAuthorityQuestions, decisionHandoff, context, planningToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
                 var metrics = await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(board.Id)
                 {
                     TeamId = entry.ActiveTeam?.TeamId,
@@ -909,7 +909,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             }
             catch (InvalidOperationException ex) { return PersonalTodoResult.Blocked("Producer could not verify roadmap ownership: " + ex.Message); }
             priorCycle = await ReconcileOwnershipFindingsAsync(cycle, priorCycle, roadmap, ownership, technicalProposal,
-                technicalDirector, handoff, context, cancellationToken);
+                technicalDirector, handoff, context, cancellationToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
             var currentHeld = priorCycle.OwnershipHeldProposalKeys.Except(ownership.Gaps.SelectMany(g => g.AffectedProposalKeys)).ToArray();
             if (currentHeld.Length > 0) ownership = ownership with { Gaps = [.. ownership.Gaps,
                 new BoundOwnershipGap("Recorded planning direction is being incorporated", "The issue remains open until its authoritative dependencies are satisfied.", currentHeld)] };
@@ -940,7 +940,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             designerProposal.OpenCreativeDecisions.Concat(reviewedAuthorityQuestions ?? technicalProposal.OpenFeasibilityDecisions).ToArray(),
             planningDecisions, workstreamId, handoff.RevisionDigest);
         var currentPlanningDecisions = await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
-            handoff, context, cancellationToken);
+            handoff, context, cancellationToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
         if (roleRepair is not null && !roleRepairPublished)
         {
             if (questions.Count > 0)

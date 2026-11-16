@@ -17,4 +17,5 @@
     <None Update="Fixtures/conditional-fps-ownership-gap.json" CopyToOutputDirectory="PreserveNewest" />
     <None Update="Fixtures/brickfall-staffing-return.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
+  <ItemGroup><None Update="Fixtures/shardfall-stalled-review.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

@@ -19,7 +19,12 @@ public sealed partial class SpecialistAgent
     private static IEnumerable<DecisionRecord> CurrentPlanningDecisions(IReadOnlyList<string> questions,
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
         decisions.Where(x => IsPlanningDirection(x, workstreamId, acceptedBriefDigest) &&
-            questions.Any(q => q.Trim() == x.Summary.Trim()));
+            questions.Any(q => MatchesQuestion(x, q)));
+
+    private static bool MatchesQuestion(DecisionRecord decision, string question) =>
+        decision.Summary.Trim() == question.Trim() || decision.TypeData is { } data &&
+        data.TryGetProperty("facts", out var facts) && facts.TryGetProperty("authorityQuestion", out var original) &&
+        original.GetString()?.Trim() == question.Trim();
 
     internal static string PlanningDecisionFingerprint(IReadOnlyList<string> questions,
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
@@ -60,7 +65,7 @@ public sealed partial class SpecialistAgent
         foreach (var question in questions.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()).Distinct(StringComparer.Ordinal))
         {
             lines.Add($"\nQuestion: {question}");
-            var matches = current.Where(x => x.Summary.Trim() == question).OrderBy(x => x.Id).ToArray();
+            var matches = current.Where(x => MatchesQuestion(x, question)).OrderBy(x => x.Id).ToArray();
             if (matches.Length == 0)
                 lines.Add("Decision record: unavailable. Re-read the project decisions before requesting direction.");
             foreach (var decision in matches)
@@ -102,7 +107,7 @@ public sealed partial class SpecialistAgent
     internal static IReadOnlyList<string> ResolvedPlanningDirections(
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
         decisions.Where(x => IsPlanningDirection(x, workstreamId, acceptedBriefDigest) && x.Status == DecisionStatuses.Decided &&
-                x.SelectedOptionId == "provide-direction" &&
+                (x.SelectedOptionId == "provide-direction" || RequirementDecisions.IsGrounded(x)) &&
                 !string.IsNullOrWhiteSpace(x.Rationale))
             .OrderBy(x => x.Id)
             .Select(x => $"Decision {x.Id:D}: {x.Summary} => {x.SelectedOptionId}. {x.Rationale}")
@@ -115,16 +120,34 @@ public sealed partial class SpecialistAgent
         IReadOnlyList<DecisionRecord> decisions, Guid workstreamId, string acceptedBriefDigest) =>
         questions.Where(question => !decisions.Any(x => IsPlanningDirection(x, workstreamId, acceptedBriefDigest) &&
             x.Status == DecisionStatuses.Decided && x.SelectedOptionId == "continue-current-plan" &&
-            !string.IsNullOrWhiteSpace(x.Rationale) && x.Summary.Trim() == question.Trim()))
+            !string.IsNullOrWhiteSpace(x.Rationale) && MatchesQuestion(x, question)))
             .Distinct(StringComparer.Ordinal).ToArray();
 
     internal static async Task<IReadOnlyList<DecisionRecord>> EnsurePlanningDecisionsAsync(Guid workstreamId, Guid boardId,
         string fingerprint, IReadOnlyList<string> questions, ProducerAcceptedHandoff handoff,
-        AgentRuntimeContext context, CancellationToken token)
+        AgentRuntimeContext context, CancellationToken token, AgentLlmSelection? resolutionModel = null)
     {
         var existing = await context.Platform.ReadDecisionsAsync(
             new ReadDecisionRequest(WorkstreamId: workstreamId), token);
         var current = existing.ToList();
+        if (resolutionModel is not null)
+        {
+            var document = await context.Platform.Artifacts.GetAsync(handoff.ArtifactId, token);
+            var accepted = document.Revisions.Single(r => r.Id == handoff.AcceptedRevisionId && r.Status == "Accepted" && r.ContentSha256 == handoff.RevisionDigest);
+            foreach (var question in UnresolvedPlanningQuestions(questions, current, workstreamId, handoff.RevisionDigest))
+            {
+                if (CurrentPlanningDecisions([question], current, workstreamId, handoff.RevisionDigest).Any()) continue;
+                var facts = JsonSerializer.SerializeToElement(new { boardId, authorityQuestion = question, handoff.AcceptedRevisionId, handoff.RevisionDigest });
+                var decision = await WorkRequirementResolution.RequestAsync(workstreamId, "video-game.management-direction.v1", "work-planning",
+                    AgentOperatingStateKey.Create("planning-question", new { boardId, question }), facts, accepted.Content,
+                    [new("artifact", handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest, "video-game.production-plan.v1", "Accepted")],
+                    context, resolutionModel, null, token);
+                current.Add(decision);
+            }
+            return current;
+        }
+        // Compatibility for callers replaying pre-inference decisions. Runtime callers supply a model.
+
         foreach (var request in PlanningDecisionRequests(workstreamId, boardId, fingerprint,
             UnresolvedPlanningQuestions(questions, existing, workstreamId, handoff.RevisionDigest), handoff))
         {

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrosswiredStudios.VideoGame.AgentKit;
 using CSweet.Agent.SDK;
 using CSweet.WorkManagement.Contracts;
 
@@ -76,6 +77,13 @@ public sealed partial class SpecialistAgent
             foreach (var item in execution.Items.Where(x => x.Status is "Blocked" or "Failed"))
             {
                 var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
+                if (stage is { Status: "Blocked", LatestOutcome: { } latest } &&
+                    (latest.Diagnostics?.Contains(WorkExecutionDiagnostics.DecisionRequired) == true ||
+                        latest.Disposition == WorkExecutionDispositions.Completed && latest.OutcomeCode is "changes_requested" or "rejected"))
+                {
+                    await ResolveStoppedWorkAsync(board, item, stage, context, token);
+                    continue;
+                }
                 (string Key, string Content)? revisionEscalation = null;
                 if (stage?.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) == true)
                     revisionEscalation = ReplacementDiscussionEscalation(board.Id, item, stage,
@@ -99,6 +107,36 @@ public sealed partial class SpecialistAgent
         }
     }
 
+
+    internal static (string Root, JsonElement Facts) StoppedWorkDependency(Guid boardId, Guid workItemId, WorkStageExecutionResponse stage) =>
+        (AgentOperatingStateKey.Create("stopped-work", new { boardId, workItemId, stageId = stage.Id }),
+        JsonSerializer.SerializeToElement(new { boardId, workItemId, stageId = stage.Id, stage.LastOutcomeCode, stage.LastError, stage.LatestOutcome }, JsonSerializerOptions.Web));
+
+    private async Task ResolveStoppedWorkAsync(WorkBoardSummary board, WorkItemExecutionResponse item,
+        WorkStageExecutionResponse stage, AgentRuntimeContext context, CancellationToken ct)
+    {
+        if (board.WorkstreamId is not Guid project) return;
+        var state = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), ct);
+        if (state is null || !state.Payload.AcceptedHandoffs.TryGetValue(project, out var handoff)) return;
+        var document = await context.Platform.Artifacts.GetAsync(handoff.ArtifactId, ct);
+        var accepted = document.Revisions.Single(r => r.Id == handoff.AcceptedRevisionId && r.ContentSha256 == handoff.RevisionDigest && r.Status == "Accepted");
+        var (root, facts) = StoppedWorkDependency(board.Id, item.WorkItemId, stage);
+        var model = new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel"));
+        var decision = await WorkRequirementResolution.RequestAsync(project, "video-game.management-direction.v1", "work-planning",
+            root, facts, accepted.Content,
+            [new("artifact", handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest, "video-game.production-plan.v1", "Accepted")],
+            context, model, ResponseOptions(), ct);
+        var todos = await context.Platform.PersonalTodo.ListAsync(ct);
+        var owner = todos.Boards.SelectMany(b => b.Items).FirstOrDefault(t => t.WorkContext?.BoardId == board.Id &&
+            t.CorrelationId?.StartsWith(WorkflowRecoveryPrefix, StringComparison.Ordinal) == true && t.Status is not ("Completed" or "Cancelled"));
+        if (owner is not null && owner.WorkContext!.DecisionId != decision.Id)
+            await context.Platform.PersonalTodo.UpdateAsync(new(owner.Id, owner.Title, owner.Description, owner.Priority, owner.DueDate,
+                owner.Revision, AgentOperatingStateKey.Create("work-resolution-dependency", new { itemId = owner.Id, decisionId = decision.Id, owner.Revision })) {
+                    WorkContext = owner.WorkContext with { DecisionId = decision.Id }
+                }, ct);
+        if (decision.Status == DecisionStatuses.Decided)
+            await RequirementDecisions.FollowThroughAsync(decision, accepted.Content, facts, context, model, ResponseOptions(), ct);
+    }
 
     internal static (string Key, string Content)? ReplacementDiscussionEscalation(Guid boardId,
         WorkItemExecutionResponse item, WorkStageExecutionResponse stage, IReadOnlyList<WorkItemComment> comments)

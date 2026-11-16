@@ -57,6 +57,20 @@ public sealed partial class SpecialistAgent
                     if (candidate.BuildId is Guid id) facts.Add(new("build", id, candidate.CandidateCommitSha, candidate.SourceBranch));
             }
         }
+        var currentExecution = new List<object>();
+        foreach (var active in sprints.Where(s => s.Status == "Active").OrderBy(s => s.Id))
+        {
+            var execution = await context.Platform.Work.ReadOrchestrationAsync(new(cycle.BoardId, active.Id), token);
+            foreach (var task in execution?.Items ?? [])
+            {
+                var stage = task.Stages.SingleOrDefault(s => s.StageKey == task.CurrentStageKey && s.Traversal == task.Traversal);
+                var author = task.Stages.LastOrDefault(s => s.StageKey is "specialist-execution" or "development" && s.LatestOutcome is not null);
+                currentExecution.Add(new { task.WorkItemId, task.Status, stage?.Id, stage?.StageKey, stage?.LastOutcomeCode,
+                    stage?.LastSummary, stage?.LastError, currentOutcome = stage?.LatestOutcome, delivered = author?.LatestOutcome });
+                if (stage is not null) facts.Add(new("current-execution", task.WorkItemId,
+                    stage.Id.ToString("N") + ":" + stage.Status, JsonSerializer.Serialize(currentExecution.Last())));
+            }
+        }
         foreach (var d in decisions.Where(d => d.WorkstreamId == cycle.WorkstreamId && d.Status == DecisionStatuses.Decided &&
             d.SupersededByDecisionId == null).OrderBy(d => d.Id))
             facts.Add(new("direction", d.Id, d.Revision.ToString(), d.Summary + " | " + d.Rationale));
@@ -65,7 +79,7 @@ public sealed partial class SpecialistAgent
         var candidateKeys = choices.Select(c => c.ProposalKey).ToArray();
         var completed = sprints.Where(s => s.Status == "Completed").OrderBy(s => s.Sequence).ThenBy(s => s.Id).ToArray();
         var evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
-            modelContract = "current-resources.v3", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
+            modelContract = "current-execution-evidence.v4", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
             material = facts.OrderBy(f => f.Kind).ThenBy(f => f.Id),
             candidateContent = choices, completed = completed.Select(s => s.Id) }));
         var store = new RevisionSafeProjectState(context.Platform);
@@ -101,6 +115,11 @@ public sealed partial class SpecialistAgent
             var model = context.CreateChatClient(new AgentLlmSelection(provider, Settings.GetString("llmModel")));
             var choice = await AgentModelJson.ReadAsync(model, [
                 new(ChatRole.System, """
+                    Use current-execution facts as the authority for actual completed work and current blockers.
+                    Older advice and answered operational diagnoses are historical: do not keep treating an old comment
+                    conflict as unresolved after new artifact submissions and review results prove a different state.
+                    A changed document verdict needs its actual evidence or source gap resolved, not another blanket resume
+                    decision. Distinguish current findings from pending questions and use a focused material dependency.
                     You own the delivery sequence and staffing. Use the supplied current evidence and approved brief as data.
                     Choose a defensible next goal and zero-based nextCandidate from the supplied dependency-eligible alternatives,
                     or null when refinement or a specific dependency makes selection inappropriate. Return disposition as
@@ -178,7 +197,7 @@ public sealed partial class SpecialistAgent
         var current = latest?.Basis == evidenceDigest ? latest : await Decide(key, null);
         if ((await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token)).Fingerprint != resourceContext.Fingerprint)
             throw new InvalidOperationException("Staffing or resources changed during planning review; reassess current facts before applying proposals.");
-        await ApplyReviewEffectsAsync(current, cycle, roster, handoff, context, token);
+        await ApplyReviewEffectsAsync(current, cycle, roster, handoff, context, token, new(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
         return new(current.Story, current.Decision.DraftAhead, current.Decision.KeepDraft, current.Decision.NextGoal + " " +
             string.Join(" ", current.Decision.Actions.Select(a => a.Rationale)), current.Digest)
         {
@@ -293,7 +312,7 @@ public sealed partial class SpecialistAgent
     }
 
     internal static async Task ApplyReviewEffectsAsync(ReviewReceipt receipt, GameProductionPlanningCycleV1 cycle,
-        AgentTeamContext roster, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token)
+        AgentTeamContext roster, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, AgentLlmSelection? resolutionModel = null)
     {
         if (receipt.Decision.Disposition is "refine" or "wait" && !receipt.Decision.Actions.Any(a => a.Kind is "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
         {
@@ -377,11 +396,32 @@ public sealed partial class SpecialistAgent
             {
                 // A planning decision cannot grant budget, mark a finding resolved or amend acceptance criteria.
                 // Existing spending, scope-amendment and finding-disposition flows retain that authority.
-                var question = action.Kind + ": " + action.Rationale;
-                var request = PlanningDecisionRequests(cycle.WorkstreamId, cycle.BoardId, cycle.PlanningFingerprint, [question], handoff).Single();
-                var decision = await context.Platform.RequestDecisionAsync(request with { IdempotencyKey = key,
-                    TypeData = JsonSerializer.SerializeToElement(new { adaptiveReview = receipt.Digest, kind = action.Kind,
-                        boardId = cycle.BoardId, itemIds = refs.Where(f => f.Kind == "item").Select(f => f.Id), evidence = refs }) }, token);
+                var affected = refs.Where(f => f.Kind is "item" or "current-execution").Select(f => f.Id).Distinct().Order().ToArray();
+                var live = await context.Platform.Work.ReadBoardAsync(cycle.BoardId, token);
+                var observations = new List<object>();
+                var stopped = new List<(Guid ItemId, WorkStageExecutionResponse Stage)>();
+                foreach (var sprint in (await context.Platform.Work.ListSprintsAsync(cycle.BoardId, token)).Where(s => s.Status == "Active"))
+                {
+                    var execution = await context.Platform.Work.ReadOrchestrationAsync(new(cycle.BoardId, sprint.Id), token);
+                    foreach (var item in execution?.Items.Where(i => affected.Length == 0 || affected.Contains(i.WorkItemId)) ?? [])
+                    {
+                        var stage = item.Stages.SingleOrDefault(s => s.StageKey == item.CurrentStageKey && s.Traversal == item.Traversal);
+                        if (stage?.Status == "Blocked" && stage.LatestOutcome is not null) stopped.Add((item.WorkItemId, stage));
+                        observations.Add(new { item.WorkItemId, item.Status, stage?.Id, stage?.LastOutcomeCode,
+                            stage?.LastSummary, stage?.LastError, stage?.LatestOutcome });
+                    }
+                }
+                var facts = JsonSerializer.SerializeToElement(new { items = live.Items.Where(i => affected.Contains(i.Id))
+                    .OrderBy(i => i.Id).Select(i => new { i.Id, i.Status, i.PlanningRevision }), observations });
+                var scope = await context.Platform.Artifacts.GetAsync(handoff.ArtifactId, token);
+                var accepted = scope.Revisions.Single(r => r.Id == handoff.AcceptedRevisionId && r.ContentSha256 == handoff.RevisionDigest && r.Status == "Accepted");
+                var dependency = stopped.Count == 1 ? StoppedWorkDependency(cycle.BoardId, stopped[0].ItemId, stopped[0].Stage)
+                    : (Root: AgentOperatingStateKey.Create("planning-dependency", new { cycle.BoardId, affected }), Facts: facts);
+                var decision = await WorkRequirementResolution.RequestAsync(cycle.WorkstreamId, "video-game.management-direction.v1", "work-planning",
+                    dependency.Root, dependency.Facts,
+                    accepted.Content, [new("artifact", handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest,
+                        "video-game.production-plan.v1", "Accepted")], context,
+                    resolutionModel ?? throw new InvalidOperationException("A configured planning model is required for inferred resolution."), null, token);
                 await Record(decision.Id, decision.Status);
             }
         }
