@@ -920,7 +920,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         {
             var advance = await AdvanceProgressivePlanningAsync(boardId, roster, cycle, memberDigests, technicalDirector,
                 technicalSession, technicalArtifact!, technicalProposal, priorCycle.Progressive, context, cancellationToken,
-                (progress, choices, board, plans, sprints) => ReviewAdaptivePlanAsync(cycle, roster, progress, choices, board, plans, sprints, ReadProgressiveEvidence(technicalArtifact!)!, handoff, context, cancellationToken, ownership), ownership);
+                (progress, choices, board, plans, sprints, draft) => ReviewAdaptivePlanAsync(cycle, roster, progress, choices, board, plans, sprints, ReadProgressiveEvidence(technicalArtifact!)!, handoff, context, cancellationToken, ownership, draft), ownership);
             priorCycle = priorCycle with { Progressive = advance.Progress, UpdatedAt = DateTimeOffset.UtcNow };
             if (advance.Session is null)
                 await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);

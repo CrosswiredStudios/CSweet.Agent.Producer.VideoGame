@@ -162,7 +162,7 @@ public sealed partial class SpecialistAgent
         AgentCoordinationSession outlineSession, AgentCoordinationArtifact outlineArtifact, GameTechnicalDeliveryProposalV1 outline,
         ProgressivePlanningProgress? progress, AgentRuntimeContext context, CancellationToken token,
         Func<ProgressivePlanningProgress, IReadOnlyList<GameProposedWorkItemV1>, WorkBoardDetail, IReadOnlyList<WorkDeliveryPlanResponse>,
-            IReadOnlyList<WorkSprint>, Task<ReviewEffects>>? review = null, OwnershipReview? ownership = null)
+            IReadOnlyList<WorkSprint>, StoryReviewDraft?, Task<ReviewEffects>>? review = null, OwnershipReview? ownership = null)
     {
         var evidence = ReadProgressiveEvidence(outlineArtifact)!;
         var directionReview = evidence.Phase == "Direction" ? evidence : null;
@@ -233,15 +233,18 @@ public sealed partial class SpecialistAgent
                     var liveBoard = await context.Platform.Work.ReadBoardAsync(boardId, token);
                     var livePlans = await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token);
                     var liveSprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
-                    var decision = await review(progress, eligible, liveBoard, livePlans, liveSprints);
+                    var returnedDraft = StoryReviewDraft.FromProposal(pending, currentSession.Id, currentArtifact.Digest, current);
+                    var decision = await review(progress, eligible, liveBoard, livePlans, liveSprints, returnedDraft);
                     if (decision.Disposition == "wait") return new(progress, Waiting: decision.Guidance);
                     if (prior.Count > 0 && !HasAcceptedProgressiveIncrements(priorPlan, prior.ToArray(), liveBoard.Items, livePlans, true))
                         return new(progress, Waiting: "The provisional Story still needs its prerequisite acceptance.");
-                    if (decision.Story != pending || !decision.KeepDraft && progress.AdmissionReviewBasis is { } reviewed && reviewed != decision.Basis)
+                    if (decision.Story != pending || !decision.KeepDraft)
                         return new(progress with { RefinementSessionId = progress.LastPublishedSessionId, PendingStoryKey = null,
                             DraftSessionId = currentSession.Id, DraftStoryKey = pending, DraftBasis = progress.AcceptedBases.GetValueOrDefault(pending),
                             DraftDirection = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest },
-                            Waiting: "Current evidence changed the next Story. The provisional refinement is retained outside the board.");
+                            Waiting: decision.Story == pending
+                                ? $"The Producer retained the same Story for revision. {decision.Guidance}"
+                                : "The Producer selected different work. The provisional refinement is retained outside the board.");
                 }
                 progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null, AdmissionReviewBasis = null };
                 if (progress.ScheduledArtifactDigest != currentArtifact.Digest || needsAuthorityReconciliation)
@@ -262,7 +265,7 @@ public sealed partial class SpecialistAgent
             var sprints = evidence.Adaptive || progress.ScheduledSprintSequence.HasValue ? await context.Platform.Work.ListSprintsAsync(boardId, token) : [];
             var detailed = progress.DetailedStoryKeys.ToHashSet();
             var candidates = evidence.Adaptive ? OwnershipCandidates(SuccessorCandidates(current.DeliveryItems, detailed), current.DeliveryItems, ownership) : [];
-            var assessment = evidence.Adaptive && review != null ? await review(progress, candidates, board, plans, sprints) : null;
+            var assessment = evidence.Adaptive && review != null ? await review(progress, candidates, board, plans, sprints, null) : null;
             if (progress.ScheduledSprintSequence.HasValue)
             {
                 if (!sprints.Any(x => x.Status == "Active") &&

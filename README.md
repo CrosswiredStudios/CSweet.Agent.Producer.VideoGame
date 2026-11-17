@@ -1,4 +1,6 @@
-# Producer 6.21.1
+# Producer 6.21.2
+
+The Producer reviews the Technical Director's completed Story and task briefs before publishing the increment. An existing business can use its saved refinement after updating the Producer. See the [6.21.2 release notes](releases/6.21.2.md).
 
 Staffing follows the newest applicable manager review, with full work descriptions, named reporting
 relationships and separate future activation. Exact resource dependencies and current-state recovery

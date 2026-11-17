@@ -311,15 +311,16 @@ public sealed partial class ProgressivePlanningTests
         public async Task<SpecialistAgent.ProgressiveAdvance> Review(ProgressivePlanningProgress? progress, bool draft = true, bool keep = true)
         {
             return await SpecialistAgent.AdvanceProgressivePlanningAsync(Cycle.BoardId, Roster, Cycle, [], Member, Session, Artifact, Outline,
-                progress, Runtime.CreateContext(), default, (_, choices, _, _, _) => Task.FromResult(new SpecialistAgent.ReviewEffects(
+                progress, Runtime.CreateContext(), default, (_, choices, _, _, _, _) => Task.FromResult(new SpecialistAgent.ReviewEffects(
                     choices.FirstOrDefault()?.ProposalKey, draft, keep, "Test the highest uncertainty first.", draft ? "clean" : "open-collision")));
         }
-        public void CompleteRefinement()
+        public void CompleteRefinement(params string[] additionalTasks)
         {
             var story = Evidence.Adaptive ? Outline.DeliveryItems[0] with { WorkItemTypeKey = VideoGameWorkItemTypeKeys.Feature,
                 ParentProposalKey = "prototype", ProposalKey = "prototype.story-1" } : Outline.DeliveryItems[1];
             var leaf = story with { ProposalKey = "implementation", WorkItemTypeKey = VideoGameWorkItemTypeKeys.Task, ParentProposalKey = story.ProposalKey, AccountableRoleKey = "game-engineer" };
-            Detail = Outline with { DeliveryItems = [.. Outline.DeliveryItems, .. (Evidence.Adaptive ? new[] { story } : Array.Empty<GameProposedWorkItemV1>()), leaf, leaf with { ProposalKey = "qa", AccountableRoleKey = "game-quality-assurance", DependencyProposalKeys = ["implementation"] }] };
+            Detail = Outline with { DeliveryItems = [.. Outline.DeliveryItems, .. (Evidence.Adaptive ? new[] { story } : Array.Empty<GameProposedWorkItemV1>()), leaf, leaf with { ProposalKey = "qa", AccountableRoleKey = "game-quality-assurance", DependencyProposalKeys = ["implementation"] },
+                .. additionalTasks.Select(key => leaf with { ProposalKey = key, Description = "Brief for " + key })] };
             DetailArtifact = Wrap(Detail, Evidence with { Phase = "Story", DetailedStoryKeys = [story.ProposalKey] }, "detail-artifact");
             Refinement = (Refinement ?? Session) with { Status = "Completed", Turns = [new(Guid.NewGuid(), 1, Person.OrganizationUserId, "complete", "Complete", DateTimeOffset.UtcNow, DetailArtifact)] };
             sessions[Refinement.Id] = Refinement;

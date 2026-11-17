@@ -11,12 +11,19 @@ public sealed partial class SpecialistAgent
 {
     internal sealed record ReviewFact(string Kind, Guid Id, string Revision, string Detail);
     internal sealed record ReviewAction(string Kind, string Rationale, string? Capability, IReadOnlyList<int> EvidenceIndexes);
+    internal sealed record StoryReviewDraft(Guid SessionId, string ArtifactDigest, GameProposedWorkItemV1 Story, IReadOnlyList<GameProposedWorkItemV1> Tasks)
+    {
+        internal static StoryReviewDraft FromProposal(string storyKey, Guid sessionId, string digest, GameTechnicalDeliveryProposalV1 proposal) =>
+            new(sessionId, digest, proposal.DeliveryItems.Single(i => i.ProposalKey == storyKey && IsScopeContainer(i)),
+                proposal.DeliveryItems.Where(i => i.ParentProposalKey == storyKey && !IsScopeContainer(i)).ToArray());
+    }
     internal sealed record ReviewChoice(string NextGoal, int? NextCandidate, bool DraftAhead, bool KeepDraft, string RevisitWhen,
         string FeelSummary, IReadOnlyList<ReviewAction> Actions)
     {
         public IReadOnlyList<int>? AdditionalDraftCandidates { get; init; }
         public string? Disposition { get; init; }
         public IReadOnlyList<int>? VerifiedSources { get; init; }
+        public string? DraftRevisionReason { get; init; }
     }
     internal sealed record ReviewReceipt(string Digest, string? Story, ReviewChoice Decision,
         IReadOnlyList<ReviewFact> Evidence, IReadOnlyList<string> Roles, DateTimeOffset ReviewedAt, string Basis)
@@ -36,7 +43,7 @@ public sealed partial class SpecialistAgent
         ProgressivePlanningProgress progress, IReadOnlyList<GameProposedWorkItemV1> choices, WorkBoardDetail board,
         IReadOnlyList<WorkDeliveryPlanResponse> plans, IReadOnlyList<WorkSprint> sprints,
         ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, OwnershipReview? ownership = null,
-        int factRefreshes = 0)
+        StoryReviewDraft? draft = null, int factRefreshes = 0)
     {
         var decisions = await context.Platform.ReadDecisionsAsync(new(WorkstreamId: cycle.WorkstreamId), token);
         var resourceContext = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
@@ -83,6 +90,26 @@ public sealed partial class SpecialistAgent
             modelContract = "current-execution-evidence.v5", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
             material = facts.OrderBy(f => f.Kind).ThenBy(f => f.Id),
             candidateContent = choices, completed = completed.Select(s => s.Id) }));
+        if (draft is null && progress.DraftSessionId is Guid retainedId && progress.DraftStoryKey is string retainedStory)
+        {
+            var retained = await context.Platform.Communication.ReadCoordinationAsync(retainedId, token);
+            if (retained.Status == "Completed" && retained.BoardSource?.BoardId == cycle.BoardId &&
+                retained.Initiator.OrganizationUserId.ToString() == context.Identity?.EmployeeId &&
+                retained.Turns.LastOrDefault(t => t.SpeakerOrganizationUserId == retained.Target.OrganizationUserId &&
+                    t.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1")?.Artifact is { } artifact &&
+                ReadProgressiveEvidence(artifact) is { } detail && detail.OutlineDigest == progress.OutlineDigest &&
+                detail.DetailedStoryKeys.Contains(retainedStory))
+            {
+                var proposal = artifact.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
+                if (proposal.Cycle.WorkstreamId == cycle.WorkstreamId && proposal.Cycle.ApprovedPackageDigest == cycle.ApprovedPackageDigest)
+                    draft = StoryReviewDraft.FromProposal(retainedStory, retainedId, artifact.Digest, proposal);
+            }
+        }
+        // A pre-refinement receipt cannot decide whether to keep a proposal it never saw.
+        // Keep historical receipt identities for reviews that do not have a completed draft.
+        if (draft is not null)
+            evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+                evidenceDigest, draft.SessionId, draft.ArtifactDigest, draft.Story.ProposalKey }));
         var store = new RevisionSafeProjectState(context.Platform);
         var brief = await context.Platform.Artifacts.GetAsync(handoff.ArtifactId, token);
         var acceptedBrief = brief.Revisions.Single(r => r.Id == handoff.AcceptedRevisionId && r.ContentSha256 == handoff.RevisionDigest && r.Status == "Accepted");
@@ -109,10 +136,6 @@ public sealed partial class SpecialistAgent
                 }
             }
             var provider = Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the Producer planning provider.");
-            var draft = progress.DraftSessionId is Guid sessionId ? await context.Platform.Communication.ReadCoordinationAsync(sessionId, token) : null;
-            var provisional = draft?.BoardSource?.BoardId == cycle.BoardId && draft?.Initiator.OrganizationUserId.ToString() == context.Identity?.EmployeeId
-                ? draft?.Turns.LastOrDefault(t => t.SpeakerOrganizationUserId == draft.Target.OrganizationUserId &&
-                    t.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1")?.Artifact : null;
             var model = context.CreateChatClient(new AgentLlmSelection(provider, Settings.GetString("llmModel")));
             var choice = await AgentModelJson.ReadAsync(model, [
                 new(ChatRole.System, """
@@ -131,6 +154,8 @@ public sealed partial class SpecialistAgent
                     Give a short feelSummary with actual build reference or prerequisite progress, how to try it, attributed observations
                     and remaining hypotheses. Never invent human playtests, build links or observations. Report a research-only sprint honestly.
                     Examine the provisional Story, its assumptions and current evidence. Set keepDraft true when the same draft remains suitable.
+                    When you select the supplied draft's Story but its briefs need revision, set keepDraft false and include
+                    draftRevisionReason naming the affected task or criterion, the conflicting evidence and the correction Victor should make.
                     Return {disposition,nextGoal,nextCandidate,draftAhead,keepDraft,revisitWhen,feelSummary,actions:[{kind,rationale,capability,evidenceIndexes}],additionalDraftCandidates:[]}.
                     Include verifiedSources as indexes into supplied obligations only when accepted evidence meaningfully
                     verifies the approved wording and applicable constraints. Existing tickets being done is insufficient.
@@ -151,11 +176,12 @@ public sealed partial class SpecialistAgent
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { brief = acceptedBrief.Content, sprint = sprint?.Goal, candidates = choices.Select(c => new { c.Title,c.Description }),
                     obligations=ownership?.Coverage??roadmap.ScopeCoverage, resourceContext,
-                    provisionalStory = progress.DraftStoryKey, provisional = provisional?.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()?.DeliveryItems.Where(x => x.ParentProposalKey == progress.DraftStoryKey), evidence, roles, roster = roster.Members.Select(m => new { m.DisplayName, m.DeclaredRoleKeys,m.SpecializationKeys,m.IsAvailable }) }))
+                    provisionalStory = draft?.Story.ProposalKey, storyDefinition = draft?.Story, provisional = draft?.Tasks,
+                    evidence, roles, roster = roster.Members.Select(m => new { m.DisplayName, m.DeclaredRoleKeys,m.SpecializationKeys,m.IsAvailable }) }))
             ], new AgentModelJsonRequest<ReviewChoice>("game planning review") {
                 Options = ResponseOptions(), Normalize = value =>
                 {
-                    ValidateReview(value, choices.Count, roles, evidence);
+                    ValidateReview(value, choices.Count, roles, evidence, draft is null ? null : Array.IndexOf(candidateKeys, draft.Story.ProposalKey));
                     var obligations=ownership?.Coverage??roadmap.ScopeCoverage;
                     if(value.VerifiedSources?.Any(i=>i<0||i>=obligations.Count)==true)
                         throw new AgentModelJsonException("Verified source indexes must refer to supplied approved obligations.");
@@ -164,7 +190,7 @@ public sealed partial class SpecialistAgent
             }, token);
             await context.ReportProgressAsync(new { adaptivePlanning = "review", cycle.WorkstreamId, cycle.BoardId,
                 sprintId = sprint?.Id, candidates = candidateKeys, choice.NextCandidate, choice.DraftAhead, choice.KeepDraft,
-                pending = progress.DraftStoryKey, choice.RevisitWhen }, token);
+                pending = draft?.Story.ProposalKey, draftSessionId = draft?.SessionId, proposalDigest = draft?.ArtifactDigest, choice.RevisitWhen }, token);
             var used = choice.Actions.SelectMany(a => a.EvidenceIndexes).Distinct().Order().ToArray();
             var compact = used.Select(index => evidence[index]).ToArray();
             var remap = used.Select((index, offset) => (index, offset)).ToDictionary(x => x.index, x => x.offset);
@@ -202,12 +228,12 @@ public sealed partial class SpecialistAgent
                 return await ReviewAdaptivePlanAsync(cycle, roster, progress, choices,
                     await context.Platform.Work.ReadBoardAsync(cycle.BoardId, token),
                     await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token),
-                    await context.Platform.Work.ListSprintsAsync(cycle.BoardId, token), roadmap, handoff, context, token, ownership, 1);
+                    await context.Platform.Work.ListSprintsAsync(cycle.BoardId, token), roadmap, handoff, context, token, ownership, draft, 1);
             return new(null, false, true, "Current staffing or resources changed again. The Producer will reassess current facts on the next planning review; the existing draft is retained.", evidenceDigest) { Disposition = "wait" };
         }
         await ApplyReviewEffectsAsync(current, cycle, roster, handoff, context, token, new(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
         return new(current.Story, current.Decision.DraftAhead, current.Decision.KeepDraft, current.Decision.NextGoal + " " +
-            string.Join(" ", current.Decision.Actions.Select(a => a.Rationale)), current.Digest)
+            string.Join(" ", current.Decision.Actions.Select(a => a.Rationale).Append(current.Decision.DraftRevisionReason)).TrimEnd(), current.Digest)
         {
             AdditionalDrafts = (current.Decision.AdditionalDraftCandidates ?? []).Select(i => candidateKeys[i]).ToArray(),
             Disposition = current.Decision.Disposition
@@ -298,7 +324,8 @@ public sealed partial class SpecialistAgent
         }
     }
 
-    internal static ReviewChoice ValidateReview(ReviewChoice value, int candidateCount, IReadOnlyList<CoverageRoleChoice> roles, IReadOnlyList<ReviewFact> evidence)
+    internal static ReviewChoice ValidateReview(ReviewChoice value, int candidateCount, IReadOnlyList<CoverageRoleChoice> roles, IReadOnlyList<ReviewFact> evidence,
+        int? draftCandidate = null)
     {
         if (string.IsNullOrWhiteSpace(value.NextGoal) || string.IsNullOrWhiteSpace(value.RevisitWhen) || string.IsNullOrWhiteSpace(value.FeelSummary) ||
             (value.NextCandidate is int i && (i < 0 || i >= candidateCount)) ||
@@ -316,6 +343,8 @@ public sealed partial class SpecialistAgent
                 a.Kind == "ceo-hold" && !a.EvidenceIndexes.Any(i => evidence[i].Kind == "item") ||
                 a.Kind == "qa-disposition" && !a.EvidenceIndexes.Any(i => evidence[i].Kind is "qa" or "finding")))
             throw new AgentModelJsonException("Supply an eligible next candidate, supported actions, named capability choices, valid evidence indexes and an evidence-backed feel summary.");
+        if (value.NextCandidate is int selected && selected == draftCandidate && !value.KeepDraft && string.IsNullOrWhiteSpace(value.DraftRevisionReason))
+            throw new AgentModelJsonException("Review the supplied task briefs. Keep a suitable draft, or provide draftRevisionReason naming the affected task or criterion, conflicting evidence and needed correction.");
         return value;
     }
 
