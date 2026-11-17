@@ -1,0 +1,6 @@
+{
+  "kind": "consult",
+  "capability": "Producer",
+  "rationale": "Ask Marcus Vale one bounded question: approve refining roadmap-epic-1.story-1 so that the current increment is only Victor Lin's versioned technical feasibility/decomposition/guardrails record with implementation-package sizing, explicitly deferring dependency-pin-phaser and chromium-static-browser-build-foundation to downstream packages after Engineer staffing and build authorization.",
+  "evidenceIndexes": [0]
+}

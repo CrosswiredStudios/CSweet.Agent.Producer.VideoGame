@@ -1,4 +1,4 @@
-# Producer 6.21.0
+# Producer 6.21.1
 
 Staffing follows the newest applicable manager review, with full work descriptions, named reporting
 relationships and separate future activation. Exact resource dependencies and current-state recovery
@@ -14,7 +14,7 @@ public planning refinement protocol for missing approved future outcomes, then r
 work to ordinary estimates, current-roster staffing and readiness. Existing protected decisions
 and second judgments remain required by their actual operations.
 
-Shared durable manager recovery and scoped ownership review let independent work proceed while later obligations remain open. Current staffing/resource evidence informs the review. Subscribe to the standard communication-mention event for prompt recovery wakes; normal attention review discovers missed notifications. See [release notes](releases/6.21.0.md).
+Shared durable manager recovery and scoped ownership review let independent work proceed while later obligations remain open. Current staffing/resource evidence informs the review. Subscribe to the standard communication-mention event for prompt recovery wakes; normal attention review discovers missed notifications. See [release notes](releases/6.21.1.md).
 
 # Producer 6.13.0
 

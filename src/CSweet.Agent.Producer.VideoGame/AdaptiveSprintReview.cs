@@ -35,7 +35,8 @@ public sealed partial class SpecialistAgent
     internal async Task<ReviewEffects> ReviewAdaptivePlanAsync(GameProductionPlanningCycleV1 cycle, AgentTeamContext roster,
         ProgressivePlanningProgress progress, IReadOnlyList<GameProposedWorkItemV1> choices, WorkBoardDetail board,
         IReadOnlyList<WorkDeliveryPlanResponse> plans, IReadOnlyList<WorkSprint> sprints,
-        ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, OwnershipReview? ownership = null)
+        ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, OwnershipReview? ownership = null,
+        int factRefreshes = 0)
     {
         var decisions = await context.Platform.ReadDecisionsAsync(new(WorkstreamId: cycle.WorkstreamId), token);
         var resourceContext = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
@@ -79,7 +80,7 @@ public sealed partial class SpecialistAgent
         var candidateKeys = choices.Select(c => c.ProposalKey).ToArray();
         var completed = sprints.Where(s => s.Status == "Completed").OrderBy(s => s.Sequence).ThenBy(s => s.Id).ToArray();
         var evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
-            modelContract = "current-execution-evidence.v4", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
+            modelContract = "current-execution-evidence.v5", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership,
             material = facts.OrderBy(f => f.Kind).ThenBy(f => f.Id),
             candidateContent = choices, completed = completed.Select(s => s.Id) }));
         var store = new RevisionSafeProjectState(context.Platform);
@@ -158,8 +159,6 @@ public sealed partial class SpecialistAgent
                     var obligations=ownership?.Coverage??roadmap.ScopeCoverage;
                     if(value.VerifiedSources?.Any(i=>i<0||i>=obligations.Count)==true)
                         throw new AgentModelJsonException("Verified source indexes must refer to supplied approved obligations.");
-                    if (value.Actions.Any(a => a.Kind == "consult" && SelectRoleMember(roster, roles.Single(r => r.Capability == a.Capability).RoleKey) == null))
-                        throw new AgentModelJsonException("Consult an available qualified participant. Propose a hire only for a sustained gap.");
                     return value;
                 }
             }, token);
@@ -196,7 +195,16 @@ public sealed partial class SpecialistAgent
         var key = "game-plan-assessment:" + evidenceDigest;
         var current = latest?.Basis == evidenceDigest ? latest : await Decide(key, null);
         if ((await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token)).Fingerprint != resourceContext.Fingerprint)
-            throw new InvalidOperationException("Staffing or resources changed during planning review; reassess current facts before applying proposals.");
+        {
+            // A legitimate staffing decision during inference invalidates the judgment, not the draft.
+            // Refresh once in this callback. Continued change waits for the normal durable planning wake.
+            if (factRefreshes == 0)
+                return await ReviewAdaptivePlanAsync(cycle, roster, progress, choices,
+                    await context.Platform.Work.ReadBoardAsync(cycle.BoardId, token),
+                    await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token),
+                    await context.Platform.Work.ListSprintsAsync(cycle.BoardId, token), roadmap, handoff, context, token, ownership, 1);
+            return new(null, false, true, "Current staffing or resources changed again. The Producer will reassess current facts on the next planning review; the existing draft is retained.", evidenceDigest) { Disposition = "wait" };
+        }
         await ApplyReviewEffectsAsync(current, cycle, roster, handoff, context, token, new(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
         return new(current.Story, current.Decision.DraftAhead, current.Decision.KeepDraft, current.Decision.NextGoal + " " +
             string.Join(" ", current.Decision.Actions.Select(a => a.Rationale)), current.Digest)
@@ -361,31 +369,20 @@ public sealed partial class SpecialistAgent
                     context, token, handoff.RevisionDigest);
                 if (staffing != null) await Record(staffing.Id, staffing.Status);
             }
-            else if ((action.Kind is "consult" or "refine") &&
-                SelectRoleMember(roster, action.Kind == "refine" ? VideoGameRoleKeys.TechnicalDirector : role!) is { } member)
+            else if (action.Kind is "consult" or "refine")
             {
                 var scope = receipt.Story ?? "project";
                 var question = new WorkContributionRequest(cycle.WorkstreamId,cycle.BoardId,scope,action.Rationale,
                     [new(handoff.ArtifactId,handoff.AcceptedRevisionId,handoff.RevisionDigest)]);
                 var artifact = CollaborationActions.WithDocuments(new(WorkContributions.RequestType,"1.0",key,1,true,
                     JsonSerializer.SerializeToElement(question)),[new(handoff.ArtifactId,handoff.AcceptedRevisionId,handoff.RevisionDigest)]);
-                var session = await context.Platform.Communication.StartBoardCoordinationAsync(new(Guid.Parse(member.EmployeeId),
-                    cycle.BoardId,"Scoped contribution",action.Rationale,["Answer the scoped question with attributed judgment and evidence needed."],
-                    action.Rationale,key,artifact),token);
+                var (member,session) = await StartReviewConsultationAsync(key,action,roster,cycle,artifact,context,resolutionModel,token);
                 await TrackedCollaboration.QueueCardAsync(context,session,new("Receive scoped planning advice",action.Rationale) {
                     WorkstreamId=cycle.WorkstreamId,TeamId=cycle.TeamId,BoardId=cycle.BoardId},token);
                 await journal.MergeAsync<DesignConsultations>("design-consults:"+cycle.WorkstreamId.ToString("N"),"game.design-consults.v1",1,
                     prior=>new((prior?.Requests??[]).Append(new(session.Id,scope,Guid.Parse(member.EmployeeId),key)).DistinctBy(w=>w.ArtifactKey).ToArray()),
                     new Dictionary<string,string>(),key+":watch",token);
                 await Record(session.Id,session.Status);
-            }
-            else if (action.Kind == "refine")
-            {
-                var staffing = await ProposeCoverageAsync(cycle.WorkstreamId, cycle.BoardId, roster,
-                    [new("planning", VideoGameRoleKeys.TechnicalDirector, ["work.execution.run"], null, true,
-                        "A qualified contributor is needed for this retained planning question: " + action.Rationale)], context, token, handoff.RevisionDigest);
-                if (staffing is null) throw new InvalidOperationException("The retained refinement needs qualified planning coverage or an owner revision of the affected approach.");
-                await Record(staffing.Id, staffing.Status);
             }
             else if (action.Kind == "spend")
             {
@@ -425,6 +422,80 @@ public sealed partial class SpecialistAgent
                 await Record(decision.Id, decision.Status);
             }
         }
+    }
+
+    private sealed class PlanningDependencyPendingException(string message) : Exception(message);
+    private sealed record ConsultationRecipient(Guid EmployeeId, Guid InstallationId, string Reason);
+    private sealed record ConsultationRejection(string Message);
+
+    private static async Task<(AgentTeammate,AgentCoordinationSession)> StartReviewConsultationAsync(string key, ReviewAction action,
+        AgentTeamContext roster, GameProductionPlanningCycleV1 cycle, AgentCoordinationArtifactSubmission artifact,
+        AgentRuntimeContext context, AgentLlmSelection? selection, CancellationToken token)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var dispatchKey = attempt == 0 ? key : key + ":corrected";
+            var rejected = await context.Platform.ReadOperatingStateAsync<ConsultationRejection>(dispatchKey + ":rejection",token);
+            if (rejected is not null)
+            {
+                if (attempt == 0) continue;
+                throw new InvalidOperationException("Consultation remains blocked after one corrected request. The reporting manager must resolve the recorded routing or access failure before retry: " + rejected.Payload.Message);
+            }
+            var prior = attempt == 0 ? null : await context.Platform.ReadOperatingStateAsync<ConsultationRejection>(key + ":rejection",token);
+            if (prior is not null)
+                roster = (await PlanningResourceContext.ReadAsync(context.Platform,cycle.WorkstreamId,cycle.TeamId,token)).Roster ?? roster with { Members = [] };
+            var member = await ResolveConsultationAsync(dispatchKey,action,roster,context,selection,token,prior?.Payload.Message);
+            if (member is null) throw new PlanningDependencyPendingException("The Producer retains this draft and owns finding a qualified consultation recipient for: " + action.Rationale);
+            try
+            {
+                var session = await context.Platform.Communication.StartBoardCoordinationAsync(new(Guid.Parse(member.EmployeeId),
+                    cycle.BoardId,"Scoped contribution",action.Rationale,["Answer the scoped question with attributed judgment and evidence needed."],
+                    action.Rationale,dispatchKey,artifact),token);
+                return (member,session);
+            }
+            catch (PlatformCapabilityException error) when (error.Retryable != true && error.Code is PlatformCapabilityErrorCode.Denied or PlatformCapabilityErrorCode.ValidationFailed or PlatformCapabilityErrorCode.Conflict)
+            {
+                await new RevisionSafeProjectState(context.Platform).MergeAsync<ConsultationRejection>(dispatchKey + ":rejection",
+                    "planning.consultation-rejection.v1",1,old => old ?? new(error.Message),new Dictionary<string,string>(),dispatchKey + ":rejected",token);
+                if (attempt == 1) throw new InvalidOperationException("Consultation was rejected after one correction. The reporting manager owns resolving this failure before retry: " + error.Message,error);
+            }
+        }
+        throw new InvalidOperationException("The reporting manager must resolve the retained consultation rejection before retry.");
+    }
+
+    private static async Task<AgentTeammate?> ResolveConsultationAsync(string actionKey, ReviewAction action,
+        AgentTeamContext roster, AgentRuntimeContext context, AgentLlmSelection? selection, CancellationToken token, string? previousRejection = null)
+    {
+        var identity = context.Identity ?? throw new InvalidOperationException("Consultation requires the current employee identity.");
+        var candidates = ConsultationRouting.Candidates(roster.Members, identity.EmployeeId);
+        var key = actionKey + ":recipient:v1";
+        var retained = await context.Platform.ReadOperatingStateAsync<ConsultationRecipient>(key, token);
+        if (retained is not null && candidates.SingleOrDefault(p => p.EmployeeId == retained.Payload.EmployeeId.ToString() &&
+            p.AgentInstallationId == retained.Payload.InstallationId) is { } existing) return existing;
+        if (candidates.Count == 0) return null;
+        AgentTeammate? member;
+        string reason;
+        if (selection is null && action.Kind == "refine")
+        {
+            // Compatibility for deterministic callers without a configured model.
+            member = SelectRoleMember(roster with { Members = candidates }, VideoGameRoleKeys.TechnicalDirector);
+            reason = "Available technical refinement contributor.";
+        }
+        else
+        {
+            if (selection is null) throw new InvalidOperationException("Consultation routing requires the configured planning model.");
+            var choice = await ConsultationRouting.SelectAsync(candidates, identity, action.Rationale, action.Capability,
+                context.CreateChatClient(selection), token, previousRejection);
+            member = choice.Candidate is int index ? candidates[index] : null;
+            reason = choice.Reason;
+        }
+        if (member is null) return null;
+        var recipient = new ConsultationRecipient(Guid.Parse(member.EmployeeId), member.AgentInstallationId!.Value, reason);
+        var saved = await new RevisionSafeProjectState(context.Platform).MergeAsync<ConsultationRecipient>(key,
+            "planning.consultation-recipient.v1", 1, old => old is not null && candidates.Any(p =>
+                p.EmployeeId == old.EmployeeId.ToString() && p.AgentInstallationId == old.InstallationId) ? old : recipient,
+            new Dictionary<string,string>(), key + ":" + recipient.InstallationId.ToString("N"), token);
+        return candidates.Single(p => p.EmployeeId == saved.Payload.EmployeeId.ToString() && p.AgentInstallationId == saved.Payload.InstallationId);
     }
 
     internal sealed record ReviewActionReceipt(string Kind, Guid Id, string Status, string ProposalKey)

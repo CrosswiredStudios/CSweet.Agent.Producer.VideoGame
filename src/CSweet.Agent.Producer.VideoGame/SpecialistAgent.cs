@@ -23,7 +23,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string PlanningCommitmentPrefix = "producer-planning:";
     private const string LegacyHiringWait = "The initial Technical Director, engineering, and QA coverage proposal is awaiting hiring. Team-board planning starts after technical leadership is hired.";
     internal const string InitialHiringWait = "Planning staffing: ";
-    internal const string PlanningRecoveryMarker = "Producer planning recovery generation 3";
+    internal const string PlanningRecoveryMarker = "Producer planning recovery generation 4";
     private const string EstimationCommitmentPrefix = "producer-estimation:";
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";

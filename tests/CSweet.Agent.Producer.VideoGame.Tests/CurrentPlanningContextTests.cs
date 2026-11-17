@@ -8,8 +8,9 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed partial class ProgressivePlanningTests
 {
     [Theory]
-    [InlineData("Ready")][InlineData("PendingApproval")]
-    public async Task DraftSelectionUsesCurrentStaffingAndCanProceedBeforeResourceExecutionApproval(string resourceStatus)
+    [InlineData("Ready",0)][InlineData("PendingApproval",0)]
+    [InlineData("Ready",1)][InlineData("Ready",4)]
+    public async Task DraftSelectionUsesCurrentStaffingAndCanProceedBeforeResourceExecutionApproval(string resourceStatus, int changes)
     {
         var f = new Fixture(adaptive: true, independent: true);
         var author = Guid.NewGuid(); var briefId = Guid.NewGuid(); var revisionId = Guid.NewGuid();
@@ -21,7 +22,8 @@ public sealed partial class ProgressivePlanningTests
             TeamId = f.Cycle.TeamId, Status = "Approved", DeliveryStatus = "Fulfilled", Roles = [] };
         var resource = JsonSerializer.Deserialize<ResourceRequestState>("{}")! with { Id = Guid.NewGuid(), WorkstreamId = f.Cycle.WorkstreamId, Status = resourceStatus, Revision = 1 };
         var states = new Dictionary<string, AgentOperatingStateResponse>(); var models = 0;
-        f.Runtime.RegisterCapability<TeamRosterV2Request, TeamRosterV2Response>(PlatformCapabilities.TeamRosterReadV2, (_, _) => Task.FromResult(new TeamRosterV2Response(roster, f.Cycle.WorkstreamId)))
+        var reads = 0;
+        f.Runtime.RegisterCapability<TeamRosterV2Request, TeamRosterV2Response>(PlatformCapabilities.TeamRosterReadV2, (_, _) => Task.FromResult(new TeamRosterV2Response(roster with { Revision = roster.Revision + Math.Min(reads++,changes) }, f.Cycle.WorkstreamId)))
             .RegisterCapability<ResourceChangeReadRequest, ResourceChangeReadResponse>(PlatformCapabilities.ResourceChangeRead, (_, _) => Task.FromResult(new ResourceChangeReadResponse([staffing])))
             .RegisterCapability<ResourceRead, IReadOnlyList<ResourceRequestState>>(ResourceCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<ResourceRequestState>>([resource]))
             .RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead, (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([]))
@@ -40,8 +42,14 @@ public sealed partial class ProgressivePlanningTests
         var choices = SpecialistAgent.SuccessorCandidates(f.Outline.DeliveryItems, new HashSet<string>());
         var board = new WorkBoardDetail(new(f.Cycle.BoardId, "Game", "", false, false, 1, []) { WorkstreamId = f.Cycle.WorkstreamId, TeamId = f.Cycle.TeamId }, [], []);
         async Task<SpecialistAgent.ReviewEffects> Review() => await agent.ReviewAdaptivePlanAsync(f.Cycle, staleRoster, progress, choices, board, [], [], f.Evidence, handoff, f.Runtime.CreateContext(), default);
-        Assert.Equal(choices[0].ProposalKey, (await Review()).Story);
-        Assert.Equal(choices[0].ProposalKey, (await Review()).Story); Assert.Equal(1, models);
+        var first = await Review();
+        if (changes == 4)
+        {
+            Assert.Equal("wait",first.Disposition); Assert.True(first.KeepDraft); Assert.Null(first.Story);
+            Assert.Equal(2,models); Assert.Equal(4,reads); return;
+        }
+        Assert.Equal(choices[0].ProposalKey, first.Story);
+        Assert.Equal(choices[0].ProposalKey, (await Review()).Story); Assert.Equal(changes == 0 ? 1 : 2, models);
         Assert.Equal(resourceStatus, resource.Status); // Draft selection never approved or provisioned anything.
     }
 }

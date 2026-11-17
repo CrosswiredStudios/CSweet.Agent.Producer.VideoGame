@@ -18,4 +18,5 @@
     <None Update="Fixtures/brickfall-staffing-return.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup><None Update="Fixtures/shardfall-stalled-review.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
+  <ItemGroup><None Update="Fixtures/prism-self-consultation.json" CopyToOutputDirectory="PreserveNewest" /></ItemGroup>
 </Project>

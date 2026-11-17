@@ -234,6 +234,7 @@ public sealed partial class SpecialistAgent
                     var livePlans = await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token);
                     var liveSprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
                     var decision = await review(progress, eligible, liveBoard, livePlans, liveSprints);
+                    if (decision.Disposition == "wait") return new(progress, Waiting: decision.Guidance);
                     if (prior.Count > 0 && !HasAcceptedProgressiveIncrements(priorPlan, prior.ToArray(), liveBoard.Items, livePlans, true))
                         return new(progress, Waiting: "The provisional Story still needs its prerequisite acceptance.");
                     if (decision.Story != pending || !decision.KeepDraft && progress.AdmissionReviewBasis is { } reviewed && reviewed != decision.Basis)
@@ -348,6 +349,10 @@ public sealed partial class SpecialistAgent
                     Waiting: "The next Story is being drafted against the current increment. It has no scheduled or executable work.");
             return new(progress with { RefinementSessionId = session.Id, PendingStoryKey = next, AdmissionReviewBasis = assessment?.Basis, AcceptedBases = evidence.Adaptive ? new Dictionary<string,string>(progress.AcceptedBases) { [next] = basis } : progress.AcceptedBases }, Waiting:
                 "The complete scope outline is published. The next dependency-ready Story has a durable refinement request.");
+        }
+        catch (PlanningDependencyPendingException pending)
+        {
+            return new(progress, Waiting: pending.Message);
         }
         catch (Exception error) when (error is InvalidOperationException or JsonException)
         {
