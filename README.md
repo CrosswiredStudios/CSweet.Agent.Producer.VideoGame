@@ -1,4 +1,6 @@
-# Producer 6.21.3
+# Producer 6.21.4
+
+After an update, a planning commitment that stopped unexpectedly before its first Story was published is reassessed once. See the [6.21.4 release notes](releases/6.21.4.md).
 
 A planning responsibility that was already resolved stays resolved until the approved brief changes, and a failed issue update no longer stops the Producer from reviewing and publishing independent work. See the [6.21.3 release notes](releases/6.21.3.md).
 

@@ -624,7 +624,16 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existing.BlockReason?.StartsWith("Repeated issue:", StringComparison.Ordinal) == true &&
                 existing.BlockReason.Contains("execution stopped unexpectedly", StringComparison.Ordinal))
             {
-                if (progressiveContinuation.Fingerprint is not { } acceptedFingerprint ||
+                // An accepted increment normally authorizes one retry after a crash. Before any Story is published
+                // there is no such acceptance, so a crash there could never be released. A new recovery generation
+                // (changed planning contract after an update) authorizes one reassessment of that exact revision;
+                // another failure advances the revision and is not retried.
+                var recoveryGeneration = dependencyChangedAt > existing.UpdatedAt &&
+                    existing.WorkContext?.WorkstreamId == workContext.WorkstreamId && existing.WorkContext?.TeamId == workContext.TeamId &&
+                    existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
+                var acceptedFingerprint = progressiveContinuation.Fingerprint ??
+                    (recoveryGeneration ? "planning-contract:" + OwnershipContractRevision : null);
+                if (acceptedFingerprint is null ||
                     !await AuthorizeContinuationRecoveryAsync(existing, acceptedFingerprint, context, cancellationToken)) return existing;
             }
             if (prerequisiteCleared && existing.Status == PersonalTodoStatuses.Blocked &&

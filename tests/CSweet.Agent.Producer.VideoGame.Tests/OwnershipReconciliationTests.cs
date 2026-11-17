@@ -60,6 +60,41 @@ public sealed partial class ProgressivePlanningTests
     }
 
     [Fact]
+    public async Task AnUpdatedProducerReleasesAPlanningCrashOnceBeforeAnyStoryIsPublished()
+    {
+        // Prism Break: the commitment crashed before its first Story was published, so no accepted
+        // increment existed to authorize a retry and the installed fix never ran.
+        var states = new Dictionary<string, AgentOperatingStateResponse>();
+        var source = new PersonalTodoWorkContext(WorkstreamId: Guid.NewGuid(), TeamId: Guid.NewGuid(), SourceFingerprint: "approved");
+        var item = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with { Id = Guid.NewGuid(), Revision = 35,
+            CorrelationId = "producer-planning:crashed", WorkContext = source, Status = PersonalTodoStatuses.Blocked,
+            BlockReason = "Repeated issue: I couldn\u2019t finish this attempt because execution stopped unexpectedly.",
+            UpdatedAt = DateTimeOffset.UtcNow.AddHours(-1) };
+        var requeues = 0;
+        var runtime = new AgentTestRuntime()
+            .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(r.StateKey))))
+            .RegisterCapability<AgentOperatingStateWriteRequest, AgentOperatingStateResponse>(PlatformCapabilities.AgentOperatingStateWrite,
+                (r, _) => Task.FromResult(states[r.StateKey] = new(Guid.NewGuid(), r.StateKey, r.SchemaId, r.SchemaVersion, "Active", r.SourceRevisions,
+                    [], "", [], Guid.NewGuid(), r.Payload, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)))
+            .RegisterCapability<object, PersonalTodoDirectory>(PersonalTodoCapabilities.Read, (_, _) => Task.FromResult(new PersonalTodoDirectory(
+                [new(Guid.NewGuid(), Guid.NewGuid(), "Producer", null, null, 1, [item])])))
+            .RegisterCapability<RequeuePersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Requeue, (_, _) => {
+                requeues++; item = item with { Status = PersonalTodoStatuses.Ready, Revision = item.Revision + 1, UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(1) };
+                return Task.FromResult(item); });
+        var context = runtime.CreateContext();
+        var unpublished = new SpecialistAgent.ProgressiveContinuation(null);
+        Task Ensure(DateTimeOffset? changed) => SpecialistAgent.EnsureCommitmentAsync(item.CorrelationId!, "Plan", "Plan", "High", source, context, default,
+            progressiveContinuation: unpublished, dependencyChangedAt: changed);
+        await Ensure(null); Assert.Equal(0, requeues); // The same release has no new reason to retry.
+        var changed = DateTimeOffset.UtcNow;
+        await Ensure(changed); Assert.Equal(1, requeues);
+        // The reassessment crashes again: the same generation cannot release it a second time.
+        item = item with { Status = PersonalTodoStatuses.Blocked };
+        await Ensure(changed); await Ensure(changed); Assert.Equal(1, requeues);
+    }
+
+    [Fact]
     public async Task RewordedFindingsShareOneCommissionAndAdviceNeedsAnOwnedResolutionBeforeRelease()
     {
         var f = new Fixture(adaptive: true, independent: true); var producer = Guid.NewGuid();
