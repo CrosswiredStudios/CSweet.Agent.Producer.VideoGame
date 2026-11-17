@@ -89,5 +89,12 @@ public sealed class PlanningDirectionRecoveryTests
         await SpecialistAgent.EnsurePlanningSessionAsync(member, cycle.BoardId, cycle, "Planning", "Plan delivery",
             "video-game.production.technical-delivery-proposal.v1", [], [], runtime.CreateContext(), default);
         Assert.Equal($"producer-planning-session:{cycle.PlanningFingerprint}:{target:N}", requests[2].IdempotencyKey);
+        // A failed generation is asked again under a new key; replaying the same retry reuses its request.
+        foreach (var retry in new[] { 1, 1, 2 })
+            await SpecialistAgent.EnsurePlanningSessionAsync(member, cycle.BoardId, cycle, "Planning", "Plan delivery",
+                "video-game.production.technical-delivery-proposal.v1", [], [], runtime.CreateContext(), default, generationRetry: retry);
+        Assert.Equal(requests[3].IdempotencyKey, requests[4].IdempotencyKey);
+        Assert.Equal(3, new[] { requests[2], requests[3], requests[5] }.Select(r => r.IdempotencyKey).Distinct().Count());
+        Assert.InRange(requests[5].IdempotencyKey.Length, 1, 160);
     }
 }

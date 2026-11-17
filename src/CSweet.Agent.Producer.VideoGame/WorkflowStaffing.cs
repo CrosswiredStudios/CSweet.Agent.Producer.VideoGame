@@ -214,7 +214,7 @@ public sealed partial class SpecialistAgent
             return PersonalTodoResult.Blocked("The Producer no longer manages this board and team.");
         var workstream = await context.Platform.ReadWorkstreamAsync(new(project), token);
         var roster = await ReadManagerTeamAsync(team, context, token);
-        if (roster is null) return PersonalTodoResult.Blocked("The approved team is unavailable.");
+        if (roster is null) return PersonalTodoResult.RetryLater("The approved team is unavailable.");
         string? gap;
         try
         {

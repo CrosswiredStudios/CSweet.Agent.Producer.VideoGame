@@ -767,11 +767,11 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             ProjectStateKeys.Portfolio("producer"), cancellationToken);
         var operatingState = state?.Payload;
         if (operatingState is null || !operatingState.AcceptedHandoffs.TryGetValue(workstreamId, out var handoff))
-            return PersonalTodoResult.Blocked("The exact Video Game Director handoff is no longer available.");
+            return PersonalTodoResult.RetryLater("The accepted Video Game Director handoff could not be read from planning state.");
 
         var roster = await ReadManagerTeamAsync(teamId, context, cancellationToken, workstreamId);
         if (roster is null || roster.Revision < 1)
-            return PersonalTodoResult.Blocked("The active team roster is unavailable.");
+            return PersonalTodoResult.RetryLater("The active team roster is unavailable.");
         var designer = SelectRoleMember(roster, VideoGameRoleKeys.GameDesigner);
         var technicalDirector = SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector);
 
@@ -857,7 +857,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 (roleRepair is null ? RoleBoundary : RoleRepairObjective(roleRepair)),
             "video-game.production.technical-delivery-proposal.v1", memberDigests, managerDirections, context, cancellationToken,
             roleRepair is null ? null : RoleRepairContext(roleRepair), reusePrior ? priorCycle?.TechnicalDirectorSessionId : null,
-            adaptive: adaptive, progressivePlanning: roleRepair is null && !separateDesignerBacklog, roleRepair: roleRepair, retainedProgress: priorCycle?.Progressive);
+            adaptive: adaptive, progressivePlanning: roleRepair is null && !separateDesignerBacklog, roleRepair: roleRepair, retainedProgress: priorCycle?.Progressive,
+            generationRetry: priorCycle?.GenerationRetries ?? 0);
         if (roleRepair is not null && !roleRepairPublished && designer is null)
             technicalSession = await EnsureRoleRepairCorrectionAsync(roleRepair, technicalSession, cycle, memberDigests, managerDirections, context, cancellationToken);
         var designerSession = !separateDesignerBacklog ? technicalSession : await EnsurePlanningSessionAsync(designer!, boardId, cycle,
@@ -879,6 +880,17 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         };
         await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
 
+        if (roleRepair is null && IsTechnicalPlanningGenerationBlock(technicalSession) &&
+            (designerSession.Id == technicalSession.Id || designerSession.Status is not (AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)))
+        {
+            // The Technical Director's model could not produce a valid page. That may succeed on another
+            // attempt, so request a fresh generation on the retry. The runtime's retry budget bounds this
+            // and blocks with the specialist's exact diagnostic when it is spent.
+            priorCycle = priorCycle with { GenerationRetries = priorCycle.GenerationRetries + 1, UpdatedAt = DateTimeOffset.UtcNow };
+            await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
+            return PersonalTodoResult.RetryLater("Technical Director planning generation failed: " + technicalSession.Turns.Last(x =>
+                x.SpeakerOrganizationUserId == technicalSession.Target.OrganizationUserId && x.Disposition == "Blocked").Content);
+        }
         if (designerSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled ||
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
             return PersonalTodoResult.Blocked(IsTechnicalPlanningGenerationBlock(technicalSession)
@@ -904,7 +916,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             designerProposal.Cycle.PlanningFingerprint != cycle.PlanningFingerprint ||
             technicalProposal.Cycle.PlanningFingerprint != cycle.PlanningFingerprint ||
             technicalProposal.Cycle.ApprovedPackageDigest != cycle.ApprovedPackageDigest)
-            return PersonalTodoResult.Blocked("The completed planning sessions do not contain current, correlated proposal artifacts.");
+        {
+            // The returned proposal belongs to different inputs. Ask for a fresh one on the retry.
+            priorCycle = priorCycle with { GenerationRetries = priorCycle.GenerationRetries + 1, UpdatedAt = DateTimeOffset.UtcNow };
+            await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
+            return PersonalTodoResult.RetryLater("The completed planning sessions do not contain current, correlated proposal artifacts.");
+        }
 
         var progressiveMode = ReadProgressiveEvidence(technicalArtifact!) is not null;
         if (adaptive && ReadProgressiveEvidence(technicalArtifact!)?.Adaptive != true)
@@ -1068,7 +1085,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 source with { SourceFingerprint = reconciledDigest },
                 context, cancellationToken);
             if (roleRepair?.ScopeDirection is not null && estimation.Status == "Blocked" &&
-                estimation.BlockReason == "The candidate planning evidence changed.")
+                estimation.BlockReason?.Contains("The candidate planning evidence changed.", StringComparison.Ordinal) == true)
                 await context.Platform.PersonalTodo.RequeueAsync(new(estimation.Id, estimation.Revision,
                     BoundedMutationKey($"scope-readiness-recovered:{estimation.Id:N}:{estimation.Revision}")), cancellationToken);
         }
@@ -1106,12 +1123,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 
         var roster = await ReadManagerTeamAsync(teamId, context, cancellationToken, workstreamId);
         if (roster is null)
-            return PersonalTodoResult.Blocked("The current team roster is unavailable.");
+            return PersonalTodoResult.RetryLater("The current team roster is unavailable.");
         var workstream = await context.Platform.ReadWorkstreamAsync(new ReadWorkstreamRequest(workstreamId), cancellationToken);
         var planningState = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), cancellationToken);
         if (planningState?.Payload.PlanningCycles.TryGetValue(workstreamId, out var currentCycle) != true ||
             currentCycle is null || currentCycle.ReconciledDigest != source.SourceFingerprint)
-            return PersonalTodoResult.Blocked("The candidate planning evidence changed.");
+            return PersonalTodoResult.RetryLater("The candidate planning evidence changed.");
         await BindAvailableWorkAsync(boardId, roster, workstream.ProfileDefinitionDigest ?? string.Empty, context, cancellationToken);
         var board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         IReadOnlySet<Guid> authorizedCorrections=source.WorkItemId.HasValue
@@ -1192,13 +1209,21 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (partner is null)
                 return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                     "Waiting for an available estimate-review partner for the Producer-owned work.");
+            var estimateScope = "estimate:" + requestFingerprint + ":" + partner.AgentInstallationId?.ToString("N");
+            var estimateAttempt = await ReadRegenerationAsync(estimateScope, context, cancellationToken);
             var session = await EnsureTypedBoardSessionAsync(partner, boardId,
                 $"{role} sprint estimate and capacity",
                 "Supply estimates, confidence, assumptions, blockers, and available sprint capacity for only the exact accountable-role items.",
                 ["Every requested item has a role-owned estimate.", "Planning revision and digest match.",
                     "Capacity and blockers are explicit."],
                 "video-game.production.role-estimate-request.v1", requestFingerprint, requestPayload,
-                $"producer-estimation-session:{requestFingerprint}:{partner.AgentInstallationId:N}", context, cancellationToken);
+                $"producer-estimation-session:{requestFingerprint}:{partner.AgentInstallationId:N}" + RegenerationSuffix(estimateAttempt), context, cancellationToken);
+            if (session.Status is AgentCoordinationStatuses.Blocked or "Failed")
+            {
+                // A failed estimate request used to be reported as pending and polled forever.
+                await RecordRegenerationAsync(estimateScope, estimateAttempt, context, cancellationToken);
+                return PersonalTodoResult.RetryLater($"The {role} estimate request failed: {CollaboratorDiagnostic(session)}");
+            }
             if (session.Status != AgentCoordinationStatuses.Completed)
             {
                 pendingRoles.Add($"{role} ({session.Status})");
@@ -1213,7 +1238,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 proposal.PlanningDigest != planningDigest ||
                 !proposal.Estimates.Select(x => x.WorkItemId).OrderBy(x => x).SequenceEqual(expectedIds) ||
                 proposal.Estimates.Any(x => x.EstimatePoints <= 0))
-                return PersonalTodoResult.Blocked($"The {role} estimate proposal is stale, incomplete, or not bound to the candidate scope.");
+            {
+                await RecordRegenerationAsync(estimateScope, estimateAttempt, context, cancellationToken);
+                return PersonalTodoResult.RetryLater($"The {role} estimate proposal is stale, incomplete, or not bound to the candidate scope.");
+            }
             roleProposals.Add((session, author, new(artifact.Key,artifact.Digest,null), proposal,
                 WorkCapacityAssessment.FromEvidence(artifact.Payload, proposal.AvailableSprintCapacity)));
         }
@@ -1359,7 +1387,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 DateTimeOffset.UtcNow.Date, DateTimeOffset.UtcNow.Date.AddDays(14),
                 SprintCreationKey(boardId, planningDigest, sequence)) { Sequence = sequence }, cancellationToken);
         if (sprint.Status != "Planned" || sprint.Sequence is { } returnedSequence && returnedSequence != sequence)
-            return PersonalTodoResult.Blocked("Sprint creation returned a historical or conflicting sprint; no candidate scope was changed.");
+            return PersonalTodoResult.RetryLater("Sprint creation returned a historical or conflicting sprint; no candidate scope was changed.");
         foreach (var candidate in selectedCandidates)
         {
             var current = (await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken)).Items.Single(x => x.Id == candidate.Id);
@@ -1498,7 +1526,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         IReadOnlyList<string> managerDirections,
         AgentRuntimeContext context,
         CancellationToken cancellationToken, string? additionalContext = null, Guid? existingSessionId = null, bool progressivePlanning = false,
-        RoleRepairRequest? roleRepair = null, ProgressivePlanningProgress? retainedProgress = null, bool adaptive = false)
+        RoleRepairRequest? roleRepair = null, ProgressivePlanningProgress? retainedProgress = null, bool adaptive = false, int generationRetry = 0)
     {
         var reviewDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(managerDirections));
         var directionReview = progressivePlanning && retainedProgress is not null &&
@@ -1552,6 +1580,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + (adaptive ? ":adaptive-v1" : ":progressive-v1")),
                 InitialMessage = "Publish the complete approved scope as an outline first. Do not detail the entire game. " + start.InitialMessage,
                 Artifact = ProgressiveRequestArtifact(cycle, members, new("Outline", reviewDigest, Adaptive: adaptive)) };
+        // After a failed generation the same request key would return the same failed session forever.
+        if (generationRetry > 0)
+            start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + ":generation-retry-" + generationRetry) };
         var session = await StartAsync(start);
         if (NeedsPlanningContextRecovery(session))
             session = await StartAsync(

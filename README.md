@@ -1,4 +1,6 @@
-# Producer 6.22.0
+# Producer 6.22.1
+
+When the Technical Director cannot generate a valid plan, the Producer asks again later instead of blocking. See the [6.22.1 release notes](releases/6.22.1.md).
 
 Planning no longer stops on a side check or a recoverable failure. The scope-ownership review tracks gaps beside the plan instead of holding work, and a rejected model reply is retried later instead of blocking. See the [6.22.0 release notes](releases/6.22.0.md).
 

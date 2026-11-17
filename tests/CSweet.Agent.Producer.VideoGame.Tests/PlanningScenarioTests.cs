@@ -141,6 +141,38 @@ public sealed partial class ProgressivePlanningTests
     }
 
     [Fact]
+    public async Task Journey_a_failed_story_refinement_is_asked_again_with_its_reason()
+    {
+        var j = new PlanningJourney();
+        var ownership = new SpecialistAgent.OwnershipReview([new("Playable loop", ["approved"], [new("prototype", "The first Epic owns the loop")]) { ObligationKey = "loop" }], []);
+        var kickoff = await j.PassAsync(null, ownership);
+        Assert.Equal("prototype.story-1", kickoff.Progress.PendingStoryKey);
+
+        // The Technical Director's model could not produce the Story page.
+        const string diagnostic = "Page failed after three attempts: approaching Epic (finish=stop): Assign every approved Epic criterion to a Story.";
+        j.F.Refinement = j.F.Refinement! with { Status = "Blocked",
+            Turns = [new(Guid.NewGuid(), 1, j.F.Person.OrganizationUserId, "Blocked", diagnostic, DateTimeOffset.UtcNow)] };
+        var failed = await j.PassAsync(kickoff, ownership);
+        Assert.Null(failed.Blocker); Assert.Contains("Assign every approved Epic criterion", failed.Retry);
+        Assert.Equal(1, failed.Progress.StoryRetries); Assert.Null(failed.Progress.PendingStoryKey);
+
+        // The retry requests the same Story under a new key and says what was wrong.
+        var retried = await j.PassAsync(failed, ownership);
+        Assert.Null(retried.Retry); Assert.Null(retried.Blocker);
+        Assert.Equal("prototype.story-1", retried.Progress.PendingStoryKey);
+        Assert.Equal(2, j.F.Starts.Count);
+        Assert.NotEqual(j.F.Starts[0].IdempotencyKey, j.F.Starts[1].IdempotencyKey);
+        Assert.Contains("The previous attempt could not be used", j.F.Starts[1].InitialMessage);
+        Assert.Contains("Assign every approved Epic criterion", j.F.Starts[1].InitialMessage);
+
+        // A usable Story clears the retry state.
+        j.F.CompleteRefinement();
+        var admitted = await j.PassAsync(retried, ownership);
+        Assert.Equal(j.F.Refinement!.Id, admitted.Session?.Id);
+        Assert.Equal(0, admitted.Progress.StoryRetries); Assert.Null(admitted.Progress.StoryRetryReason);
+    }
+
+    [Fact]
     public async Task Journey_a_binding_conflict_holds_only_its_own_scope_while_independent_work_is_selected()
     {
         var j = new PlanningJourney();

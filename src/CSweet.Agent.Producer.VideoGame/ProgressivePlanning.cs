@@ -218,15 +218,25 @@ public sealed partial class SpecialistAgent
                 if (currentSession.Target.OrganizationUserId != outlineSession.Target.OrganizationUserId ||
                     currentSession.Initiator.OrganizationUserId != outlineSession.Initiator.OrganizationUserId || currentSession.BoardSource?.BoardId != boardId)
                     throw new InvalidOperationException("The refinement session no longer belongs to this board and planning authority.");
-                if (currentSession.Status is "Failed" or "Blocked" or "Cancelled")
-                    return new(progress, Blocker: PlanningRecoveryMarker + ": The current increment's refinement is blocked. Preserve the published outline and address the specialist diagnostic before retrying: " + currentSession.FinalSummary);
+                if (currentSession.Status == "Cancelled")
+                    return new(progress, Blocker: PlanningRecoveryMarker + ": The current increment's refinement was cancelled. Preserve the published outline and address the specialist diagnostic before retrying: " + currentSession.FinalSummary);
+                if (currentSession.Status is "Failed" or "Blocked")
+                    // The Technical Director's attempt failed. Set it aside and ask again on the retry;
+                    // the published outline and accepted Stories are untouched.
+                    return RetryStory(progress, CollaboratorDiagnostic(currentSession), "The Technical Director could not refine the selected Story: ");
                 if (currentSession.Status != "Completed") return new(progress, Waiting: "The complete scope outline is published. The Technical Director is refining only the next increment.");
                 currentArtifact = currentSession.Turns.LastOrDefault(x => x.SpeakerOrganizationUserId == currentSession.Target.OrganizationUserId &&
                     x.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1")?.Artifact
                     ?? throw new InvalidOperationException("The completed refinement has no authoritative technical proposal.");
                 current = currentArtifact.Payload.Deserialize<GameTechnicalDeliveryProposalV1>()!;
                 var currentEvidence = ReadProgressiveEvidence(currentArtifact) ?? throw new InvalidOperationException("The refinement omitted progressive scope evidence.");
-                ValidateProgressiveProposal(outline, evidence, current, currentEvidence, progress.DetailedStoryKeys, progress.PendingStoryKey);
+                try { ValidateProgressiveProposal(outline, evidence, current, currentEvidence, progress.DetailedStoryKeys, progress.PendingStoryKey); }
+                catch (InvalidOperationException invalid) when (progress.PendingStoryKey is not null)
+                {
+                    // A returned Story that fails validation is unusable work, not a broken plan. Ask for it
+                    // again with the reason. A failure on already admitted work still reports a defect below.
+                    return RetryStory(progress, invalid.Message, "The returned Story did not pass validation: ");
+                }
                 if (evidence.Adaptive && progress.PendingStoryKey is string pending && review != null)
                 {
                     var prior = progress.DetailedStoryKeys.ToHashSet();
@@ -250,7 +260,8 @@ public sealed partial class SpecialistAgent
                                 ? $"The Producer retained the same Story for revision. {decision.Guidance}"
                                 : "The Producer selected different work. The provisional refinement is retained outside the board.") { OwnNextStep = true };
                 }
-                progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null, AdmissionReviewBasis = null };
+                progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null, AdmissionReviewBasis = null,
+                    StoryRetries = 0, StoryRetryReason = null };
                 if (progress.ScheduledArtifactDigest != currentArtifact.Digest || needsAuthorityReconciliation)
                     return new(progress, currentSession) { ReviewedAuthorityQuestions = reviewedQuestions };
             }
@@ -319,8 +330,9 @@ public sealed partial class SpecialistAgent
                     Guid.Parse(technicalDirector.EmployeeId), boardId, "Refine next increment: " + storyKey,
                     "Refine this increment against the approved Epic. State assumptions about pending prerequisites and how to verify them. This request grants no execution authority.",
                     ["The exact frozen scope outline is preserved.", "Only the requested Story is detailed.", "Every original criterion survives in execution/QA tasks."],
-                    "Refine Story " + storyKey + " within the existing approved scope. Other Stories stay planned; no new creative approval or completed work is inferred. " + assessment?.Guidance,
-                    BoundedMutationKey("progressive-story:" + evidence.ScopeKey + ":" + evidence.OutlineDigest + ":" + storyKey + (evidence.Adaptive ? ":" + draftBasis + ":" + current.ProposalDigest : "")),
+                    "Refine Story " + storyKey + " within the existing approved scope. Other Stories stay planned; no new creative approval or completed work is inferred. " + assessment?.Guidance +
+                        (progress.StoryRetryReason is { } previous ? " The previous attempt could not be used: " + previous + " Correct that in this attempt." : ""),
+                    BoundedMutationKey("progressive-story:" + evidence.ScopeKey + ":" + evidence.OutlineDigest + ":" + storyKey + (evidence.Adaptive ? ":" + draftBasis + ":" + current.ProposalDigest : "") + RegenerationSuffix(progress.StoryRetries)),
                     ProgressiveRequestArtifact(cycle, members, request)), token);
             }
             string BasisFor(string storyKey) => ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
@@ -381,6 +393,14 @@ public sealed partial class SpecialistAgent
                 "Progressive planning retained the existing scope but could not advance: " + error.Message +
                 " Escalate through the reporting manager for a code correction. Retry only after its cause changes; accepted scope and saved specialist output are retained.");
         }
+    }
+
+    private static ProgressiveAdvance RetryStory(ProgressivePlanningProgress progress, string reason, string description)
+    {
+        reason = reason.ReplaceLineEndings(" ").Trim();
+        if (reason.Length > 500) reason = reason[..500];
+        return new(progress with { RefinementSessionId = progress.LastPublishedSessionId, PendingStoryKey = null, AdmissionReviewBasis = null,
+            StoryRetries = progress.StoryRetries + 1, StoryRetryReason = reason }) { Retry = description + reason };
     }
 
     internal static GameTechnicalDeliveryProposalV1 RetainScopeAfterPlanningDirection(GameTechnicalDeliveryProposalV1 reviewed,

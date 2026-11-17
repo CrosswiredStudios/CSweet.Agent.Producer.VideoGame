@@ -90,6 +90,10 @@ public sealed record ProducerPlanningCycleState(
     public string? OwnershipCorrection { get; init; }
     public IReadOnlyList<PlanningReconciliationReference> PlanningReconciliations { get; init; } = [];
     public IReadOnlyList<string> OwnershipHeldProposalKeys { get; init; } = [];
+    // How many times the Technical Director's planning generation failed for this cycle. Each failure
+    // requests a fresh generation on the next retry instead of rereading the same failed session.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public int GenerationRetries { get; init; }
     public IReadOnlyList<string> OutstandingAuthorityQuestions { get; init; } = [];
     public IReadOnlyList<string> EngineeringPrerequisiteKeys { get; init; } = [];
     public string? AuthorityDecisionFingerprint { get; init; }
@@ -116,6 +120,12 @@ public sealed record ProgressivePlanningProgress(string ScopeKey, string Outline
     public string? DraftDirection { get; init; }
     public IReadOnlyDictionary<string, ProvisionalStory> AdditionalDrafts { get; init; } = new Dictionary<string, ProvisionalStory>();
     public int? ScheduledSprintSequence { get; init; }
+    // Failed or unusable refinements of the Story being requested. A retry asks again under a new request key
+    // and tells the Technical Director what was wrong with the previous attempt.
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public int StoryRetries { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public string? StoryRetryReason { get; init; }
 }
 
 public sealed record ProvisionalStory(Guid SessionId, string Basis, string Direction, string ParentRevision);
