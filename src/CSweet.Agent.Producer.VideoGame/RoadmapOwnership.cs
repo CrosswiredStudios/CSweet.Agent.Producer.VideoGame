@@ -41,6 +41,12 @@ public sealed partial class SpecialistAgent
         public IReadOnlyList<string> Citations { get; init; } = [];
         public string? BriefTitle { get; init; }
         public string? BriefSummary { get; init; }
+        // A recorded hold carried from an earlier pass while its management decision is pending.
+        public bool RecordedHold { get; init; }
+        // The ownership review is advisory. A gap is tracked as an issue beside the plan and must be closed
+        // before final acceptance, but it does not stop work. Only an established conflict between binding
+        // requirements, which needs authority to settle, holds the scope it affects.
+        [JsonIgnore] public bool HoldsScope => RecordedHold || ConflictEvidence.Count > 0;
     }
     internal sealed record OwnershipReview(IReadOnlyList<OwnedCommitment> Commitments, IReadOnlyList<BoundOwnershipGap> Gaps)
     {
@@ -94,10 +100,9 @@ public sealed partial class SpecialistAgent
                 throw new InvalidOperationException("Roadmap commitment cites a source outside the accepted package.")).ToArray(), c.ProposalKeys }).ToArray();
         // Contributions change the review basis; old criterion-only reviews cannot be replayed.
         // Ownership is planning responsibility among approved sources, Epics, constraints, decisions and advice.
-        // Staffing and resource readiness are context for the reviewer, never a reason to judge ownership again:
-        // a toolchain becoming Ready must not produce a second verdict on an unchanged roadmap.
-        var resources = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
-        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v5", new { projection = OwnershipKey(cycle, roadmap), catalog,
+        // Staffing and resource readiness are not part of this judgment and are not supplied to it. The reviewer
+        // once reported a missing engineer as a gap while that hire was completing, which held the whole roadmap.
+        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v6", new { projection = OwnershipKey(cycle, roadmap), catalog,
             retainedIdentities = existing.Select(e => new { e.Key, e.IsCurrent }) });
         var reviewed = await PitchProtocol.CachedAsync(key, context, async () => {
             using var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
@@ -131,9 +136,13 @@ public sealed partial class SpecialistAgent
                 Account for every current retained obligation when approved sources are unchanged. Use null only for a genuinely distinct obligation.
                 Reviewed ownership remains meaningful evidence while its relevant approved constraints and sources remain applicable; do not reopen it for phrasing.
                 Empty gaps means every obligation has a meaningful owner; it never means all work is complete.
+                Staffing, hiring, capacity, assignment, tool or resource readiness are never ownership gaps. Who is on the team
+                and whether they are available is decided separately by staffing review, estimates and sprint commitment.
+                Do not report that a role, implementer or capacity is missing. If a retained obligation concerns only staffing,
+                capacity or readiness, return it as a commitment owned by the Epic whose work it serves.
                 """), new(ChatRole.User, JsonSerializer.Serialize(new { sources = sources.Select((s, index) => new { index, s.ApprovedText }),
                     existingObligations = existing.Select((e,index) => new { index,e.Statement,e.Sources,e.IsCurrent }),
-                    approvedBasisChanged = registry?.Payload.ApprovedDigest != cycle.ApprovedPackageDigest, currentResources = resources,
+                    approvedBasisChanged = registry?.Payload.ApprovedDigest != cycle.ApprovedPackageDigest,
                     proposed, epics = epics.Select((e,index) => new { index,e.ProposalKey,e.Title }),
                     evidence = catalog.Select((e,index) => new { index,e.Kind,e.Text,e.ScopeKeys }) }))],
                 new AgentModelJsonRequest<OwnershipDraft>("approved scope ownership") { CorrectionLimit = 1, Options = ResponseOptions(),
@@ -211,9 +220,9 @@ public sealed partial class SpecialistAgent
     }
 
     internal static IReadOnlySet<string> OwnershipHolds(IReadOnlyList<GameProposedWorkItemV1> items, OwnershipReview? review) =>
-        review is null || review.Gaps.Count == 0 ? new HashSet<string>() :
+        review is null || !review.Gaps.Any(g => g.HoldsScope) ? new HashSet<string>() :
             PlanningScopeOwnership.BlockedScopes(items.Select(i => new PlanningScopeDependency(i.ProposalKey,i.DependencyProposalKeys,i.ParentProposalKey)).ToArray(),
-                review.Gaps.SelectMany(g => g.AffectedProposalKeys));
+                review.Gaps.Where(g => g.HoldsScope).SelectMany(g => g.AffectedProposalKeys));
 
     internal static IReadOnlyList<GameProposedWorkItemV1> OwnershipCandidates(IReadOnlyList<GameProposedWorkItemV1> candidates,
         IReadOnlyList<GameProposedWorkItemV1> items, OwnershipReview? review)

@@ -25,14 +25,52 @@ public sealed partial class ProgressivePlanningTests
     [Theory]
     [InlineData("Scoped")]
     [InlineData("Unassessed")]
-    public async Task ConcreteOrUnknownPrerequisiteStillHoldsItsConsumers(string impact)
+    public async Task AnOrdinaryGapIsTrackedBesideThePlanAndDoesNotHoldWork(string impact)
     {
         var f = new Fixture(adaptive: true);
         var source = new GameOutcomeSource("approved", Guid.NewGuid(), Guid.NewGuid(), "digest", "Director", "The core must be feasible.");
         var review = SpecialistAgent.BindOwnership(new([], [new("Core feasibility", 0, "The missing capability affects the actual experiment.") {
             Impact = impact, AffectedEpicIndexes = impact == "Scoped" ? [0] : [] }]), [source], f.Outline.DeliveryItems);
         var result = await f.Advance(null, review);
-        Assert.Empty(f.Starts); Assert.False(result.Complete); Assert.NotEmpty(SpecialistAgent.OwnershipHolds(f.Outline.DeliveryItems, review));
+        // The ownership review is advisory: the first Story is still requested. The gap must close before
+        // final acceptance, and only a conflict between binding requirements holds scope.
+        Assert.Single(f.Starts); Assert.False(result.Complete); Assert.Null(result.Blocker);
+        Assert.Single(review.Gaps); Assert.Empty(SpecialistAgent.OwnershipHolds(f.Outline.DeliveryItems, review));
+    }
+
+    [Fact]
+    public async Task AFullyHeldRoadmapWaitsOnItsReconciliationInsteadOfAskingForAnImpossibleSelection()
+    {
+        // Fresh Prism Break, November 17: a gap on the first Epic held every candidate, the review was still
+        // asked to select, and three rejected replies blocked planning as a technical failure.
+        var f = new Fixture(adaptive: true);
+        var source = new GameOutcomeSource("approved", Guid.NewGuid(), Guid.NewGuid(), "digest", "Director", "The core must be feasible.");
+        var review = new SpecialistAgent.OwnershipReview([], [new("Core feasibility", "Two binding requirements cannot both hold.",
+            f.Outline.DeliveryItems.Select(i => i.ProposalKey).ToArray()) { BriefTitle = "Core feasibility is unresolved",
+            ConflictEvidence = new PlanningOwnershipEvidence[] { new("one", "Constraint", "Use only provided audio.", ["prototype"]), new("two", "Decision", "Provided audio is forbidden.", ["prototype"]) } }]);
+        Assert.NotNull(source);
+        var asked = 0;
+        var result = await SpecialistAgent.AdvanceProgressivePlanningAsync(f.Cycle.BoardId, f.Roster, f.Cycle, [], f.Member, f.Session, f.Artifact,
+            f.Outline, null, f.Runtime.CreateContext(), default, (_, _, _, _, _, _) => { asked++; throw new InvalidOperationException("No selection is possible."); }, review);
+        Assert.Equal(0, asked); Assert.Null(result.Blocker); Assert.False(result.Complete); Assert.Empty(f.Starts);
+        Assert.Contains("Core feasibility is unresolved", result.Waiting);
+    }
+
+    [Fact]
+    public void ARejectedReviewReplyNamesItsOwnCorrection()
+    {
+        SpecialistAgent.ReviewFact[] facts = [new("brief", Guid.NewGuid(), "approved", "Approved scope")];
+        var select = new SpecialistAgent.ReviewChoice("Start the first increment", 0, true, true, "After the spike", "Planning only",
+            [new("proceed", "The draft is current", null, [0])]) { Disposition = "select" };
+        string Rejected(SpecialistAgent.ReviewChoice choice, int candidates) =>
+            Assert.Throws<AgentModelJsonException>(() => SpecialistAgent.ValidateReview(choice, candidates, [], facts)).Message;
+        SpecialistAgent.ValidateReview(select, 1, [], facts);
+        Assert.Contains("No candidate is eligible", Rejected(select, 0));
+        Assert.Contains("zero-based integer index", Rejected(select with { NextCandidate = null }, 1));
+        Assert.Contains("0..0", Rejected(select with { NextCandidate = 3 }, 1));
+        Assert.Contains("evidenceIndexes within 0..0", Rejected(select with { Actions = [new("proceed", "Cited", null, [4])] }, 1));
+        Assert.Contains("null capability", Rejected(select with { Actions = [new("proceed", "Cited", "Engineering", [0])] }, 1));
+        SpecialistAgent.ValidateReview(select with { Disposition = "wait", NextCandidate = null }, 0, [], facts);
     }
 
     [Fact]
@@ -75,10 +113,11 @@ public sealed partial class ProgressivePlanningTests
     }
 
     [Fact]
-    public async Task FindingHoldsConsumersAndCannotConcludeTheProjectEvenWhenNoEligibleScopeRemains()
+    public async Task ABindingConflictHoldsConsumersAndCannotConcludeTheProjectEvenWhenNoEligibleScopeRemains()
     {
         var f = new Fixture(adaptive: true);
-        var ownership = new SpecialistAgent.OwnershipReview([], [new("Core behavior needs an owner", "Missing responsibility", ["prototype"])]);
+        var ownership = new SpecialistAgent.OwnershipReview([], [new("Core behavior has incompatible requirements", "Both cannot hold", ["prototype"]) {
+            ConflictEvidence = new PlanningOwnershipEvidence[] { new("one", "Constraint", "Use only provided audio.", ["prototype"]), new("two", "Decision", "Provided audio is forbidden.", ["prototype"]) } }]);
         var result = await f.Advance(null, ownership);
         Assert.Null(result.Blocker); Assert.False(result.Complete); Assert.NotNull(result.Waiting);
         Assert.Empty(f.Starts); Assert.Equal(2, f.Items.Count);
@@ -86,11 +125,12 @@ public sealed partial class ProgressivePlanningTests
     }
 
     [Fact]
-    public async Task ANewFindingRetainsAffectedDraftAndAllowsAnIndependentIncrementToBeSelected()
+    public async Task ANewBindingConflictRetainsAffectedDraftAndAllowsAnIndependentIncrementToBeSelected()
     {
         var f = new Fixture(adaptive: true, independent: true);
         var first = await f.Advance(null);
-        var ownership = new SpecialistAgent.OwnershipReview([], [new("Core review", "Unresolved", ["prototype"])]);
+        var ownership = new SpecialistAgent.OwnershipReview([], [new("Core review", "Unresolved", ["prototype"]) {
+            ConflictEvidence = new PlanningOwnershipEvidence[] { new("one", "Constraint", "Use only provided audio.", ["prototype"]), new("two", "Decision", "Provided audio is forbidden.", ["prototype"]) } }]);
         var next = await f.Advance(first.Progress, ownership);
         Assert.Null(next.Blocker); Assert.Equal("final.story-1", next.Progress.PendingStoryKey);
         Assert.Equal(first.Progress.RefinementSessionId, next.Progress.DraftSessionId);

@@ -8,7 +8,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal const string OwnershipContractRevision = "scoped-planning-recovery.v10";
+    internal const string OwnershipContractRevision = "scoped-planning-recovery.v11";
     internal sealed record PlanningContractReceipt(string Revision, DateTimeOffset ChangedAt);
 
     internal static async Task<DateTimeOffset> PlanningContractChangedAtAsync(Guid workstream, string fingerprint,
@@ -222,7 +222,13 @@ public sealed partial class SpecialistAgent
             transferred.UnionWith(legacy);
         }
         directory = await context.Platform.Issues.ReadAllAsync(cycle.BoardId, true, ct);
-        var heldRoots = directory.Issues.Where(i => i.Status == "Open" && i.Source == source).SelectMany(i => i.ScopeKeys).Distinct().ToArray();
+        // Only a binding conflict holds scope. Its hold continues while its management decision is pending,
+        // even if a later review words the finding differently. Ordinary gaps stay open as tracked issues.
+        var conflicts = ownership.Gaps.Where(g => g.ConflictEvidence.Count > 0).Select(g => g.ObligationKey).ToHashSet();
+        var previouslyHeld = state.OwnershipHeldProposalKeys.ToHashSet(StringComparer.Ordinal);
+        var heldRoots = directory.Issues.Where(i => i.Status == "Open" && i.Source == source &&
+                (conflicts.Contains(i.ObligationKey) || AwaitingDecision(i) && i.ScopeKeys.Any(previouslyHeld.Contains)))
+            .SelectMany(i => i.ScopeKeys).Distinct().ToArray();
         var known = proposal.DeliveryItems.Select(i => i.ProposalKey).ToHashSet(StringComparer.Ordinal);
         var held = PlanningScopeOwnership.BlockedScopes(proposal.DeliveryItems.Select(i => new PlanningScopeDependency(i.ProposalKey, i.DependencyProposalKeys, i.ParentProposalKey)).ToArray(),
             heldRoots.Where(known.Contains));

@@ -37,6 +37,8 @@ public sealed partial class SpecialistAgent
     internal sealed record ProgressiveAdvance(ProgressivePlanningProgress Progress, AgentCoordinationSession? Session = null,
         string? Waiting = null, string? Blocker = null, bool Complete = false)
     {
+        // The attempt failed for a reason that may clear by itself; the runtime retries it within a budget.
+        public string? Retry { get; init; }
         public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
         // The next move is the Producer's own, so no collaborator's completion will wake this commitment.
         public bool OwnNextStep { get; init; }
@@ -267,6 +269,14 @@ public sealed partial class SpecialistAgent
             var sprints = evidence.Adaptive || progress.ScheduledSprintSequence.HasValue ? await context.Platform.Work.ListSprintsAsync(boardId, token) : [];
             var detailed = progress.DetailedStoryKeys.ToHashSet();
             var candidates = evidence.Adaptive ? OwnershipCandidates(SuccessorCandidates(current.DeliveryItems, detailed), current.DeliveryItems, ownership) : [];
+            // Every remaining candidate is held by an open planning responsibility and no sprint has finished.
+            // There is nothing to select or report, so asking for a selection can only be rejected. Wait on the
+            // reconciliation that already owns the hold; it is re-read on the next pass.
+            var nothingSelectable = candidates.Count == 0 && ownership?.Gaps.Any(g => g.HoldsScope) == true && !sprints.Any(x => x.Status == "Completed");
+            if (evidence.Adaptive && nothingSelectable)
+                return new(progress, Waiting: "All eligible work is held by a conflict between binding requirements that awaits management direction: " +
+                    string.Join("; ", ownership!.Gaps.Where(g => g.HoldsScope).Select(g => g.BriefTitle ?? g.Statement).Distinct().Take(3)) +
+                    ". The returned draft is retained.");
             var assessment = evidence.Adaptive && review != null ? await review(progress, candidates, board, plans, sprints, null) : null;
             if (progress.ScheduledSprintSequence.HasValue)
             {
@@ -358,6 +368,12 @@ public sealed partial class SpecialistAgent
         catch (PlanningDependencyPendingException pending)
         {
             return new(progress, Waiting: pending.Message);
+        }
+        catch (AgentModelJsonException rejected)
+        {
+            // A reply the model could not get right is not a code defect and not a permanent stop. Current
+            // facts are read again on the retry; accepted scope and saved specialist output are retained.
+            return new(progress) { Retry = "A planning judgment was not accepted: " + rejected.Message };
         }
         catch (Exception error) when (error is InvalidOperationException or JsonException)
         {

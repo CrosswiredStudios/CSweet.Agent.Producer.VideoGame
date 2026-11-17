@@ -117,7 +117,7 @@ public sealed partial class SpecialistAgent
             admissionKey = "game-draft-admission:" + ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
                 modelContract = "draft-admission.v1", draft.SessionId, draft.ArtifactDigest, story = draft.Story.ProposalKey,
                 cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys,
-                holds = (ownership?.Gaps ?? []).Where(g => g.AffectedProposalKeys.Intersect(scope).Any())
+                holds = (ownership?.Gaps ?? []).Where(g => g.HoldsScope && g.AffectedProposalKeys.Intersect(scope).Any())
                     .Select(g => g.ObligationKey ?? g.Statement).Order(),
                 material = facts.Where(f => f.Kind is not ("item" or "container" or "current-execution" or "build"))
                     .OrderBy(f => f.Kind).ThenBy(f => f.Id) }));
@@ -350,22 +350,44 @@ public sealed partial class SpecialistAgent
     internal static ReviewChoice ValidateReview(ReviewChoice value, int candidateCount, IReadOnlyList<CoverageRoleChoice> roles, IReadOnlyList<ReviewFact> evidence,
         int? draftCandidate = null)
     {
-        if (string.IsNullOrWhiteSpace(value.NextGoal) || string.IsNullOrWhiteSpace(value.RevisitWhen) || string.IsNullOrWhiteSpace(value.FeelSummary) ||
-            (value.NextCandidate is int i && (i < 0 || i >= candidateCount)) ||
-            value.Disposition is not (null or "select" or "refine" or "wait" or "conclude") ||
-            (value.Disposition == "select" && value.NextCandidate is null) ||
-            (value.Disposition is "refine" or "wait" or "conclude" && value.NextCandidate is not null) ||
-            (value.Disposition == "conclude" && candidateCount > 0) ||
-            (value.Disposition is null && candidateCount > 0 && value.NextCandidate is null) ||
-            value.AdditionalDraftCandidates is { Count: > 0 } extras && (!value.DraftAhead || extras.Distinct().Count() != extras.Count ||
-                extras.Any(i => i < 0 || i >= candidateCount || i == value.NextCandidate)) ||
-            value.Actions is not { Count: > 0 } || value.Actions.Any(a => a == null ||
-                a.Kind is not ("proceed" or "resequence" or "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold") ||
-                string.IsNullOrWhiteSpace(a.Rationale) || a.EvidenceIndexes is not { Count: > 0 } || a.EvidenceIndexes.Any(i => i < 0 || i >= evidence.Count) ||
-                ((a.Kind is "hire" or "consult") ? !roles.Any(r => r.Capability == a.Capability) : a.Capability is not null) ||
-                a.Kind == "ceo-hold" && !a.EvidenceIndexes.Any(i => evidence[i].Kind == "item") ||
-                a.Kind == "qa-disposition" && !a.EvidenceIndexes.Any(i => evidence[i].Kind is "qa" or "finding")))
-            throw new AgentModelJsonException("Supply an eligible next candidate, supported actions, named capability choices, valid evidence indexes and an evidence-backed feel summary.");
+        // Each rule reports its own correction. One combined message gives a model nothing to act on,
+        // and a smaller model then repeats a different mistake on every attempt.
+        static AgentModelJsonException Reject(string correction) => new(correction);
+        if (string.IsNullOrWhiteSpace(value.NextGoal) || string.IsNullOrWhiteSpace(value.RevisitWhen) || string.IsNullOrWhiteSpace(value.FeelSummary))
+            throw Reject("Give non-empty nextGoal, revisitWhen and feelSummary.");
+        if (value.Disposition is not (null or "select" or "refine" or "wait" or "conclude"))
+            throw Reject("disposition must be select, refine, wait or conclude.");
+        if (candidateCount == 0 && (value.NextCandidate is not null || value.Disposition == "select"))
+            throw Reject("No candidate is eligible in this review, so nothing can be selected. Use disposition wait or refine with nextCandidate null, " +
+                "and name in an action what must change before work can be selected.");
+        if (value.NextCandidate is int i && (i < 0 || i >= candidateCount))
+            throw Reject($"nextCandidate must be a zero-based integer index into the supplied candidates (0..{candidateCount - 1}), never a key or title.");
+        if ((value.Disposition == "select" || value.Disposition is null && candidateCount > 0) && value.NextCandidate is null)
+            throw Reject($"disposition select needs nextCandidate as a zero-based integer index into the supplied candidates (0..{candidateCount - 1}).");
+        if (value.Disposition is "refine" or "wait" or "conclude" && value.NextCandidate is not null)
+            throw Reject("Only disposition select names a nextCandidate. Use null with refine, wait or conclude.");
+        if (value.Disposition == "conclude" && candidateCount > 0)
+            throw Reject("conclude is only valid when no candidates remain.");
+        if (value.AdditionalDraftCandidates is { Count: > 0 } extras && (!value.DraftAhead || extras.Distinct().Count() != extras.Count ||
+                extras.Any(i => i < 0 || i >= candidateCount || i == value.NextCandidate)))
+            throw Reject("additionalDraftCandidates needs draftAhead true and distinct candidate indexes other than nextCandidate. Use [] for the normal single draft.");
+        if (value.Actions is not { Count: > 0 }) throw Reject("Give at least one action.");
+        foreach (var a in value.Actions)
+        {
+            if (a == null || a.Kind is not ("proceed" or "resequence" or "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
+                throw Reject("Each action kind must be proceed, resequence, refine, consult, hire, spend, qa-disposition, escalate or ceo-hold.");
+            if (string.IsNullOrWhiteSpace(a.Rationale)) throw Reject($"The {a.Kind} action needs a rationale.");
+            if (a.EvidenceIndexes is not { Count: > 0 } || a.EvidenceIndexes.Any(i => i < 0 || i >= evidence.Count))
+                throw Reject($"The {a.Kind} action must cite evidenceIndexes within 0..{evidence.Count - 1} of the supplied evidence.");
+            if (a.Kind is "hire" or "consult" ? !roles.Any(r => r.Capability == a.Capability) : a.Capability is not null)
+                throw Reject(a.Kind is "hire" or "consult"
+                    ? $"The {a.Kind} action must copy one supplied Capability name exactly."
+                    : $"The {a.Kind} action uses null capability; only consult and hire name one.");
+            if (a.Kind == "ceo-hold" && !a.EvidenceIndexes.Any(i => evidence[i].Kind == "item"))
+                throw Reject("A ceo-hold must cite the evidence index of at least one otherwise ready board item it holds.");
+            if (a.Kind == "qa-disposition" && !a.EvidenceIndexes.Any(i => evidence[i].Kind is "qa" or "finding"))
+                throw Reject("A qa-disposition must cite a qa or finding evidence index.");
+        }
         if (value.NextCandidate is int selected && selected == draftCandidate && !value.KeepDraft && string.IsNullOrWhiteSpace(value.DraftRevisionReason))
             throw new AgentModelJsonException("Review the supplied task briefs. Keep a suitable draft, or provide draftRevisionReason naming the affected task or criterion, conflicting evidence and needed correction.");
         return value;

@@ -913,14 +913,24 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             ? reviewEvidence.ReviewedDirectionsDigest ?? reviewEvidence.DirectionsDigest : null;
         IReadOnlyList<string>? reviewedAuthorityQuestions = null;
         OwnershipReview? ownership = null;
+        string? ownershipFailure = null;
         if (adaptive && ReadProgressiveEvidence(technicalArtifact!) is { } roadmap)
         {
             try {
                 var contributions = await ReadOwnershipContributionsAsync(priorCycle, roadmap, handoff, context, cancellationToken);
                 ownership = await ReviewOwnershipAsync(cycle, technicalProposal, roadmap, ledger, managerDirections, context, cancellationToken, contributions);
             }
-            catch (InvalidOperationException ex) { return PersonalTodoResult.Blocked("Producer could not verify roadmap ownership: " + ex.Message); }
-            try
+            catch (InvalidOperationException ex)
+            {
+                // The ownership review is advisory. Its failure is reported and judged again on the next pass;
+                // recorded holds still apply and final acceptance still requires a completed review.
+                ownershipFailure = ex.Message;
+                await context.ReportProgressAsync(new { ownershipReview = "deferred", boardId, reason = ex.Message }, cancellationToken);
+                ownership = new OwnershipReview([], priorCycle.OwnershipHeldProposalKeys.Count == 0 ? [] :
+                    [new BoundOwnershipGap("Recorded planning direction is being incorporated", "The issue remains open until its authoritative dependencies are satisfied.",
+                        priorCycle.OwnershipHeldProposalKeys) { RecordedHold = true }]);
+            }
+            if (ownershipFailure is null) try
             {
                 ownership = await CarryRecordedResolutionsAsync(ownership, boardId, handoff, context, cancellationToken);
                 priorCycle = await ReconcileOwnershipFindingsAsync(cycle, priorCycle, roadmap, ownership, technicalProposal,
@@ -933,9 +943,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 // and must not stop independent work from being reviewed and published.
                 await context.ReportProgressAsync(new { ownershipReconciliation = "deferred", boardId, reason = error.Message }, cancellationToken);
             }
-            var currentHeld = priorCycle.OwnershipHeldProposalKeys.Except(ownership.Gaps.SelectMany(g => g.AffectedProposalKeys)).ToArray();
+            var currentHeld = priorCycle.OwnershipHeldProposalKeys.Except(ownership.Gaps.Where(g => g.HoldsScope).SelectMany(g => g.AffectedProposalKeys)).ToArray();
             if (currentHeld.Length > 0) ownership = ownership with { Gaps = [.. ownership.Gaps,
-                new BoundOwnershipGap("Recorded planning direction is being incorporated", "The issue remains open until its authoritative dependencies are satisfied.", currentHeld)] };
+                new BoundOwnershipGap("Recorded planning direction is being incorporated", "The issue remains open until its authoritative dependencies are satisfied.", currentHeld) { RecordedHold = true }] };
             await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
 
         }
@@ -947,7 +957,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             priorCycle = priorCycle with { Progressive = advance.Progress, UpdatedAt = DateTimeOffset.UtcNow };
             if (advance.Session is null)
                 await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
+            if (advance.Retry is not null) return PersonalTodoResult.RetryLater(advance.Retry);
             if (advance.Blocker is not null) return PersonalTodoResult.Blocked(advance.Blocker);
+            if (advance.Complete && ownershipFailure is not null)
+                return PersonalTodoResult.RetryLater("Final acceptance needs a completed scope-ownership review: " + ownershipFailure);
             if (advance.Complete) return await ReconcileFinalProductAsync(cycle,handoff,ownership!,context,cancellationToken);
             if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(
                 DateTimeOffset.UtcNow.Add(advance.OwnNextStep ? OwnNextStepDelay : CoordinationReviewDelay), advance.Waiting);

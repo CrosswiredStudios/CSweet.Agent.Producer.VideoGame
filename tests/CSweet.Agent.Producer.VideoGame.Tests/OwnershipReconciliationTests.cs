@@ -111,7 +111,7 @@ public sealed partial class ProgressivePlanningTests
             review with { Gaps = [review.Gaps[0] with { Statement = "Name who handles conditional escalation" }] }, f.Outline, f.Member, handoff, context, default);
         Assert.Equal(1, registry.CommissionCalls); Assert.Single(registry.Issues);
         Assert.Equal(new[] { legacy.SessionId }, registry.LastCommission!.SupersededSessionIds);
-        Assert.False(state.PlanningReconciliations[0].Active); Assert.Equal(new[] { "final" }, state.OwnershipHeldProposalKeys);
+        Assert.False(state.PlanningReconciliations[0].Active); Assert.Empty(state.OwnershipHeldProposalKeys); // An ordinary gap is tracked, not held.
         Assert.DoesNotContain("foundation", state.OwnershipHeldProposalKeys);
         var commissioned = registry.Commissions.Single();
         registry.Commissions[0] = commissioned with { Status = "AdviceReceived" };
@@ -232,7 +232,7 @@ public sealed partial class ProgressivePlanningTests
         Task<ProducerPlanningCycleState> Reconcile(SpecialistAgent.OwnershipReview review) =>
             SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, review, f.Outline, f.Member, handoff, f.Runtime.CreateContext(), default);
         state = await Reconcile(gap);
-        Assert.Equal(new[] { "final" }, state.OwnershipHeldProposalKeys);
+        Assert.Equal("Open", Assert.Single(registry.Issues).Status); Assert.Empty(state.OwnershipHeldProposalKeys); // Tracked, not held.
         state = await Reconcile(owned);
         var resolved = Assert.Single(registry.Issues); Assert.Equal("Resolved", resolved.Status);
 
