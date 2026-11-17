@@ -45,6 +45,7 @@ public sealed partial class SpecialistAgent
         ProgressiveEvidence roadmap, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, OwnershipReview? ownership = null,
         StoryReviewDraft? draft = null, int factRefreshes = 0)
     {
+        var admitting = draft is not null;
         var decisions = await context.Platform.ReadDecisionsAsync(new(WorkstreamId: cycle.WorkstreamId), token);
         var resourceContext = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
         roster = resourceContext.Roster ?? roster with { Members = [], RoleCoverage = [], TotalMemberCount = 0, HasMore = false };
@@ -104,6 +105,22 @@ public sealed partial class SpecialistAgent
                 if (proposal.Cycle.WorkstreamId == cycle.WorkstreamId && proposal.Cycle.ApprovedPackageDigest == cycle.ApprovedPackageDigest)
                     draft = StoryReviewDraft.FromProposal(retainedStory, retainedId, artifact.Digest, proposal);
             }
+        }
+        // Admission of a returned draft is one decision per material change. It is bound to the exact draft and
+        // the facts that bear on it: approved scope, recorded direction, findings, acceptance and holds on its own
+        // scope. Resource readiness, roster revisions and unrelated board movement do not reopen it; capacity and
+        // execution authority are settled later by estimates, sprint commitment and preflight.
+        string? admissionKey = null;
+        if (admitting && draft is not null)
+        {
+            var scope = new[] { draft.Story.ProposalKey, draft.Story.ParentProposalKey };
+            admissionKey = "game-draft-admission:" + ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+                modelContract = "draft-admission.v1", draft.SessionId, draft.ArtifactDigest, story = draft.Story.ProposalKey,
+                cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys,
+                holds = (ownership?.Gaps ?? []).Where(g => g.AffectedProposalKeys.Intersect(scope).Any())
+                    .Select(g => g.ObligationKey ?? g.Statement).Order(),
+                material = facts.Where(f => f.Kind is not ("item" or "container" or "current-execution" or "build"))
+                    .OrderBy(f => f.Kind).ThenBy(f => f.Id) }));
         }
         // A pre-refinement receipt cannot decide whether to keep a proposal it never saw.
         // Keep historical receipt identities for reviews that do not have a completed draft.
@@ -219,8 +236,14 @@ public sealed partial class SpecialistAgent
             }
         }
         var key = "game-plan-assessment:" + evidenceDigest;
-        var current = latest?.Basis == evidenceDigest ? latest : await Decide(key, null);
-        if ((await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token)).Fingerprint != resourceContext.Fingerprint)
+        // A settled publish-or-revise decision for this exact draft is reused while its material basis is unchanged.
+        // A wait is never settled: it is judged again against current facts so it cannot outlive its reason.
+        var settled = admissionKey is null ? null : (await context.Platform.ReadOperatingStateAsync<ReviewReceipt>(admissionKey, token))?.Payload;
+        var current = settled ?? (latest?.Basis == evidenceDigest ? latest : await Decide(key, null));
+        if (admissionKey is not null && settled is null && current.Decision.Disposition is null or "select")
+            await store.MergeAsync<ReviewReceipt>(admissionKey, "game.planning.review.v1", 1, prior => prior ?? current,
+                new Dictionary<string,string>(), "admission:" + ProducerPolicyFingerprint.Digest(admissionKey), token);
+        if (settled is null && (await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token)).Fingerprint != resourceContext.Fingerprint)
         {
             // A legitimate staffing decision during inference invalidates the judgment, not the draft.
             // Refresh once in this callback. Continued change waits for the normal durable planning wake.

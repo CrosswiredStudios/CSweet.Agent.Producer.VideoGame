@@ -81,6 +81,11 @@ public sealed partial class ProgressivePlanningTests
         Assert.Equal(f.Refinement.Id, recovered.Session?.Id);
         Assert.Single(f.Starts);
         Assert.Equal(2, prompts.Count); // Reuse the receipt only for these same briefs and current facts.
+        // A settled decision on this exact draft survives resource movement that does not bear on it.
+        resource = resource with { Status = "Ready", Revision = resource.Revision + 1 };
+        var replayed = await Advance(kickoff.Progress);
+        Assert.Equal(f.Refinement.Id, replayed.Session?.Id);
+        Assert.Equal(2, prompts.Count);
         for (int replay = 0; replay < 2; replay++)
             await SpecialistAgent.PublishCanonicalBacklogAsync(f.Cycle.BoardId, f.Roster, f.Cycle, [], f.Refinement, f.DetailArtifact!,
                 new(f.Cycle, [], [], [], "accepted"), f.Refinement, f.DetailArtifact!, f.Detail, context, default);

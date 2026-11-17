@@ -1,4 +1,6 @@
-# Producer 6.21.2
+# Producer 6.21.3
+
+A planning responsibility that was already resolved stays resolved until the approved brief changes, and a failed issue update no longer stops the Producer from reviewing and publishing independent work. See the [6.21.3 release notes](releases/6.21.3.md).
 
 The Producer reviews the Technical Director's completed Story and task briefs before publishing the increment. An existing business can use its saved refinement after updating the Producer. See the [6.21.2 release notes](releases/6.21.2.md).
 

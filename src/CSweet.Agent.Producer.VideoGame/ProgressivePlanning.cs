@@ -38,6 +38,8 @@ public sealed partial class SpecialistAgent
         string? Waiting = null, string? Blocker = null, bool Complete = false)
     {
         public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
+        // The next move is the Producer's own, so no collaborator's completion will wake this commitment.
+        public bool OwnNextStep { get; init; }
     }
     private static readonly JsonSerializerOptions ProgressiveJson = new(JsonSerializerDefaults.Web);
 
@@ -244,7 +246,7 @@ public sealed partial class SpecialistAgent
                             DraftDirection = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest },
                             Waiting: decision.Story == pending
                                 ? $"The Producer retained the same Story for revision. {decision.Guidance}"
-                                : "The Producer selected different work. The provisional refinement is retained outside the board.");
+                                : "The Producer selected different work. The provisional refinement is retained outside the board.") { OwnNextStep = true };
                 }
                 progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null, AdmissionReviewBasis = null };
                 if (progress.ScheduledArtifactDigest != currentArtifact.Digest || needsAuthorityReconciliation)
@@ -344,7 +346,7 @@ public sealed partial class SpecialistAgent
             {
                 if (!accepted) return new(progress, Waiting: "The next Story is provisional while the current increment is running.");
                 return new(progress with { RefinementSessionId = draft, PendingStoryKey = next, AdmissionReviewBasis = assessment?.Basis, DraftStoryKey = null,
-                    DraftBasis = null, DraftSessionId = null, AcceptedBases = new Dictionary<string,string>(progress.AcceptedBases) { [next] = progress.DraftBasis! } }, Waiting: "Prerequisites have independent acceptance. Recheck the provisional proposal before publishing.");
+                    DraftBasis = null, DraftSessionId = null, AcceptedBases = new Dictionary<string,string>(progress.AcceptedBases) { [next] = progress.DraftBasis! } }, Waiting: "Prerequisites have independent acceptance. Recheck the provisional proposal before publishing.") { OwnNextStep = true };
             }
             var session = await RequestStoryAsync(next, basis);
             if (!accepted)

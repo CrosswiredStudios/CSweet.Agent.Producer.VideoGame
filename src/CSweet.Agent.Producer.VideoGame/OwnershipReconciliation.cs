@@ -8,7 +8,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal const string OwnershipContractRevision = "scoped-planning-recovery.v8";
+    internal const string OwnershipContractRevision = "scoped-planning-recovery.v9";
     internal sealed record PlanningContractReceipt(string Revision, DateTimeOffset ChangedAt);
 
     internal static async Task<DateTimeOffset> PlanningContractChangedAtAsync(Guid workstream, string fingerprint,
@@ -57,6 +57,33 @@ public sealed partial class SpecialistAgent
         return evidence;
     }
 
+    // A recorded resolution against the same approved source stands until new recorded evidence exists.
+    // A re-run or reworded model judgment is not such evidence, and the platform refuses to reopen on it.
+    // The obligation is carried as owned so it neither holds scope nor requests an impossible reopening.
+    internal static OwnershipReview CarryRecordedResolutions(OwnershipReview ownership,
+        IReadOnlyList<WorkIssueCaseResponse> issues, WorkApprovedSource source)
+    {
+        var settled = ownership.Gaps.Where(g => g.ObligationKey is { } key &&
+            issues.Where(i => i.ObligationKey == key).OrderByDescending(i => i.Episode).FirstOrDefault() is { Status: not "Open" } latest &&
+            latest.Source == source).ToArray();
+        if (settled.Length == 0) return ownership;
+        return ownership with { Gaps = ownership.Gaps.Except(settled).ToArray(),
+            Commitments = [.. ownership.Commitments, .. settled.Select(g =>
+                new OwnedCommitment(g.Statement, g.Citations, []) { ObligationKey = g.ObligationKey })] };
+    }
+
+    internal static async Task<OwnershipReview> CarryRecordedResolutionsAsync(OwnershipReview ownership, Guid boardId,
+        ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken ct)
+    {
+        var directory = await context.Platform.Issues.ReadAllAsync(boardId, true, ct);
+        var carried = CarryRecordedResolutions(ownership, directory.Issues,
+            new WorkApprovedSource(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest));
+        if (carried.Gaps.Count != ownership.Gaps.Count)
+            await context.ReportProgressAsync(new { ownershipReview = "recorded resolutions retained", boardId,
+                obligations = ownership.Gaps.Except(carried.Gaps).Select(g => g.Statement).ToArray() }, ct);
+        return carried;
+    }
+
     internal static async Task<ProducerPlanningCycleState> ReconcileOwnershipFindingsAsync(
         GameProductionPlanningCycleV1 cycle, ProducerPlanningCycleState state, ProgressiveEvidence roadmap,
         OwnershipReview ownership, GameTechnicalDeliveryProposalV1 proposal, AgentTeammate specialist,
@@ -64,6 +91,7 @@ public sealed partial class SpecialistAgent
     {
         var directory = await context.Platform.Issues.ReadAllAsync(cycle.BoardId, true, ct);
         var source = new WorkApprovedSource(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest);
+        ownership = CarryRecordedResolutions(ownership, directory.Issues, source);
         var decisions = directory.Issues.Any(i => i.Links.Any(l => l.Kind == "Decision"))
             ? await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: cycle.WorkstreamId), ct) : [];
         bool AwaitingDecision(WorkIssueCaseResponse issue) => issue.Links.Where(l => l.Kind == "Decision").Any(l => {
@@ -154,7 +182,8 @@ public sealed partial class SpecialistAgent
         var manager = context.Identity?.ManagerDisplayName ?? "the accountable project manager";
         foreach (var gap in ownership.Gaps)
         {
-            var issue = active.Single(i => i.ObligationKey == gap.ObligationKey);
+            // Follow-up work derives from the current issue record, never from the model's gap list alone.
+            if (active.SingleOrDefault(i => i.ObligationKey == gap.ObligationKey) is not { } issue) continue;
             var finding = OwnershipFinding(cycle, roadmap.OutlineDigest, gap, proposal.DeliveryItems, specialist.DisplayName);
             var commissions = directory.Commissions.Where(c => c.IssueIds.Contains(issue.Id) && c.Source == source).ToArray();
             async Task AskManagerAsync(string question)

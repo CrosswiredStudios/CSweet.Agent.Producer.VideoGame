@@ -183,6 +183,38 @@ public sealed partial class ProgressivePlanningTests
         Assert.Empty(SpecialistAgent.OwnershipHeldItems(state with { TechnicalProposalDigest = "obsolete" }, [root, child, consumer, independent]));
         Assert.Empty(SpecialistAgent.OwnershipHeldItems(state with { OwnershipHeldProposalKeys = [] }, [root, child, consumer, independent]));
     }
+    [Fact]
+    public async Task AResolvedObligationStaysResolvedWhenALaterReviewReportsTheSameGapWithoutNewEvidence()
+    {
+        var f = new Fixture(adaptive: true, independent: true); var registry = new IssueRegistry(f.Runtime);
+        var state = new ProducerPlanningCycleState(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId,
+            f.Cycle.PlanningFingerprint, null, null, null, null, f.Artifact.Digest, null, DateTimeOffset.UtcNow);
+        var handoff = new ProducerAcceptedHandoff(f.Cycle.WorkstreamId, Guid.NewGuid(), Guid.NewGuid(), "accepted", "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
+        var source = new WorkApprovedSource(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest);
+        var gap = new SpecialistAgent.OwnershipReview([], [new("Final art package ownership", "Name who plans and accepts final art.", ["final"]) { ObligationKey = "final-art" }]);
+        var owned = new SpecialistAgent.OwnershipReview([new("Final art package ownership", ["approved"],
+            [new("final", "The Producer owns final art planning and acceptance")]) { ObligationKey = "final-art" }], []);
+        Task<ProducerPlanningCycleState> Reconcile(SpecialistAgent.OwnershipReview review) =>
+            SpecialistAgent.ReconcileOwnershipFindingsAsync(f.Cycle, state, f.Evidence, review, f.Outline, f.Member, handoff, f.Runtime.CreateContext(), default);
+        state = await Reconcile(gap);
+        Assert.Equal(new[] { "final" }, state.OwnershipHeldProposalKeys);
+        state = await Reconcile(owned);
+        var resolved = Assert.Single(registry.Issues); Assert.Equal("Resolved", resolved.Status);
+
+        // The recorded Prism Break stall: an unchanged source, a re-run judgment and no new evidence.
+        // The platform refuses that reopening, so the Producer must not request it or stop planning.
+        state = await Reconcile(gap);
+        Assert.Equal(resolved, Assert.Single(registry.Issues));
+        Assert.Empty(state.OwnershipHeldProposalKeys); Assert.Equal(1, registry.CommissionCalls);
+        var carried = SpecialistAgent.CarryRecordedResolutions(gap, registry.Issues, source);
+        Assert.Empty(carried.Gaps); Assert.Equal("final-art", Assert.Single(carried.Commitments).ObligationKey);
+        Assert.Empty(SpecialistAgent.OwnershipHolds(f.Outline.DeliveryItems, carried));
+
+        // A different approved source is a new basis; the same finding is then a real gap again.
+        var amended = SpecialistAgent.CarryRecordedResolutions(gap, registry.Issues, source with { RevisionId = Guid.NewGuid() });
+        Assert.Single(amended.Gaps); Assert.Empty(amended.Commitments);
+    }
+
     private sealed class IssueRegistry
     {
         public List<WorkIssueCaseResponse> Issues { get; } = [];
@@ -197,6 +229,9 @@ public sealed partial class ProgressivePlanningTests
                 foreach (var update in r.Issues) {
                     var prior = Issues.SingleOrDefault(i => i.ObligationKey == update.ObligationKey);
                     if (prior is not null) Assert.Equal(prior.Revision, update.ExpectedRevision);
+                    // Mirrors WorkIssueService: an unchanged source cannot reopen a retired issue without new evidence.
+                    if (prior is { Status: not "Open" } && update.Status == "Open" && prior.Source == r.Source && update.ReopeningEvidence is null)
+                        throw new InvalidOperationException("A resolved unchanged obligation needs new recorded evidence; rewording cannot reopen it.");
                     var next = new WorkIssueCaseResponse(prior?.Id ?? Guid.NewGuid(), r.BoardId, Guid.NewGuid(), update.ObligationKey,
                         update.Statement, update.Detail, update.Status, update.Phase, Guid.NewGuid(), update.NextAction,
                         r.Source, update.ScopeKeys, (prior?.Links ?? []).Concat(update.Links).Distinct().ToArray(), update.ResolutionEvidence, (prior?.Revision ?? 0) + 1, DateTimeOffset.UtcNow);

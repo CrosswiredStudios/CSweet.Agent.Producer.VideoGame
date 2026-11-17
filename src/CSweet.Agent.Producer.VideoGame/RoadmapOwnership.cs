@@ -93,9 +93,12 @@ public sealed partial class SpecialistAgent
             index, c.Statement, sources = (c.Citations ?? []).Select(k => sourceIndexes.TryGetValue(k, out var i) ? i :
                 throw new InvalidOperationException("Roadmap commitment cites a source outside the accepted package.")).ToArray(), c.ProposalKeys }).ToArray();
         // Contributions change the review basis; old criterion-only reviews cannot be replayed.
+        // Ownership is planning responsibility among approved sources, Epics, constraints, decisions and advice.
+        // Staffing and resource readiness are context for the reviewer, never a reason to judge ownership again:
+        // a toolchain becoming Ready must not produce a second verdict on an unchanged roadmap.
         var resources = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
-        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v4", new { projection = OwnershipKey(cycle, roadmap), catalog,
-            resources = resources.Fingerprint, retainedIdentities = existing.Select(e => new { e.Key, e.IsCurrent }) });
+        var key = AgentOperatingStateKey.Create("producer-roadmap-review.v5", new { projection = OwnershipKey(cycle, roadmap), catalog,
+            retainedIdentities = existing.Select(e => new { e.Key, e.IsCurrent }) });
         var reviewed = await PitchProtocol.CachedAsync(key, context, async () => {
             using var client = context.CreateChatClient(new AgentLlmSelection(Settings.GetGuid("llmProviderId") ??
                 throw new InvalidOperationException("Configure the Producer planning provider."), Settings.GetString("llmModel"), new(InvocationKind: "producer-roadmap-ownership")));

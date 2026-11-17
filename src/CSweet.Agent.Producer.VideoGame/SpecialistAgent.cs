@@ -28,6 +28,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
     private const string SprintReadinessCommitmentPrefix = "producer-readiness:";
     private const string StaffingGapCommitmentPrefix = "producer-staffing-gap:";
     private static readonly TimeSpan CoordinationReviewDelay = TimeSpan.FromMinutes(15);
+    // The fallback timer covers a missed collaborator wake. When the Producer itself owns the next step,
+    // nothing else will wake the commitment, so it continues promptly instead of idling for the fallback.
+    private static readonly TimeSpan OwnNextStepDelay = TimeSpan.FromMinutes(1);
     // Bind runtime identity to the build, never to a separately maintained literal or a mutable manifest.
     public override string Version => BuildVersion;
     private static readonly string BuildVersion = typeof(SpecialistAgent).Assembly
@@ -908,8 +911,19 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 ownership = await ReviewOwnershipAsync(cycle, technicalProposal, roadmap, ledger, managerDirections, context, cancellationToken, contributions);
             }
             catch (InvalidOperationException ex) { return PersonalTodoResult.Blocked("Producer could not verify roadmap ownership: " + ex.Message); }
-            priorCycle = await ReconcileOwnershipFindingsAsync(cycle, priorCycle, roadmap, ownership, technicalProposal,
-                technicalDirector, handoff, context, cancellationToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
+            try
+            {
+                ownership = await CarryRecordedResolutionsAsync(ownership, boardId, handoff, context, cancellationToken);
+                priorCycle = await ReconcileOwnershipFindingsAsync(cycle, priorCycle, roadmap, ownership, technicalProposal,
+                    technicalDirector, handoff, context, cancellationToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                // Issue tracking runs beside planning. The reviewed gaps and previously recorded holds still
+                // restrict their affected scope below; a failed tracking update is retried on the next pass
+                // and must not stop independent work from being reviewed and published.
+                await context.ReportProgressAsync(new { ownershipReconciliation = "deferred", boardId, reason = error.Message }, cancellationToken);
+            }
             var currentHeld = priorCycle.OwnershipHeldProposalKeys.Except(ownership.Gaps.SelectMany(g => g.AffectedProposalKeys)).ToArray();
             if (currentHeld.Length > 0) ownership = ownership with { Gaps = [.. ownership.Gaps,
                 new BoundOwnershipGap("Recorded planning direction is being incorporated", "The issue remains open until its authoritative dependencies are satisfied.", currentHeld)] };
@@ -926,7 +940,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
             if (advance.Blocker is not null) return PersonalTodoResult.Blocked(advance.Blocker);
             if (advance.Complete) return await ReconcileFinalProductAsync(cycle,handoff,ownership!,context,cancellationToken);
-            if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), advance.Waiting);
+            if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(
+                DateTimeOffset.UtcNow.Add(advance.OwnNextStep ? OwnNextStepDelay : CoordinationReviewDelay), advance.Waiting);
             technicalSession = advance.Session!;
             reviewedAuthorityQuestions = advance.ReviewedAuthorityQuestions;
             technicalArtifact = technicalSession.Turns.Last(x => x.SpeakerOrganizationUserId == technicalSession.Target.OrganizationUserId &&
