@@ -1,4 +1,4 @@
-# Producer 6.23.7
+# Producer 6.23.8
 
 Gabriel retains the corrected draft for Marcus when C-Sweet has assigned recovery to the reporting manager. [Release notes](releases/6.23.6.md)
 

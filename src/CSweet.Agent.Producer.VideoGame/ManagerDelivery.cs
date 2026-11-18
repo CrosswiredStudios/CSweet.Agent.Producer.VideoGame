@@ -104,7 +104,7 @@ public sealed partial class SpecialistAgent
         var fingerprint = ProjectDeliveryPlanning.Fingerprint(project);
         var planRequest = new ProjectDeliveryPlanRequest(projectId, setup.BoardId, fingerprint,
             string.IsNullOrWhiteSpace(state.Direction) ? (project.ProfileData is { } metadata && metadata.TryGetProperty("managerDirection", out var direction) ? direction.GetString() ?? project.Outcome : project.Outcome) : state.Direction);
-        planRequest = planRequest with { Direction = TaskSizingDirection + "\nApproved project direction:\n" + planRequest.Direction };
+        planRequest = planRequest with { Direction = TaskSizingDirection + "\nThe Technical Director chooses the game engine, language and libraries on merit. Plan project setup and any required package lock in one engineer-owned Sprint 1 deliverable that launches the first playable slice.\nApproved project direction:\n" + planRequest.Direction };
         if (state.Plan is not null && state.Fingerprint != fingerprint && board.Items.Any(x => x.ExecutionMode == WorkItemExecutionModes.Executable))
             return (false, "The approved project changed after planning. Existing work is retained; the technical plan needs explicit reconciliation before another sprint starts.");
         AgentCoordinationSession session;
