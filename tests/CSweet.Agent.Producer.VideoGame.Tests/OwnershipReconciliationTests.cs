@@ -96,6 +96,11 @@ public sealed partial class ProgressivePlanningTests
             unpublished = unpublished with { RetainedReviewSessionId = Guid.NewGuid() };
             await SpecialistAgent.EnsureCommitmentAsync(item.CorrelationId!, "Plan", "Plan", "High", source with { BoardId = Guid.NewGuid() },
                 context, default, progressiveContinuation: unpublished, dependencyChangedAt: changed);
+            await Ensure(changed);
+            await Ensure(changed);
+            Assert.Equal(0, requeues);
+            Assert.Empty(states);
+            item = item with { BlockReason = SpecialistAgent.MissingStoryAttempts };
         }
         else await Ensure(null);
         Assert.Equal(0, requeues);

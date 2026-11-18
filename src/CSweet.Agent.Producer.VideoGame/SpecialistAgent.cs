@@ -655,7 +655,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
                 existing.WorkContext?.WorkstreamId == workContext.WorkstreamId && existing.WorkContext?.TeamId == workContext.TeamId &&
                 existing.WorkContext?.BoardId == workContext.BoardId && existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint)
+            {
+                // The platform reserves a repeated-failure stop for the reporting manager. The
+                // retained draft is still available once that independent review resumes the task.
+                if (existing.BlockReason.StartsWith("Repeated issue:", StringComparison.Ordinal)) return existing;
                 resourceDependencyChanged |= await AuthorizeContinuationRecoveryAsync(existing, "returned-story:" + reviewedDraft.ToString("N"), context, cancellationToken);
+            }
             var dependencyChanged = (resourceDependencyChanged || dependencyChangedAt > existing.UpdatedAt) && existing.WorkContext?.WorkstreamId == workContext.WorkstreamId &&
                 existing.WorkContext?.TeamId == workContext.TeamId && existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
             if (existing.Status == PersonalTodoStatuses.Blocked && correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&

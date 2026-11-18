@@ -1,3 +1,7 @@
+# Producer 6.23.6
+
+Gabriel retains the corrected draft for Marcus when C-Sweet has assigned recovery to the reporting manager. [Release notes](releases/6.23.6.md)
+
 # Producer 6.23.5
 
 Gabriel can resume a blocked first-Story review when the board's saved planning state identifies the returned draft. [Release notes](releases/6.23.5.md)
