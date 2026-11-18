@@ -10,6 +10,34 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed partial class ProgressivePlanningTests
 {
     [Fact]
+    public async Task Brickfall_unusable_dependency_pin_returns_to_its_technical_owner_before_admission()
+    {
+        var f = new Fixture(adaptive: true);
+        var kickoff = await f.Review(null);
+        f.CompleteRefinement();
+        string[] criteria = ["An exact Phaser version and reproducible lockfile are committed and integrated.",
+            "A focused executed check proves the installed Phaser version matches the committed pin."];
+        var pin = f.Detail!.DeliveryItems.Last() with {
+            ProposalKey = "dependency-pin-phaser", AcceptanceCriteria = criteria, BrowserVerification = GameBrowserVerification.None,
+            InteractionCriteria = [0, 1], CriterionBindings = criteria.Select((text, index) =>
+                new GameCriterionBinding("key-" + index, "dependency-pin-phaser", text, true)).ToArray()
+        };
+        var artifact = f.DetailArtifact!;
+        var payload = JsonNode.Parse(artifact.Payload.GetRawText())!.AsObject();
+        payload["DeliveryItems"]!.AsArray().Add(JsonSerializer.SerializeToNode(pin));
+        var completed = f.Refinement!;
+        f.Refinement = completed with { Turns = [completed.Turns.Single() with {
+            Artifact = artifact with { Payload = JsonSerializer.SerializeToElement(payload) } }] };
+
+        var returned = await f.Review(kickoff.Progress);
+
+        Assert.Contains("dependency-pin-phaser", returned.Retry);
+        Assert.Equal(completed.Id, returned.Progress.FailedStorySessionId);
+        Assert.Null(returned.Session);
+        Assert.Empty(returned.Progress.DetailedStoryKeys);
+    }
+
+    [Fact]
     public async Task PrismBreakDetachedCompletedStoryReachesAdmissionBeforeCachedWait()
     {
         var f = new Fixture(adaptive: true);

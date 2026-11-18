@@ -97,6 +97,14 @@ public sealed partial class SpecialistAgent
             throw new InvalidOperationException("Only validated detailed Stories may publish executable tasks.");
         if (!expected.IsSubsetOf(containers.Select(x => x.ProposalKey).ToHashSet()))
             throw new InvalidOperationException("A selected Story has no definition.");
+        foreach (var leaf in leaves)
+        {
+            try { TicketVerification.FromProposal(leaf); }
+            catch (InvalidOperationException invalid)
+            {
+                throw new InvalidOperationException($"{leaf.ProposalKey}: {invalid.Message}", invalid);
+            }
+        }
         foreach (var story in containers.Where(x => expected.Contains(x.ProposalKey)))
         {
             var tasks = leaves.Where(x => x.ParentProposalKey == story.ProposalKey).ToArray();

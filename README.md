@@ -1,3 +1,7 @@
+# Producer 6.23.2
+
+The Producer checks each task’s verification requirements before admitting a Story. A failed check returns the task key and diagnostic to the Technical Director through the existing Story recovery flow. [Release notes](releases/6.23.2.md)
+
 # Producer 6.23.1
 
 The Brickstorm regression exercises the personal-work wake, restart and redelivery using the packed agent harness. [Release notes](releases/6.23.1.md)
