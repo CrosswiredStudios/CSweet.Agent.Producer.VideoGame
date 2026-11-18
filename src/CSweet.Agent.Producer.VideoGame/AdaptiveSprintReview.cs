@@ -464,6 +464,28 @@ public sealed partial class SpecialistAgent
             }
             else if (action.Kind is "consult" or "refine")
             {
+                var interrupted = refs.Where(f => f.Kind == "current-execution" &&
+                    f.Detail.Contains("code=runtime.repeated_operation;", StringComparison.Ordinal)).Select(f => f.Id).ToHashSet();
+                if (interrupted.Count > 0)
+                {
+                    // Board planning advice cannot resume code. Re-read the exact stage and
+                    // route its checkpoint through the assigned worker's execution channel.
+                    var routed = false;
+                    foreach (var sprint in (await context.Platform.Work.ListSprintsAsync(cycle.BoardId, token)).Where(s => s.Status == "Active"))
+                    {
+                        var execution = await context.Platform.Work.ReadOrchestrationAsync(new(cycle.BoardId, sprint.Id), token);
+                        if (execution?.Status != "Active") continue;
+                        foreach (var item in execution.Items.Where(item => interrupted.Contains(item.WorkItemId)))
+                        {
+                            var stage = item.Stages.SingleOrDefault(s => s.StageKey == item.CurrentStageKey && s.Traversal == item.Traversal);
+                            if (stage is null || CheckpointRepair(cycle.BoardId, execution.Id, stage) is not { } repair) continue;
+                            var resumed = await context.Platform.Work.RetryBlockedStageAsync(repair, token);
+                            await Record(stage.Id, resumed.Status);
+                            routed = true;
+                        }
+                    }
+                    if (routed) continue;
+                }
                 var scope = receipt.Story ?? "project";
                 var questionText = receipt.TechnicalConstraints.Count == 0 ? action.Rationale : action.Rationale +
                     "\nTechnical constraints from the Technical Director's project proposal:\n" + string.Join("\n", receipt.TechnicalConstraints);

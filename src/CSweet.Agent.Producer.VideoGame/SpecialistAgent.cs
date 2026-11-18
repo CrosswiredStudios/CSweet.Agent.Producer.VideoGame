@@ -258,6 +258,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         CancellationToken cancellationToken)
     {
 
+        if (review.TriggerCategory == "work.stage-stopped" && review.CorrelationId is Guid stoppedStage)
+        {
+            var managed = await context.Platform.Work.ListBoardsAsync(cancellationToken: cancellationToken);
+            foreach (var board in managed.Where(b => !b.IsArchived && b.ManagerOrganizationUserId.ToString() == context.Identity?.EmployeeId))
+                if (await RetryCorrectableDeliveryFailuresAsync(board, context, cancellationToken, stoppedStage)) return;
+        }
         await RecoverSubmittedProjectsAsync(context, cancellationToken);
         await RecoverDiscussionAsync(context, cancellationToken);
         var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(

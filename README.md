@@ -1,6 +1,6 @@
-# Producer 6.23.9
+# Producer 6.23.10
 
-Gabriel carries Victor's technical decision into Story admission and distinguishes provider selection from runtime requirements. [Release notes](releases/6.23.9.md)
+Gabriel carries Victor's technical decision into Story admission and distinguishes provider selection from runtime requirements. [Release notes](releases/6.23.10.md)
 
 # Producer 6.23.8
 

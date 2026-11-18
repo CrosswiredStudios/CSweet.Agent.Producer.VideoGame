@@ -6,6 +6,17 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
+    public override Task<DelegationIntent> ClassifyDelegationIntentAsync(CommunicationMessageReceivedEvent incoming,
+        AgentRuntimeContext context, CancellationToken token)
+    {
+        var current = incoming.Context?.GetValueOrDefault("currentUserMessage") ?? incoming.Message;
+        // A ticket retry is the board manager's own operation. Names in the repair instructions
+        // do not turn it into a separate employee delegation. ManagerChat verifies the sender.
+        return TryReadRetryDirection(current, out _, out _)
+            ? Task.FromResult(new DelegationIntent("Other", null, null, null, null))
+            : base.ClassifyDelegationIntentAsync(incoming, context, token);
+    }
+
     // Only the current authenticated message authorizes recovery, never history or model output.
     internal static bool TryReadRetryDirection(string message, out string ticket, out string reason)
     {
@@ -54,6 +65,8 @@ public sealed partial class SpecialistAgent
             stage.Status is not ("Blocked" or "Failed") || stage.PrincipalKind != "AgentInstallation" ||
             stage.AgentInstallationId is null || stage.AssignmentRevision < 1 || stage.AttemptCount < 1)
             return $"{item.ItemIdentifier} has no eligible current blocked agent stage. No retry was requested.";
+        if (CheckpointRepair(current.BoardId, current.Id, stage) is { } repair)
+            reason = repair.Reason + "\nManager direction: " + reason;
         var result = await context.Platform.Work.RetryBlockedStageAsync(new(current.BoardId, current.Id, stage.Id,
             $"producer-directed-retry:{turnId:N}:{stage.Id:N}", reason)
             { ExpectedAssignmentRevision = stage.AssignmentRevision }, token);

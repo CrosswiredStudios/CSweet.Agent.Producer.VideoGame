@@ -7,18 +7,22 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    private async Task RetryCorrectableDeliveryFailuresAsync(WorkBoardSummary board, AgentRuntimeContext context, CancellationToken token)
+    private async Task<bool> RetryCorrectableDeliveryFailuresAsync(WorkBoardSummary board, AgentRuntimeContext context, CancellationToken token, Guid? stoppedStage = null)
     {
-        if (!Guid.TryParse(context.Identity?.EmployeeId, out var self) || board.ManagerOrganizationUserId != self) return;
+        if (!Guid.TryParse(context.Identity?.EmployeeId, out var self) || board.ManagerOrganizationUserId != self) return false;
+        var resumed = false;
         foreach (var sprint in (await context.Platform.Work.ListSprintsAsync(board.Id, token)).Where(x => x.Status == "Active"))
         {
             var execution = await context.Platform.Work.ReadOrchestrationAsync(new(board.Id, SprintId: sprint.Id), token);
             if (execution?.Status != "Active") continue;
+            // A duplicate wake after a successful retry is already satisfied.
+            if (stoppedStage.HasValue && execution.Items.SelectMany(x => x.Stages)
+                .Any(s => s.Id == stoppedStage && s.Status is not ("Blocked" or "Failed"))) return true;
             foreach (var item in execution.Items.Where(x => x.Status == "Blocked"))
             {
                 var stage = item.Stages.SingleOrDefault(x => x.StageKey == item.CurrentStageKey && x.Traversal == item.Traversal);
-                if (stage is null) continue;
-                var request = CorrectableDeliveryRetry(board.Id, execution.Id, stage);
+                if (stage is null || (stoppedStage.HasValue && stage.Id != stoppedStage)) continue;
+                var request = CheckpointRepair(board.Id, execution.Id, stage) ?? CorrectableDeliveryRetry(board.Id, execution.Id, stage);
                 if (request is null && stage.LatestOutcome?.Diagnostics?.Contains(TicketConversations.Discussion.Waiting) == true)
                 {
                     var comments = await TicketConversations.Discussion.ReadAsync(board.Id, item.WorkItemId, context, token);
@@ -26,8 +30,31 @@ public sealed partial class SpecialistAgent
                 }
                 if (request is null) continue;
                 await context.Platform.Work.RetryBlockedStageAsync(request, token);
+                resumed = true;
+                if (stoppedStage.HasValue) return true;
             }
         }
+        return resumed;
+    }
+
+    internal static RetryWorkStageExecutionRequest? CheckpointRepair(Guid boardId, Guid executionId, WorkStageExecutionResponse stage)
+    {
+        if (stage.Status != "Blocked" || stage.StageType != "AgentExecution" || stage.PrincipalKind != "AgentInstallation" || stage.AgentInstallationId is null ||
+            stage.AssignmentRevision < 1 || stage.AttemptCount < 1 ||
+            stage.LastError?.StartsWith("agent-failure:v1;", StringComparison.Ordinal) != true) return null;
+        var fields = stage.LastError.Split(';');
+        string? Value(string key) => fields.FirstOrDefault(x => x.StartsWith(key + "=", StringComparison.Ordinal))?[(key.Length + 1)..];
+        if (Value("retryable") != "false" || Value("code") != "runtime.repeated_operation" || Value("cause") != "workspace.command.timeout" ||
+            Value("operation") is not { Length: 64 } operation || !operation.All(Uri.IsHexDigit) ||
+            Value("checkpoint") is not { Length: 40 or 64 } checkpoint || !checkpoint.All(Uri.IsHexDigit)) return null;
+        var name = Value("command");
+        // Labels are evidence only and must match the interrupted operation.
+        var command = name is { Length: > 0 and <= 180 } && name.All(c => char.IsAsciiLetterOrDigit(c) || " ./_-".Contains(c)) &&
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name)))
+                .Equals(operation, StringComparison.OrdinalIgnoreCase) ? name : operation;
+        return new(boardId, executionId, stage.Id, $"producer-command-repair:{stage.Id:N}:{stage.AssignmentRevision}:{operation}",
+            $"Resume from checkpoint {checkpoint}. The previous execution timed out running {command}. Inspect its implementation and repair the timeout before retrying the check. Use a bounded wall-clock deadline and verify actual output on the retained source.")
+            { ExpectedAssignmentRevision = stage.AssignmentRevision };
     }
 
     internal static RetryWorkStageExecutionRequest? AnsweredDiscussionRetry(Guid boardId, Guid executionId, Guid itemId,
