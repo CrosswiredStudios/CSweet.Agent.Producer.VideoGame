@@ -1,6 +1,10 @@
-# Producer 6.22.2
+# Producer 6.23.1
 
-When the Technical Director cannot generate a valid plan, the Producer asks again later instead of blocking. The standalone regression covers the SDK wake and restart. [Release notes](releases/6.22.2.md)
+The Brickstorm regression exercises the personal-work wake, restart and redelivery using the packed agent harness. [Release notes](releases/6.23.1.md)
+
+# Producer 6.23.0
+
+The Producer uses team-scoped coordination discovery to recover the original Story and specialist output on upgrade. A recoverable failure reuses that Story's request on retry. See the [6.23.0 release notes](releases/6.23.0.md).
 
 Planning no longer stops on a side check or a recoverable failure. The scope-ownership review tracks gaps beside the plan instead of holding work, and a rejected model reply is retried later instead of blocking. See the [6.22.0 release notes](releases/6.22.0.md).
 

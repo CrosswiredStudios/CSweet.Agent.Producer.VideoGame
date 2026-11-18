@@ -66,6 +66,11 @@ public sealed partial class SpecialistAgent
                 item.Revision, $"producer-draft-scope:{sprint.Id:N}:{item.Id:N}"), token);
     }
 
+    private static WorkTechnicalDelegationRecommendation AuthorRequirement(GameProposedWorkItemV1 proposal) =>
+        new("specialist-execution", proposal.AccountableRoleKey, proposal.RequiredCapabilityKeys.Append("work.execution.run").Distinct().ToList(),
+            null, true, proposal.Title) { RequiredSpecializationKeys = proposal.RequiredSpecializationKeys,
+            PreferredSpecializationKeys = proposal.PreferredSpecializationKeys };
+
     private static async Task<ResourceChangeRequestResponse?> ProposeCoverageAsync(Guid workstreamId, Guid? boardId, AgentTeamContext roster,
         IReadOnlyList<WorkTechnicalDelegationRecommendation> requirements, AgentRuntimeContext context, CancellationToken token, string? acceptedBriefDigest = null, Guid? correctionOf = null, string? assessmentReason = null,
         bool reconcileCorrection = false, IReadOnlyDictionary<string, StaffingWorkDescription>? descriptions = null)

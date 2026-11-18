@@ -10,6 +10,36 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed partial class ProgressivePlanningTests
 {
     [Fact]
+    public async Task PrismBreakDetachedCompletedStoryReachesAdmissionBeforeCachedWait()
+    {
+        var f = new Fixture(adaptive: true);
+        var first = await f.Review(null);
+        var request = Assert.Single(f.Starts).Artifact!;
+        f.CompleteRefinement();
+        var completed = f.Refinement! with {
+            SourceKind = "Board",
+            Turns = [new(Guid.NewGuid(), 0, f.Session.Initiator.OrganizationUserId, "Continue", "Refine the chosen Story",
+                DateTimeOffset.UtcNow, new(request.Type, request.SchemaVersion, request.Key, request.PageOrdinal,
+                    request.IsFinalPage, request.Payload, "original-request")), .. f.Refinement!.Turns]
+        };
+        f.Refinement = completed;
+        f.Runtime.RegisterCapability<ListAgentCoordinationRequest, AgentCoordinationSessions>(
+            CommunicationCapabilities.CoordinationList, (query, _) => {
+                Assert.Equal(f.Cycle.BoardId, query.BoardContributions!.BoardId);
+                return Task.FromResult(new AgentCoordinationSessions([]) { Contributions = new([completed.Id], null) });
+            });
+        var detached = first.Progress with { RefinementSessionId = null, PendingStoryKey = null, StoryRetries = 1,
+            AdmissionReviewBasis = null, StoryRetryReason = "Invalid task index" };
+        var result = await SpecialistAgent.AdvanceProgressivePlanningAsync(f.Cycle.BoardId, f.Roster, f.Cycle,
+            [], f.Member, f.Session, f.Artifact, f.Outline, detached, f.Runtime.CreateContext(), default,
+            (_, _, _, _, _, draft) => Task.FromResult(draft is null
+                ? new SpecialistAgent.ReviewEffects(null, false, false, "Cached pause from before the specialist reply", "old") { Disposition = "wait" }
+                : new SpecialistAgent.ReviewEffects(draft.Story.ProposalKey, false, true, "Reviewed returned evidence", "new")));
+        Assert.Equal(completed.Id, result.Session?.Id);
+        Assert.Single(f.Starts);
+    }
+
+    [Fact]
     public async Task Recorded_direction_reuses_frozen_scope_and_detailed_work_without_reopening_implementation()
     {
         var f = new Fixture(); var first = await f.Advance(null); f.CompleteRefinement();
@@ -300,7 +330,11 @@ public sealed partial class ProgressivePlanningTests
                         ProposalProvenance = r.ProposalProvenance, StageAssignments = r.StageAssignments ?? [] }; Items[i] = item; return Task.FromResult(item);
                 })
                 .RegisterCapability<StartBoardCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationStartBoard, (r, _) => {
-                    Starts.Add(r); Refinement = Session with { Id = Guid.NewGuid(), Status = "Active", Turns = [] }; sessions[Refinement.Id] = Refinement; return Task.FromResult(Refinement);
+                    var a = r.Artifact!;
+                    Starts.Add(r); Refinement = Session with { Id = Guid.NewGuid(), SourceKind = "Board", Status = "Active",
+                        Turns = [new(Guid.NewGuid(), 0, Session.Initiator.OrganizationUserId, "Continue", r.InitialMessage, DateTimeOffset.UtcNow,
+                            new(a.Type, a.SchemaVersion, a.Key, a.PageOrdinal, a.IsFinalPage, a.Payload, "request"))] };
+                    sessions[Refinement.Id] = Refinement; return Task.FromResult(Refinement);
                 })
                 .RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(CommunicationCapabilities.CoordinationRead, (r, _) => Task.FromResult(Refinement?.Id == r.SessionId ? Refinement : sessions.GetValueOrDefault(r.SessionId) ?? Refinement!))
                 .RegisterCapability<WorkBoardReference, IReadOnlyList<WorkSprint>>(WorkSprintCapabilities.Read, (_, _) => Task.FromResult<IReadOnlyList<WorkSprint>>([]))

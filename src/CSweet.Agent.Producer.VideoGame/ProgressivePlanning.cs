@@ -49,11 +49,13 @@ public sealed partial class SpecialistAgent
         artifact.Payload.TryGetProperty("progressivePlanning", out var evidence) ? evidence.Deserialize<ProgressiveEvidence>(ProgressiveJson) : null;
 
     internal static AgentCoordinationArtifactSubmission ProgressiveRequestArtifact(GameProductionPlanningCycleV1 cycle,
-        IReadOnlyList<ArtifactPackageMemberDigest> members, ProgressiveRequest request)
+        IReadOnlyList<ArtifactPackageMemberDigest> members, ProgressiveRequest request, string? boardTitle = null)
     {
         var artifact = PlanningArtifact(cycle, members);
         var payload = JsonNode.Parse(artifact.Payload.GetRawText())!.AsObject();
         payload["progressivePlanning"] = JsonSerializer.SerializeToNode(request, ProgressiveJson);
+        if (request.Phase == "Story" && boardTitle is not null)
+            payload["boardIncrement"] = JsonSerializer.SerializeToNode(new { key = request.StoryKey, title = boardTitle }, ProgressiveJson);
         return artifact with { Payload = JsonSerializer.SerializeToElement(payload) };
     }
 
@@ -204,6 +206,13 @@ public sealed partial class SpecialistAgent
             AgentCoordinationSession? currentSession = null;
             AgentCoordinationArtifact? currentArtifact = null;
             GameTechnicalDeliveryProposalV1 current = outline;
+            if (progress.StoryRetries > 0 && progress.PendingStoryKey is null)
+            {
+                var recovery = await RecoverStoryRequestAsync(boardId, cycle, outlineSession, evidence, outline, progress,
+                    directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest, ownership, context, token);
+                if (recovery.Waiting is not null || recovery.Blocker is not null) return recovery;
+                progress = recovery.Progress;
+            }
             if (progress.PendingStoryKey is { } heldStory && ownership is not null &&
                 (OwnershipHolds(outline.DeliveryItems, ownership).Contains(heldStory) ||
                  outline.DeliveryItems.Any(e => heldStory.StartsWith(e.ProposalKey + ".story-", StringComparison.Ordinal) && OwnershipHolds(outline.DeliveryItems, ownership).Contains(e.ProposalKey))))
@@ -261,7 +270,7 @@ public sealed partial class SpecialistAgent
                                 : "The Producer selected different work. The provisional refinement is retained outside the board.") { OwnNextStep = true };
                 }
                 progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null, AdmissionReviewBasis = null,
-                    StoryRetries = 0, StoryRetryReason = null };
+                    StoryRetries = 0, StoryRetryReason = null, FailedStorySessionId = null };
                 if (progress.ScheduledArtifactDigest != currentArtifact.Digest || needsAuthorityReconciliation)
                     return new(progress, currentSession) { ReviewedAuthorityQuestions = reviewedQuestions };
             }
@@ -333,7 +342,7 @@ public sealed partial class SpecialistAgent
                     "Refine Story " + storyKey + " within the existing approved scope. Other Stories stay planned; no new creative approval or completed work is inferred. " + assessment?.Guidance +
                         (progress.StoryRetryReason is { } previous ? " The previous attempt could not be used: " + previous + " Correct that in this attempt." : ""),
                     BoundedMutationKey("progressive-story:" + evidence.ScopeKey + ":" + evidence.OutlineDigest + ":" + storyKey + (evidence.Adaptive ? ":" + draftBasis + ":" + current.ProposalDigest : "") + RegenerationSuffix(progress.StoryRetries)),
-                    ProgressiveRequestArtifact(cycle, members, request)), token);
+                    ProgressiveRequestArtifact(cycle, members, request, candidates.FirstOrDefault(c => c.ProposalKey == storyKey)?.Title ?? storyKey)), token);
             }
             string BasisFor(string storyKey) => ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
                 evidence.OutlineDigest, current.ProposalDigest, review = assessment?.Basis, direction, next = storyKey }));
@@ -399,7 +408,7 @@ public sealed partial class SpecialistAgent
     {
         reason = reason.ReplaceLineEndings(" ").Trim();
         if (reason.Length > 500) reason = reason[..500];
-        return new(progress with { RefinementSessionId = progress.LastPublishedSessionId, PendingStoryKey = null, AdmissionReviewBasis = null,
+        return new(progress with { FailedStorySessionId = progress.RefinementSessionId, RefinementSessionId = progress.LastPublishedSessionId, PendingStoryKey = null, AdmissionReviewBasis = null,
             StoryRetries = progress.StoryRetries + 1, StoryRetryReason = reason }) { Retry = description + reason };
     }
 

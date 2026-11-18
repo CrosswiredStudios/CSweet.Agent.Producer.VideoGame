@@ -1,4 +1,5 @@
 using System.Text.Json;
+using CrosswiredStudios.VideoGame.AgentKit;
 using CSweet.Agent.SDK;
 using CSweet.Agent.SDK.VideoGame.Contracts;
 using CSweet.WorkManagement.Contracts;
@@ -151,7 +152,7 @@ public sealed partial class ProgressivePlanningTests
         // The Technical Director's model could not produce the Story page.
         const string diagnostic = "Page failed after three attempts: approaching Epic (finish=stop): Assign every approved Epic criterion to a Story.";
         j.F.Refinement = j.F.Refinement! with { Status = "Blocked",
-            Turns = [new(Guid.NewGuid(), 1, j.F.Person.OrganizationUserId, "Blocked", diagnostic, DateTimeOffset.UtcNow)] };
+            Turns = [.. j.F.Refinement.Turns, new(Guid.NewGuid(), 1, j.F.Person.OrganizationUserId, "Blocked", diagnostic, DateTimeOffset.UtcNow)] };
         var failed = await j.PassAsync(kickoff, ownership);
         Assert.Null(failed.Blocker); Assert.Contains("Assign every approved Epic criterion", failed.Retry);
         Assert.Equal(1, failed.Progress.StoryRetries); Assert.Null(failed.Progress.PendingStoryKey);
@@ -170,6 +171,43 @@ public sealed partial class ProgressivePlanningTests
         var admitted = await j.PassAsync(retried, ownership);
         Assert.Equal(j.F.Refinement!.Id, admitted.Session?.Id);
         Assert.Equal(0, admitted.Progress.StoryRetries); Assert.Null(admitted.Progress.StoryRetryReason);
+    }
+
+    [Fact]
+    public async Task RecoveredStoryWaitsForItsOriginalDecisionAuthorityAndReusesOneRequestOnReplay()
+    {
+        var j = new PlanningJourney();
+        var manager = Guid.NewGuid();
+        var issuer = Guid.NewGuid();
+        var context = j.F.Runtime.CreateContext(identity: new(issuer.ToString(), "Producer", null, "Producer", null, [], null, manager.ToString(), "Director"));
+        var prior = JsonSerializer.Deserialize<DecisionRecord>("{}")! with {
+            Id = Guid.NewGuid(), Revision = 2, WorkstreamId = j.F.Cycle.WorkstreamId, Status = "Decided",
+            SelectedOptionId = "choice-0", RequestedByOrganizationUserId = issuer, DecidedByOrganizationUserId = manager,
+            TypeKey = "video-game.management-direction.v1", AuthorityRuleKey = "work-planning", Summary = "Hold this Story pending repair",
+            Evidence = [new("artifact", j.Handoff.ArtifactId, j.Handoff.AcceptedRevisionId, j.Handoff.RevisionDigest, "video-game.production-plan.v1", "Accepted")] };
+        var registry = new SpecialistAgent.ReviewProposals([new("escalate", prior.Id, "Decided", "old-action")]);
+        await new RevisionSafeProjectState(context.Platform).MergeAsync<SpecialistAgent.ReviewProposals>(
+            "game-review-proposals:" + j.F.Cycle.WorkstreamId.ToString("N"), "game.review-proposals.v1", 1, _ => registry,
+            new Dictionary<string,string>(), "seed-prior-action", default);
+        var requests = new Dictionary<string, DecisionRecord>();
+        j.F.Runtime.RegisterCapability<DecisionRequest, DecisionRecord>(PlatformCapabilities.DecisionRequest, (request, _) => {
+            Assert.Null(request.SupersedesDecisionId);
+            requests.TryAdd(request.IdempotencyKey, prior with { Id = Guid.NewGuid(), Status = "Pending", TypeData = request.TypeData,
+                SelectedOptionId = null, DecidedByOrganizationUserId = null, Rationale = null });
+            return Task.FromResult(requests[request.IdempotencyKey]);
+        }).RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead,
+            (r, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([requests.Values.Single(d => d.Id == r.DecisionId)]));
+        await j.F.Review(null); j.F.CompleteRefinement();
+        var draft = SpecialistAgent.StoryReviewDraft.FromProposal("prototype.story-1", j.F.Refinement!.Id, j.F.DetailArtifact!.Digest, j.F.Detail!);
+        Task<string?> Review() => SpecialistAgent.ReconcileRecoveryDirectionAsync(j.F.Cycle, j.Handoff, draft, [prior], context, default);
+        Assert.NotNull(await Review());
+        var key = Assert.Single(requests.Keys);
+        requests[key] = requests[key] with { Status = "Decided", SelectedOptionId = ContributionAdmission.Hold,
+            Rationale = "Still held", DecidedByOrganizationUserId = manager };
+        Assert.NotNull(await Review());
+        requests[key] = requests[key] with { SelectedOptionId = ContributionAdmission.Admit, Rationale = "Both original briefs now validate" };
+        Assert.Null(await Review());
+        Assert.Single(requests);
     }
 
     [Fact]

@@ -20,7 +20,7 @@
   },
   "id": "com.csweet.video-game-producer",
   "name": "Gabriel Reyes",
-  "version": "6.22.2",
+  "version": "6.23.1",
   "publisher": {
     "id": "com.csweet",
     "name": "C-Sweet"
@@ -622,6 +622,11 @@
       "name": "communication.coordination.respond.v1",
       "scope": "team",
       "purpose": "Acknowledge exact Creative Director handoffs and coordination turns."
+    },
+    {
+      "name": "communication.coordination.list.v1",
+      "scope": "team",
+      "purpose": "Rediscover the original board-scoped Story request and its specialist result after an upgrade."
     },
     {
       "name": "communication.coordination.read.v1",
