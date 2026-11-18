@@ -47,6 +47,9 @@ public sealed partial class SpecialistAgent
     {
         var admitting = draft is not null;
         var decisions = await context.Platform.ReadDecisionsAsync(new(WorkstreamId: cycle.WorkstreamId), token);
+        if (draft is not null && progress.StoryRetries > 0 &&
+            await ReconcileRecoveryDirectionAsync(cycle, handoff, draft, decisions, context, token) is { } waiting)
+            return new(null, false, true, waiting, draft.ArtifactDigest) { Disposition = "wait" };
         var resourceContext = await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token);
         roster = resourceContext.Roster ?? roster with { Members = [], RoleCoverage = [], TotalMemberCount = 0, HasMore = false };
         var roles = CoverageRoleCatalog(roster);
@@ -428,7 +431,8 @@ public sealed partial class SpecialistAgent
                 "Financial", key) : null;
             async Task Record(Guid id, string status)
             {
-                var bound = new ReviewActionReceipt(action.Kind, id, status, key) { Intent = intent, Spend = spend, Rationale = action.Rationale };
+                var bound = new ReviewActionReceipt(action.Kind, id, status, key) { Intent = intent, Spend = spend,
+                    Rationale = action.Rationale, StoryKey = receipt.Story };
                 if (protectedAction)
                     await journal.MergeAsync<ReviewProposals>(registryKey, "game.review-proposals.v1", 1,
                         old => new((old?.Actions ?? []).Append(bound).DistinctBy(r => r.Id).ToArray()),
@@ -574,6 +578,7 @@ public sealed partial class SpecialistAgent
 
     internal sealed record ReviewActionReceipt(string Kind, Guid Id, string Status, string ProposalKey)
     {
+        public string? StoryKey { get; init; }
         public string? Intent { get; init; }
         public string? Rationale { get; init; }
         public ApprovalProposalRequest? Spend { get; init; }

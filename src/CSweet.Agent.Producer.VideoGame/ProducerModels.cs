@@ -126,6 +126,7 @@ public sealed record ProgressivePlanningProgress(string ScopeKey, string Outline
     public int StoryRetries { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public string? StoryRetryReason { get; init; }
+    public Guid? FailedStorySessionId { get; init; }
 }
 
 public sealed record ProvisionalStory(Guid SessionId, string Basis, string Direction, string ParentRevision);

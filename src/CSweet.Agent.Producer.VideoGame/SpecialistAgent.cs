@@ -970,7 +970,24 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         {
             var advance = await AdvanceProgressivePlanningAsync(boardId, roster, cycle, memberDigests, technicalDirector,
                 technicalSession, technicalArtifact!, technicalProposal, priorCycle.Progressive, context, cancellationToken,
-                (progress, choices, board, plans, sprints, draft) => ReviewAdaptivePlanAsync(cycle, roster, progress, choices, board, plans, sprints, ReadProgressiveEvidence(technicalArtifact!)!, handoff, context, cancellationToken, ownership, draft), ownership);
+                async (progress, choices, board, plans, sprints, draft) =>
+                {
+                    var review = await ReviewAdaptivePlanAsync(cycle, roster, progress, choices, board, plans, sprints,
+                        ReadProgressiveEvidence(technicalArtifact!)!, handoff, context, cancellationToken, ownership, draft);
+                    if (draft is not null && review.KeepDraft && review.Story == draft.Story.ProposalKey &&
+                        review.Disposition is not ("wait" or "refine"))
+                    {
+                        // A returned brief identifies the actual vacancy. Make the governed request while the draft
+                        // is visible. The existing post-publication staffing commitment also reconciles this need.
+                        try { await ProposeCoverageAsync(workstreamId, boardId, roster, draft.Tasks.Select(AuthorRequirement).ToList(),
+                            context, cancellationToken, handoff.RevisionDigest, assessmentReason: "Staff the reviewed increment: " + draft.Story.Title); }
+                        catch (PlatformCapabilityException error)
+                        {
+                            await context.ReportProgressAsync(new { staffing = "pending", draft.SessionId, reason = error.Message }, cancellationToken);
+                        }
+                    }
+                    return review;
+                }, ownership);
             priorCycle = priorCycle with { Progressive = advance.Progress, UpdatedAt = DateTimeOffset.UtcNow };
             if (advance.Session is null)
                 await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
@@ -1836,13 +1853,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                         DeliveryKind = ProposalDeliveryKind(proposal.AccountableRoleKey),
                         DependencyItemIds = proposal.DependencyProposalKeys.Select(key => byKey[key].Id).ToList(),
                         DelegationRecommendations = executable
-                            ? [new WorkTechnicalDelegationRecommendation("specialist-execution", proposal.AccountableRoleKey,
-                                proposal.RequiredCapabilityKeys.Append("work.execution.run").Distinct().ToList(), null, true,
-                                "Reconciled Designer / Technical Director proposal.")
-                            {
-                                RequiredSpecializationKeys = proposal.RequiredSpecializationKeys,
-                                PreferredSpecializationKeys = proposal.PreferredSpecializationKeys
-                            }]
+                            ? [AuthorRequirement(proposal)]
                             : [],
                         ArchitectureArtifactDigest = technicalArtifact.Digest,
                         ArtifactPackageDigest = package,
