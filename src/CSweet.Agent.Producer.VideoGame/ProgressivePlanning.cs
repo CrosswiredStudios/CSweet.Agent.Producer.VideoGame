@@ -214,7 +214,16 @@ public sealed partial class SpecialistAgent
             AgentCoordinationSession? currentSession = null;
             AgentCoordinationArtifact? currentArtifact = null;
             GameTechnicalDeliveryProposalV1 current = outline;
-            if (progress.StoryRetries > 0 && progress.PendingStoryKey is null)
+            // Older Producers retained a validated return for review but also kept the failure that
+            // preceded it. Re-read the later, exactly bound draft through normal admission.
+            if (progress.PendingStoryKey is null && progress.DraftSessionId is Guid reviewedDraft &&
+                progress.FailedStorySessionId is Guid earlierFailure && earlierFailure != reviewedDraft &&
+                progress.RefinementSessionId == progress.LastPublishedSessionId &&
+                progress.DraftDirection == (directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest) &&
+                progress.DraftStoryKey is string reviewedStory && progress.DraftBasis is { } reviewedBasis &&
+                progress.AcceptedBases.GetValueOrDefault(reviewedStory) == reviewedBasis)
+                progress = progress with { RefinementSessionId = reviewedDraft, PendingStoryKey = reviewedStory };
+            else if (progress.StoryRetries > 0 && progress.PendingStoryKey is null)
             {
                 var recovery = await RecoverStoryRequestAsync(boardId, cycle, outlineSession, evidence, outline, progress,
                     directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest, ownership, context, token);
@@ -269,13 +278,24 @@ public sealed partial class SpecialistAgent
                     if (decision.Disposition == "wait") return new(progress, Waiting: decision.Guidance);
                     if (prior.Count > 0 && !HasAcceptedProgressiveIncrements(priorPlan, prior.ToArray(), liveBoard.Items, livePlans, true))
                         return new(progress, Waiting: "The provisional Story still needs its prerequisite acceptance.");
-                    if (decision.Story != pending || !decision.KeepDraft)
+                    if (decision.Story == pending && !decision.KeepDraft)
+                    {
+                        var revisionBasis = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+                            previous = currentSession.Id, currentArtifact.Digest, review = decision.Basis }));
+                        var bases = new Dictionary<string,string>(progress.AcceptedBases) { [pending] = revisionBasis };
+                        var revision = await OpenStoryRequestAsync(pending, revisionBasis, returnedDraft.Story.Title,
+                            currentSession.Id, decision.Guidance, current.ProposalDigest, bases);
+                        return new(progress with { RefinementSessionId = revision.Id, PendingStoryKey = pending,
+                            AcceptedBases = bases, AdmissionReviewBasis = decision.Basis,
+                            DraftSessionId = null, DraftStoryKey = null, DraftBasis = null, DraftDirection = null },
+                            Waiting: "The Technical Director has the Producer's revision request for the same Story.");
+                    }
+                    if (decision.Story != pending)
                         return new(progress with { RefinementSessionId = progress.LastPublishedSessionId, PendingStoryKey = null,
                             DraftSessionId = currentSession.Id, DraftStoryKey = pending, DraftBasis = progress.AcceptedBases.GetValueOrDefault(pending),
-                            DraftDirection = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest },
-                            Waiting: decision.Story == pending
-                                ? $"The Producer retained the same Story for revision. {decision.Guidance}"
-                                : "The Producer selected different work. The provisional refinement is retained outside the board.") { OwnNextStep = true };
+                            DraftDirection = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest,
+                            StoryRetries = 0, FailedStorySessionId = null, StoryRetryReason = null },
+                            Waiting: "The Producer selected different work. The provisional refinement is retained outside the board.") { OwnNextStep = true };
                 }
                 progress = progress with { DetailedStoryKeys = currentEvidence.DetailedStoryKeys, PendingStoryKey = null, AdmissionReviewBasis = null,
                     StoryRetries = 0, StoryRetryReason = null, FailedStorySessionId = null };
@@ -338,19 +358,24 @@ public sealed partial class SpecialistAgent
             if (evidence.Adaptive && !candidates.Any(c => c.ProposalKey == next))
                 return new(progress, Waiting: "The selected scope has an unresolved planning responsibility. Gabriel and Victor are reconciling it; independent work remains eligible.");
             var direction = directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest;
-            async Task<AgentCoordinationSession> RequestStoryAsync(string storyKey, string draftBasis)
+            Task<AgentCoordinationSession> RequestStoryAsync(string storyKey, string draftBasis) =>
+                OpenStoryRequestAsync(storyKey, draftBasis, candidates.FirstOrDefault(c => c.ProposalKey == storyKey)?.Title ?? storyKey,
+                    evidence.Adaptive && progress.DraftStoryKey == storyKey ? progress.DraftSessionId : null,
+                    assessment?.Guidance + (progress.StoryRetryReason is { } previous ? " The previous attempt could not be used: " + previous + " Correct that in this attempt." : ""),
+                    current.ProposalDigest, progress.AcceptedBases);
+            async Task<AgentCoordinationSession> OpenStoryRequestAsync(string storyKey, string draftBasis, string title,
+                Guid? previousDraft, string guidance, string parentDigest, IReadOnlyDictionary<string,string> bases)
             {
                 var request = new ProgressiveRequest("Story", evidence.DirectionsDigest, evidence.ScopeKey, evidence.OutlineDigest, storyKey, progress.DetailedStoryKeys,
-                    ReviewDirectionsDigest: progress.ReviewedDirectionsDigest != evidence.DirectionsDigest ? progress.ReviewedDirectionsDigest : null, Adaptive: evidence.Adaptive, DraftBasis: evidence.Adaptive ? draftBasis : null, AcceptedBases: progress.AcceptedBases,
-                    PreviousDraft: evidence.Adaptive && progress.DraftStoryKey == storyKey ? progress.DraftSessionId : null);
+                    ReviewDirectionsDigest: progress.ReviewedDirectionsDigest != evidence.DirectionsDigest ? progress.ReviewedDirectionsDigest : null, Adaptive: evidence.Adaptive, DraftBasis: evidence.Adaptive ? draftBasis : null, AcceptedBases: bases,
+                    PreviousDraft: previousDraft);
                 return await context.Platform.Communication.StartBoardCoordinationAsync(new(
                     Guid.Parse(technicalDirector.EmployeeId), boardId, "Refine next increment: " + storyKey,
                     "Refine this increment against the approved Epic. State assumptions about pending prerequisites and how to verify them. This request grants no execution authority.",
                     ["The exact frozen scope outline is preserved.", "Only the requested Story is detailed.", "Every original criterion survives in execution/QA tasks."],
-                    "Refine Story " + storyKey + " within the existing approved scope. Other Stories stay planned; no new creative approval or completed work is inferred. " + assessment?.Guidance +
-                        (progress.StoryRetryReason is { } previous ? " The previous attempt could not be used: " + previous + " Correct that in this attempt." : ""),
-                    BoundedMutationKey("progressive-story:" + evidence.ScopeKey + ":" + evidence.OutlineDigest + ":" + storyKey + (evidence.Adaptive ? ":" + draftBasis + ":" + current.ProposalDigest : "") + RegenerationSuffix(progress.StoryRetries)),
-                    ProgressiveRequestArtifact(cycle, members, request, candidates.FirstOrDefault(c => c.ProposalKey == storyKey)?.Title ?? storyKey)), token);
+                    "Refine Story " + storyKey + " within the existing approved scope. Other Stories stay planned; no new creative approval or completed work is inferred. " + guidance,
+                    BoundedMutationKey("progressive-story:" + evidence.ScopeKey + ":" + evidence.OutlineDigest + ":" + storyKey + (evidence.Adaptive ? ":" + draftBasis + ":" + parentDigest : "") + RegenerationSuffix(progress.StoryRetries)),
+                    ProgressiveRequestArtifact(cycle, members, request, title)), token);
             }
             string BasisFor(string storyKey) => ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
                 evidence.OutlineDigest, current.ProposalDigest, review = assessment?.Basis, direction, next = storyKey }));

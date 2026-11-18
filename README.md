@@ -1,3 +1,7 @@
+# Producer 6.23.4
+
+The Producer sends a requested revision directly to the specialist who owns that Story and recovers reviews previously held behind an older failed attempt. [Release notes](releases/6.23.4.md)
+
 # Producer 6.23.3
 
 A corrected version of a rejected Story draft has its own saved identity. Original results and previously admitted Stories stay traceable. [Release notes](releases/6.23.3.md)

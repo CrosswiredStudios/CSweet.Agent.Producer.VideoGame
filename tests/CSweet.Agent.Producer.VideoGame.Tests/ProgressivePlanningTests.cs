@@ -296,18 +296,33 @@ public sealed partial class ProgressivePlanningTests
         Assert.False(SpecialistAgent.OutcomeCoverage(f.Evidence.ScopeCoverage, f.Items, f.Plans, plan.UpdatedAt.AddSeconds(-1))[0].Verified);
     }
 
-    [Fact]
-    public async Task Management_change_before_admission_reopens_stale_detail_for_the_same_story()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Management_change_before_admission_reopens_stale_detail_for_the_same_story(bool retainedBeforeUpgrade)
     {
         var f = new Fixture(adaptive: true);
         var kickoff = await f.Review(null);
         f.CompleteRefinement();
-        var changed = await f.Review(kickoff.Progress, draft: false, keep: false);
-        Assert.Null(changed.Session);
-        Assert.Null(changed.Progress.PendingStoryKey);
-        Assert.Equal(kickoff.Progress.RefinementSessionId, changed.Progress.DraftSessionId);
+        var original = kickoff.Progress;
+        var story = original.PendingStoryKey!;
+        var progress = original with { StoryRetries = 7, FailedStorySessionId = Guid.NewGuid(),
+            StoryRetryReason = "Progressive planning cannot replace validated scope or a saved increment." };
+        if (retainedBeforeUpgrade)
+            progress = progress with { DraftSessionId = original.RefinementSessionId, DraftStoryKey = story,
+                DraftBasis = original.AcceptedBases[story], DraftDirection = original.DirectionsDigest,
+                RefinementSessionId = null, PendingStoryKey = null, AdmissionReviewBasis = null };
+        var replacement = await SpecialistAgent.AdvanceProgressivePlanningAsync(f.Cycle.BoardId, f.Roster, f.Cycle,
+            [], f.Member, f.Session, f.Artifact, f.Outline, progress, f.Runtime.CreateContext(), default,
+            (_, _, _, _, _, draft) => Task.FromResult(draft is null
+                ? new SpecialistAgent.ReviewEffects(story, false, true, "Continue this Story", "selection")
+                : new SpecialistAgent.ReviewEffects(story, false, false, "Give the Phaser pin to one engineer", "review")));
+        Assert.Null(replacement.Blocker);
+        Assert.Null(replacement.Session);
         Assert.All(f.Items, item => Assert.Equal("Epic", item.Kind));
-        var replacement = await f.Review(changed.Progress, draft: false, keep: false);
+        Assert.Equal(2, f.Starts.Count);
+        Assert.Contains("Give the Phaser pin to one engineer", f.Starts.Last().InitialMessage);
+        Assert.NotEqual(original.AcceptedBases[story], replacement.Progress.AcceptedBases[story]);
         Assert.Equal(kickoff.Progress.PendingStoryKey, replacement.Progress.PendingStoryKey);
         Assert.NotEqual(kickoff.Progress.RefinementSessionId, replacement.Progress.RefinementSessionId);
         Assert.Equal(kickoff.Progress.RefinementSessionId, f.Starts.Last().Artifact!.Payload
