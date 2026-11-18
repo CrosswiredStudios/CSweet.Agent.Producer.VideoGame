@@ -984,7 +984,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 async (progress, choices, board, plans, sprints, draft) =>
                 {
                     var review = await ReviewAdaptivePlanAsync(cycle, roster, progress, choices, board, plans, sprints,
-                        ReadProgressiveEvidence(technicalArtifact!)!, handoff, context, cancellationToken, ownership, draft);
+                        ReadProgressiveEvidence(technicalArtifact!)!, handoff, context, cancellationToken, ownership, draft, outlineConstraints: technicalProposal.TechnicalConstraints);
                     if (draft is not null && review.KeepDraft && review.Story == draft.Story.ProposalKey &&
                         review.Disposition is not ("wait" or "refine"))
                     {

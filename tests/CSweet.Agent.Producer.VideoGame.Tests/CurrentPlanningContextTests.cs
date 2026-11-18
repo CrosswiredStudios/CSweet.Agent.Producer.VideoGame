@@ -8,9 +8,10 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed partial class ProgressivePlanningTests
 {
     [Theory]
-    [InlineData("Ready",0)][InlineData("PendingApproval",0)]
-    [InlineData("Ready",1)][InlineData("Ready",4)]
-    public async Task DraftSelectionUsesCurrentStaffingAndCanProceedBeforeResourceExecutionApproval(string resourceStatus, int changes)
+    [InlineData("Ready",0,false)][InlineData("PendingApproval",0,false)]
+    [InlineData("Ready",1,false)][InlineData("Ready",4,false)]
+    [InlineData("PendingApproval",4,true)]
+    public async Task DraftSelectionUsesCurrentStaffingAndCanProceedBeforeResourceExecutionApproval(string resourceStatus, int changes, bool admitting)
     {
         var f = new Fixture(adaptive: true, independent: true);
         var author = Guid.NewGuid(); var briefId = Guid.NewGuid(); var revisionId = Guid.NewGuid();
@@ -41,8 +42,18 @@ public sealed partial class ProgressivePlanningTests
         var progress = new ProgressivePlanningProgress(f.Evidence.ScopeKey, f.Evidence.OutlineDigest, f.Evidence.DirectionsDigest, []);
         var choices = SpecialistAgent.SuccessorCandidates(f.Outline.DeliveryItems, new HashSet<string>());
         var board = new WorkBoardDetail(new(f.Cycle.BoardId, "Game", "", false, false, 1, []) { WorkstreamId = f.Cycle.WorkstreamId, TeamId = f.Cycle.TeamId }, [], []);
-        async Task<SpecialistAgent.ReviewEffects> Review() => await agent.ReviewAdaptivePlanAsync(f.Cycle, staleRoster, progress, choices, board, [], [], f.Evidence, handoff, f.Runtime.CreateContext(), default);
+        var draft = admitting ? new SpecialistAgent.StoryReviewDraft(Guid.NewGuid(), "returned-artifact", choices[0], []) : null;
+        async Task<SpecialistAgent.ReviewEffects> Review() => await agent.ReviewAdaptivePlanAsync(f.Cycle, staleRoster, progress, choices, board, [], [], f.Evidence, handoff, f.Runtime.CreateContext(), default, draft: draft);
         var first = await Review();
+        if (admitting)
+        {
+            Assert.Equal(choices[0].ProposalKey, first.Story);
+            Assert.True(first.KeepDraft);
+            Assert.Equal(first.Basis, (await Review()).Basis);
+            Assert.Equal(1, models);
+            Assert.Equal(2, reads);
+            return;
+        }
         if (changes == 4)
         {
             Assert.Equal("wait",first.Disposition); Assert.True(first.KeepDraft); Assert.Null(first.Story);
