@@ -1,3 +1,7 @@
+# Producer 6.23.3
+
+A corrected version of a rejected Story draft has its own saved identity. Original results and previously admitted Stories stay traceable. [Release notes](releases/6.23.3.md)
+
 # Producer 6.23.2
 
 The Producer checks each task’s verification requirements before admitting a Story. A failed check returns the task key and diagnostic to the Technical Director through the existing Story recovery flow. [Release notes](releases/6.23.2.md)

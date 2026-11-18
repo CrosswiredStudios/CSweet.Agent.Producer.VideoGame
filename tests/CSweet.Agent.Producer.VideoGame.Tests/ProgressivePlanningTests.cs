@@ -9,11 +9,14 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed partial class ProgressivePlanningTests
 {
-    [Fact]
-    public async Task Brickfall_unusable_dependency_pin_returns_to_its_technical_owner_before_admission()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Brickfall_unusable_dependency_pin_returns_to_its_technical_owner_before_admission(bool legacyRetryBlocked)
     {
         var f = new Fixture(adaptive: true);
         var kickoff = await f.Review(null);
+        var source = f.Refinement!.Turns.Single();
         f.CompleteRefinement();
         string[] criteria = ["An exact Phaser version and reproducible lockfile are committed and integrated.",
             "A focused executed check proves the installed Phaser version matches the committed pin."];
@@ -26,7 +29,7 @@ public sealed partial class ProgressivePlanningTests
         var payload = JsonNode.Parse(artifact.Payload.GetRawText())!.AsObject();
         payload["DeliveryItems"]!.AsArray().Add(JsonSerializer.SerializeToNode(pin));
         var completed = f.Refinement!;
-        f.Refinement = completed with { Turns = [completed.Turns.Single() with {
+        f.Refinement = completed with { Turns = [source, completed.Turns.Single() with {
             Artifact = artifact with { Payload = JsonSerializer.SerializeToElement(payload) } }] };
 
         var returned = await f.Review(kickoff.Progress);
@@ -35,6 +38,37 @@ public sealed partial class ProgressivePlanningTests
         Assert.Equal(completed.Id, returned.Progress.FailedStorySessionId);
         Assert.Null(returned.Session);
         Assert.Empty(returned.Progress.DetailedStoryKeys);
+
+        var rejected = f.Refinement;
+        var progress = returned.Progress;
+        if (legacyRetryBlocked)
+        {
+            var blocked = rejected with { Id = Guid.NewGuid(), Status = "Blocked", Turns = [source],
+                FinalSummary = "Progressive planning cannot replace validated scope or a saved increment." };
+            f.Runtime.RegisterCapability<ReadAgentCoordinationRequest, AgentCoordinationSession>(
+                CommunicationCapabilities.CoordinationRead, (q, _) => Task.FromResult(
+                    q.SessionId == blocked.Id ? blocked : q.SessionId == rejected.Id ? rejected : f.Refinement!));
+            f.Runtime.RegisterCapability<ListAgentCoordinationRequest, AgentCoordinationSessions>(
+                CommunicationCapabilities.CoordinationList, (_, _) => Task.FromResult(
+                    new AgentCoordinationSessions([]) { Contributions = new([blocked.Id, rejected.Id], null) }));
+            progress = progress with { FailedStorySessionId = blocked.Id, StoryRetries = 6, StoryRetryReason = blocked.FinalSummary };
+        }
+        var corrected = await f.Review(progress);
+        var replacement = f.Starts.Last();
+        Assert.Equal(artifact.Digest, replacement.Artifact!.Payload.GetProperty("rejectedDraftDigest").GetString());
+        var originalScope = source.Artifact!.Payload.GetProperty("progressivePlanning");
+        var replacementScope = replacement.Artifact!.Payload.GetProperty("progressivePlanning");
+        var story = originalScope.GetProperty("storyKey").GetString()!;
+        Assert.Equal(story, corrected.Progress.PendingStoryKey);
+        Assert.Equal(rejected.Id, replacementScope.GetProperty("previousDraft").GetGuid());
+        Assert.NotEqual(originalScope.GetProperty("draftBasis").GetString(), corrected.Progress.AcceptedBases[story]);
+        Assert.Equal(corrected.Progress.AcceptedBases[story], replacementScope.GetProperty("draftBasis").GetString());
+        Assert.Equal(originalScope.GetProperty("outlineDigest").GetString(), replacementScope.GetProperty("outlineDigest").GetString());
+        Assert.Contains("dependency-pin-phaser", replacement.InitialMessage);
+        f.CompleteRefinement();
+        var admitted = await f.Review(corrected.Progress);
+        Assert.NotNull(admitted.Session);
+        Assert.Contains(story, admitted.Progress.DetailedStoryKeys);
     }
 
     [Fact]

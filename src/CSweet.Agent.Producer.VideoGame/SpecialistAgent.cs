@@ -991,7 +991,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             priorCycle = priorCycle with { Progressive = advance.Progress, UpdatedAt = DateTimeOffset.UtcNow };
             if (advance.Session is null)
                 await PersistPlanningCycleAsync(context.Platform, operatingState, priorCycle, cancellationToken);
-            if (advance.Retry is not null) return PersonalTodoResult.RetryLater(advance.Retry);
+            // The saved Story attempt owns its retry budget. Its scheduled continuation must survive
+            // an exhausted transport retry from a preceding package or publication failure.
+            if (advance.Retry is not null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(OwnNextStepDelay), advance.Retry);
             if (advance.Blocker is not null) return PersonalTodoResult.Blocked(advance.Blocker);
             if (advance.Complete && ownershipFailure is not null)
                 return PersonalTodoResult.RetryLater("Final acceptance needs a completed scope-ownership review: " + ownershipFailure);

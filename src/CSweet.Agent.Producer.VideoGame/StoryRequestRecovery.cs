@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using CSweet.Agent.SDK;
 using CSweet.Agent.SDK.VideoGame.Contracts;
 using CSweet.WorkManagement.Contracts;
@@ -50,6 +51,7 @@ public sealed partial class SpecialistAgent
         ProgressivePlanningProgress progress, string direction, OwnershipReview? ownership, AgentRuntimeContext context, CancellationToken token)
     {
         var matches = new List<StoryAttempt>();
+        StoryAttempt? failedAttempt = null;
         void Consider(AgentCoordinationSession session)
         {
             if (session.SourceKind != "Board" || session.BoardSource?.BoardId != boardId ||
@@ -70,12 +72,20 @@ public sealed partial class SpecialistAgent
                 original.TeamId != cycle.TeamId || original.ApprovedPackageId != cycle.ApprovedPackageId ||
                 original.ApprovedPackageVersion != cycle.ApprovedPackageVersion || original.ApprovedPackageDigest != cycle.ApprovedPackageDigest ||
                 original.PlanningFingerprint != cycle.PlanningFingerprint) return;
+            if (failedAttempt is not null && (session.Id == failedAttempt.Session.Id || session.Status != "Completed" ||
+                key != failedAttempt.Scope.StoryKey || scope.DraftBasis != failedAttempt.Scope.DraftBasis)) return;
             matches.Add(new(session, artifact, scope));
         }
 
         if (progress.FailedStorySessionId is Guid failed)
+        {
             Consider(await context.Platform.Communication.ReadCoordinationAsync(failed, token));
-        else
+            failedAttempt = matches.SingleOrDefault();
+        }
+        // Earlier versions could retry an already returned draft under its immutable storage key.
+        // Recover the actual rejected contribution before deciding to allocate a replacement.
+        if (progress.FailedStorySessionId is null || progress.StoryRetries > 1 &&
+            failedAttempt is { Session.Status: "Blocked" or "Failed", Scope.Adaptive: true })
         {
             Guid? cursor = null;
             do
@@ -89,7 +99,9 @@ public sealed partial class SpecialistAgent
         }
 
         var valid = new List<StoryAttempt>();
-        foreach (var attempt in matches.Where(m => m.Session.Status == "Completed"))
+        (StoryAttempt Attempt, string Digest, string Reason)? rejected = null;
+        foreach (var attempt in matches.Where(m => m.Session.Status == "Completed")
+                     .OrderBy(m => m.Session.CreatedAt).ThenBy(m => m.Session.Id))
         {
             var result = attempt.Session.Turns.OrderBy(t => t.Ordinal).LastOrDefault(t =>
                 t.SpeakerOrganizationUserId == authority.Target.OrganizationUserId &&
@@ -98,14 +110,18 @@ public sealed partial class SpecialistAgent
             var proposal = result.Payload.Deserialize<GameTechnicalDeliveryProposalV1>();
             if (proposal is null) continue;
             try { ValidateProgressiveProposal(outline, evidence, proposal, detail, progress.DetailedStoryKeys, attempt.Scope.StoryKey); }
-            catch (InvalidOperationException) { continue; }
+            catch (InvalidOperationException invalid)
+            {
+                rejected = (attempt, result.Digest, invalid.Message);
+                continue;
+            }
             valid.Add(attempt);
         }
         if (valid.Count == 1)
             return new(progress with { RefinementSessionId = valid[0].Session.Id, PendingStoryKey = valid[0].Scope.StoryKey });
-        if (matches.Count != 1)
+        if (valid.Count > 1 || failedAttempt is null && matches.Count != 1)
             return new(progress, Blocker: "The board manager must reconcile the original Story request and its competing or missing source-bound attempts.");
-        var previous = matches[0];
+        var previous = failedAttempt ?? matches[0];
         var story = previous.Scope.StoryKey!;
         if (previous.Session.Status is "Active" or "Summarizing")
             return new(progress with { RefinementSessionId = previous.Session.Id, PendingStoryKey = story });
@@ -115,15 +131,35 @@ public sealed partial class SpecialistAgent
             ownership is not null && OwnershipCandidates(SuccessorCandidates(outline.DeliveryItems, progress.DetailedStoryKeys.ToHashSet()),
                 outline.DeliveryItems, ownership).All(x => x.ProposalKey != story))
             return new(progress); // Reread changed direction and scoped holds through the ordinary planning review.
-        if (progress.StoryRetries > 5)
+        var replaceRejectedDraft = previous.Scope.Adaptive && rejected.HasValue;
+        // An old Producer could exhaust its budget replaying the very same sealed draft.
+        // Permit its first distinct correction. A corrected request carries the receipt on every replay.
+        if (progress.StoryRetries > 5 && (!replaceRejectedDraft || previous.Request.Payload.TryGetProperty("rejectedDraftDigest", out _)))
             return new(progress, Blocker: "The Technical Director and board manager must resolve the repeated refinement failure: " + progress.StoryRetryReason);
         var request = previous.Request;
+        var retryKey = $"story-recovery:{previous.Session.Id:N}:{progress.StoryRetries}";
+        var reason = progress.StoryRetryReason;
+        var acceptedBases = progress.AcceptedBases;
+        if (replaceRejectedDraft && rejected is { } unusable)
+        {
+            var basis = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
+                previous.Scope.DraftBasis, rejectedSession = unusable.Attempt.Session.Id, unusable.Digest
+            }));
+            acceptedBases = new Dictionary<string, string>(acceptedBases) { [story] = basis };
+            var scope = previous.Scope with { DraftBasis = basis, AcceptedBases = acceptedBases, PreviousDraft = unusable.Attempt.Session.Id };
+            var payload = JsonNode.Parse(request.Payload.GetRawText())!.AsObject();
+            payload["rejectedDraftDigest"] = unusable.Digest;
+            payload["progressivePlanning"] = JsonSerializer.SerializeToNode(scope, ProgressiveJson);
+            request = request with { Payload = JsonSerializer.SerializeToElement(payload) };
+            retryKey += ":" + basis;
+            reason = unusable.Reason;
+        }
         var next = await context.Platform.Communication.StartBoardCoordinationAsync(new(authority.Target.OrganizationUserId, boardId,
             previous.Session.Subject, previous.Session.Objective, previous.Session.SuccessCriteria,
-            "Refine the same approved Story. The previous attempt could not be used: " + progress.StoryRetryReason,
-            BoundedMutationKey($"story-recovery:{previous.Session.Id:N}:{progress.StoryRetries}"),
+            "Refine the same approved Story. The previous attempt could not be used: " + reason,
+            BoundedMutationKey(retryKey),
             new(request.Type, request.SchemaVersion, request.Key, request.PageOrdinal, request.IsFinalPage, request.Payload)), token);
-        return new(progress with { RefinementSessionId = next.Id, PendingStoryKey = story },
+        return new(progress with { RefinementSessionId = next.Id, PendingStoryKey = story, AcceptedBases = acceptedBases },
             Waiting: "The Technical Director has the corrected request for the same Story.");
     }
 }
