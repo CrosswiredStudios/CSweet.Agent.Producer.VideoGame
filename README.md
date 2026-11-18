@@ -1,3 +1,7 @@
+# Producer 6.23.5
+
+Gabriel can resume a blocked first-Story review when the board's saved planning state identifies the returned draft. [Release notes](releases/6.23.5.md)
+
 # Producer 6.23.4
 
 The Producer sends a requested revision directly to the specialist who owns that Story and recovers reviews previously held behind an older failed attempt. [Release notes](releases/6.23.4.md)

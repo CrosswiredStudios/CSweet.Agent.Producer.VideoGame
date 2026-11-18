@@ -309,9 +309,20 @@ public sealed partial class ProgressivePlanningTests
         var progress = original with { StoryRetries = 7, FailedStorySessionId = Guid.NewGuid(),
             StoryRetryReason = "Progressive planning cannot replace validated scope or a saved increment." };
         if (retainedBeforeUpgrade)
+        {
             progress = progress with { DraftSessionId = original.RefinementSessionId, DraftStoryKey = story,
                 DraftBasis = original.AcceptedBases[story], DraftDirection = original.DirectionsDigest,
                 RefinementSessionId = null, PendingStoryKey = null, AdmissionReviewBasis = null };
+            var cycle = new ProducerPlanningCycleState(f.Cycle.WorkstreamId, f.Cycle.BoardId, f.Cycle.TeamId, f.Cycle.PlanningFingerprint,
+                null, null, null, null, null, null, DateTimeOffset.UtcNow) { Progressive = progress };
+            f.Runtime.RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
+                (q, _) => Task.FromResult(new AgentOperatingStateReadResponse(new(Guid.NewGuid(), q.StateKey, "portfolio", 1, "Active",
+                    new Dictionary<string,string>(), [], "", [], Guid.NewGuid(), JsonSerializer.SerializeToElement(new ProducerOperatingState {
+                        PlanningCycles = new Dictionary<Guid,ProducerPlanningCycleState> { [f.Cycle.WorkstreamId] = cycle } }), 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow))));
+            var continuation = await SpecialistAgent.ReadProgressiveContinuationAsync(f.Cycle.WorkstreamId, f.Cycle.BoardId,
+                f.Cycle.PlanningFingerprint, f.Runtime.CreateContext(), default);
+            Assert.Equal(original.RefinementSessionId, continuation?.RetainedReviewSessionId);
+        }
         var replacement = await SpecialistAgent.AdvanceProgressivePlanningAsync(f.Cycle.BoardId, f.Roster, f.Cycle,
             [], f.Member, f.Session, f.Artifact, f.Outline, progress, f.Runtime.CreateContext(), default,
             (_, _, _, _, _, draft) => Task.FromResult(draft is null

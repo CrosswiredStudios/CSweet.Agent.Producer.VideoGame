@@ -10,6 +10,7 @@ public sealed partial class SpecialistAgent
     internal sealed record ProgressiveContinuation(string? Fingerprint)
     {
         public bool PrerequisiteCompleted { get; init; }
+        public Guid? RetainedReviewSessionId { get; init; }
     }
     internal sealed record PlanningContinuationReceipt(string Fingerprint, long FromRevision);
 
@@ -19,6 +20,9 @@ public sealed partial class SpecialistAgent
         var state = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(ProjectStateKeys.Portfolio("producer"), ct);
         if (state?.Payload.PlanningCycles.TryGetValue(project, out var cycle) != true || cycle is null || cycle.Progressive is not { } progress ||
             cycle.BoardId != board || cycle.PlanningFingerprint != planningFingerprint) return null;
+        if (progress.DetailedStoryKeys.Count == 0 &&
+            RetainedReviewSession(progress, progress.ReviewedDirectionsDigest ?? progress.DirectionsDigest) is Guid draft)
+            return new(null) { RetainedReviewSessionId = draft };
         var items = (await context.Platform.Work.ReadBoardAsync(board, ct)).Items;
         var prerequisites = items.Where(item => item.ProposalProvenance is { } provenance &&
             provenance.ArtifactDigest == cycle.TechnicalProposalDigest &&

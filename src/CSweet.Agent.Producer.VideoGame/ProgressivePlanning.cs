@@ -62,6 +62,13 @@ public sealed partial class SpecialistAgent
     internal static bool IsScopeContainer(GameProposedWorkItemV1 item) => item.WorkItemTypeKey is
         VideoGameWorkItemTypeKeys.Milestone or VideoGameWorkItemTypeKeys.Feature or VideoGameWorkItemTypeKeys.Content;
 
+    private static Guid? RetainedReviewSession(ProgressivePlanningProgress progress, string direction) =>
+        progress.PendingStoryKey is null && progress.DraftSessionId is Guid draft &&
+        progress.FailedStorySessionId is Guid failed && failed != draft &&
+        progress.RefinementSessionId == progress.LastPublishedSessionId && progress.DraftDirection == direction &&
+        progress.DraftStoryKey is string story && progress.DraftBasis is { } basis &&
+        progress.AcceptedBases.GetValueOrDefault(story) == basis ? draft : null;
+
     internal static string ProgressiveScopeKey(GameProductionPlanningCycleV1 cycle, string directionsDigest) =>
         "technical-progressive:" + Convert.ToHexStringLower(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new {
             cycle.WorkstreamId, cycle.TeamId, cycle.BoardId, cycle.ProfileDigest, cycle.ApprovedPackageId,
@@ -216,13 +223,8 @@ public sealed partial class SpecialistAgent
             GameTechnicalDeliveryProposalV1 current = outline;
             // Older Producers retained a validated return for review but also kept the failure that
             // preceded it. Re-read the later, exactly bound draft through normal admission.
-            if (progress.PendingStoryKey is null && progress.DraftSessionId is Guid reviewedDraft &&
-                progress.FailedStorySessionId is Guid earlierFailure && earlierFailure != reviewedDraft &&
-                progress.RefinementSessionId == progress.LastPublishedSessionId &&
-                progress.DraftDirection == (directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest) &&
-                progress.DraftStoryKey is string reviewedStory && progress.DraftBasis is { } reviewedBasis &&
-                progress.AcceptedBases.GetValueOrDefault(reviewedStory) == reviewedBasis)
-                progress = progress with { RefinementSessionId = reviewedDraft, PendingStoryKey = reviewedStory };
+            if (RetainedReviewSession(progress, directionReview?.ReviewedDirectionsDigest ?? evidence.DirectionsDigest) is Guid reviewedDraft)
+                progress = progress with { RefinementSessionId = reviewedDraft, PendingStoryKey = progress.DraftStoryKey };
             else if (progress.StoryRetries > 0 && progress.PendingStoryKey is null)
             {
                 var recovery = await RecoverStoryRequestAsync(boardId, cycle, outlineSession, evidence, outline, progress,

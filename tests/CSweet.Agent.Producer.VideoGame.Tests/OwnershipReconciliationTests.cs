@@ -59,13 +59,15 @@ public sealed partial class ProgressivePlanningTests
         Assert.Equal(1, requeues); Assert.Single(states);
     }
 
-    [Fact]
-    public async Task AnUpdatedProducerReleasesAPlanningCrashOnceBeforeAnyStoryIsPublished()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_changed_contract_or_a_retained_Story_releases_only_its_own_planning_failure_once(bool retainedStory)
     {
         // Prism Break: the commitment crashed before its first Story was published, so no accepted
         // increment existed to authorize a retry and the installed fix never ran.
         var states = new Dictionary<string, AgentOperatingStateResponse>();
-        var source = new PersonalTodoWorkContext(WorkstreamId: Guid.NewGuid(), TeamId: Guid.NewGuid(), SourceFingerprint: "approved");
+        var source = new PersonalTodoWorkContext(WorkstreamId: Guid.NewGuid(), BoardId: Guid.NewGuid(), TeamId: Guid.NewGuid(), SourceFingerprint: "approved");
         var item = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with { Id = Guid.NewGuid(), Revision = 35,
             CorrelationId = "producer-planning:crashed", WorkContext = source, Status = PersonalTodoStatuses.Blocked,
             BlockReason = "Repeated issue: I couldn\u2019t finish this attempt because execution stopped unexpectedly.",
@@ -86,8 +88,17 @@ public sealed partial class ProgressivePlanningTests
         var unpublished = new SpecialistAgent.ProgressiveContinuation(null);
         Task Ensure(DateTimeOffset? changed) => SpecialistAgent.EnsureCommitmentAsync(item.CorrelationId!, "Plan", "Plan", "High", source, context, default,
             progressiveContinuation: unpublished, dependencyChangedAt: changed);
-        await Ensure(null); Assert.Equal(0, requeues); // The same release has no new reason to retry.
-        var changed = DateTimeOffset.UtcNow;
+        var changed = retainedStory ? item.UpdatedAt.AddMinutes(-10) : DateTimeOffset.UtcNow;
+        if (retainedStory)
+        {
+            item = item with { BlockReason = "Repeated issue: I couldn't finish this ticket. " + SpecialistAgent.MissingStoryAttempts };
+            await Ensure(changed);
+            unpublished = unpublished with { RetainedReviewSessionId = Guid.NewGuid() };
+            await SpecialistAgent.EnsureCommitmentAsync(item.CorrelationId!, "Plan", "Plan", "High", source with { BoardId = Guid.NewGuid() },
+                context, default, progressiveContinuation: unpublished, dependencyChangedAt: changed);
+        }
+        else await Ensure(null);
+        Assert.Equal(0, requeues);
         await Ensure(changed); Assert.Equal(1, requeues);
         // The reassessment crashes again: the same generation cannot release it a second time.
         item = item with { Status = PersonalTodoStatuses.Blocked };

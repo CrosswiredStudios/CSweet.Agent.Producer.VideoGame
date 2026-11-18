@@ -650,6 +650,12 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 existingContext.SourceFingerprint == workContext.SourceFingerprint;
             var amendmentCleared = scopeAmendmentReady && correlationId.StartsWith(PendingScopeAmendmentPrefix, StringComparison.Ordinal) &&
                 existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
+            if (progressiveContinuation?.RetainedReviewSessionId is Guid reviewedDraft &&
+                existing.Status == PersonalTodoStatuses.Blocked && existing.BlockReason?.EndsWith(MissingStoryAttempts, StringComparison.Ordinal) == true &&
+                correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&
+                existing.WorkContext?.WorkstreamId == workContext.WorkstreamId && existing.WorkContext?.TeamId == workContext.TeamId &&
+                existing.WorkContext?.BoardId == workContext.BoardId && existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint)
+                resourceDependencyChanged |= await AuthorizeContinuationRecoveryAsync(existing, "returned-story:" + reviewedDraft.ToString("N"), context, cancellationToken);
             var dependencyChanged = (resourceDependencyChanged || dependencyChangedAt > existing.UpdatedAt) && existing.WorkContext?.WorkstreamId == workContext.WorkstreamId &&
                 existing.WorkContext?.TeamId == workContext.TeamId && existing.WorkContext?.SourceFingerprint == workContext.SourceFingerprint;
             if (existing.Status == PersonalTodoStatuses.Blocked && correlationId.StartsWith(PlanningCommitmentPrefix, StringComparison.Ordinal) &&

@@ -9,6 +9,7 @@ namespace CSweet.Agent.Producer.VideoGame;
 public sealed partial class SpecialistAgent
 {
     private sealed record StoryAttempt(AgentCoordinationSession Session, AgentCoordinationArtifact Request, ProgressiveRequest Scope);
+    internal const string MissingStoryAttempts = "The board manager must reconcile the original Story request and its competing or missing source-bound attempts.";
 
     internal static async Task<string?> ReconcileRecoveryDirectionAsync(GameProductionPlanningCycleV1 cycle,
         ProducerAcceptedHandoff handoff, StoryReviewDraft draft,
@@ -120,7 +121,7 @@ public sealed partial class SpecialistAgent
         if (valid.Count == 1)
             return new(progress with { RefinementSessionId = valid[0].Session.Id, PendingStoryKey = valid[0].Scope.StoryKey });
         if (valid.Count > 1 || failedAttempt is null && matches.Count != 1)
-            return new(progress, Blocker: "The board manager must reconcile the original Story request and its competing or missing source-bound attempts.");
+            return new(progress, Blocker: MissingStoryAttempts);
         var previous = failedAttempt ?? matches[0];
         var story = previous.Scope.StoryKey!;
         if (previous.Session.Status is "Active" or "Summarizing")
