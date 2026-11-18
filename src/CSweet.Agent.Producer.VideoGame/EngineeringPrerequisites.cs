@@ -12,16 +12,10 @@ public sealed partial class SpecialistAgent
     internal static IReadOnlyList<string> ReadEngineeringPrerequisites(
         GameTechnicalDeliveryProposalV1 proposal, AgentCoordinationArtifact artifact)
     {
-        string[] keys;
-        if (artifact.Payload.TryGetProperty("engineeringPrerequisiteKeys", out var declared))
-            keys = declared.Deserialize<string[]>() ?? throw new InvalidOperationException("Engineering prerequisite keys are missing.");
-        else
-        {
-            // Compatibility with the deterministic prerequisite emitted by Director 5.0.4.
-            // No title, question wording, or model claim of approval participates in this match.
-            keys = proposal.DeliveryItems.Any(x => x.ProposalKey == "dependency-pin-phaser")
-                ? ["dependency-pin-phaser"] : [];
-        }
+        // Only the authenticated proposal can declare work independent of outstanding decisions.
+        var keys = artifact.Payload.TryGetProperty("engineeringPrerequisiteKeys", out var declared)
+            ? declared.Deserialize<string[]>() ?? throw new InvalidOperationException("Engineering prerequisite keys are missing.")
+            : [];
         if (keys.Length > 16 || keys.Any(string.IsNullOrWhiteSpace) || keys.Distinct(StringComparer.Ordinal).Count() != keys.Length)
             throw new InvalidOperationException("Engineering prerequisite keys must be bounded and unique.");
         foreach (var key in keys)

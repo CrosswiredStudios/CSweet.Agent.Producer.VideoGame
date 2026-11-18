@@ -173,6 +173,7 @@ public sealed partial class SpecialistAgent
                     Use an empty list for the normal single draft. Narrow or suspend drafting when uncertainty is high.
                     Give a short feelSummary with actual build reference or prerequisite progress, how to try it, attributed observations
                     and remaining hypotheses. Never invent human playtests, build links or observations. Report a research-only sprint honestly.
+                    The Technical Director owns engine, language and library decisions within approved scope. For the first sprint, schedule an engineer to set up the selected stack and run the smallest playable slice from a clean checkout. Include its package lock when applicable. A missing setup artifact is work for that sprint. Return an incomplete brief to Victor once with the specific missing deliverable.
                     Examine the provisional Story, its assumptions and current evidence. Set keepDraft true when the same draft remains suitable.
                     When you select the supplied draft's Story but its briefs need revision, set keepDraft false and include
                     draftRevisionReason naming the affected task or criterion, the conflicting evidence and the correction Victor should make.
