@@ -369,8 +369,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 if (accepted?.Payload.PlanningCycles.TryGetValue(workstream.Id, out var blockedCycle) == true &&
                     accepted.Payload.AcceptedHandoffs.TryGetValue(workstream.Id, out var decisionHandoff) &&
                     blockedCycle.OutstandingAuthorityQuestions.Count > 0)
-                    await EnsurePlanningDecisionsAsync(workstream.Id, board.Id, blockedCycle.PlanningFingerprint,
-                        blockedCycle.OutstandingAuthorityQuestions, decisionHandoff, context, planningToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
+                    await EnsurePlanningDecisionsAsync(workstream.Id, board.Id,
+                        blockedCycle.OutstandingAuthorityQuestions, decisionHandoff, context, planningToken);
                 var metrics = await context.Platform.Work.ReadFlowMetricsAsync(new ReadWorkFlowMetricsRequest(board.Id)
                 {
                     TeamId = entry.ActiveTeam?.TeamId,
@@ -854,8 +854,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             workstream.ProfileDefinitionDigest ?? string.Empty, package.Id, package.Version, packageDigest,
             workstream.LifecycleStage, TargetMilestone(workstream.LifecycleStage), source.SourceFingerprint);
 
-        var planningDecisions = await context.Platform.ReadDecisionsAsync(
-            new ReadDecisionRequest(WorkstreamId: workstreamId), cancellationToken);
+        var planningDecisions = (await context.Platform.ReadDecisionsAsync(
+            new ReadDecisionRequest(WorkstreamId: workstreamId), cancellationToken)).Where(d => AppliesToBoard(d, boardId)).ToArray();
         IReadOnlyList<string> managerDirections = ResolvedPlanningDirections(planningDecisions, workstreamId, handoff.RevisionDigest)
             .Concat(await ReadAssetPlanningDirectionsAsync(planningDecisions, workstreamId, context, cancellationToken)).ToArray();
         // Historical ownership-review feedback is retained in state for audit, but it is
@@ -968,7 +968,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             {
                 ownership = await CarryRecordedResolutionsAsync(ownership, boardId, handoff, context, cancellationToken);
                 priorCycle = await ReconcileOwnershipFindingsAsync(cycle, priorCycle, roadmap, ownership, technicalProposal,
-                    technicalDirector, handoff, context, cancellationToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
+                    technicalDirector, handoff, context, cancellationToken);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
@@ -1029,8 +1029,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var questions = UnresolvedPlanningQuestions(
             designerProposal.OpenCreativeDecisions.Concat(reviewedAuthorityQuestions ?? technicalProposal.OpenFeasibilityDecisions).ToArray(),
             planningDecisions, workstreamId, handoff.RevisionDigest);
-        var currentPlanningDecisions = await EnsurePlanningDecisionsAsync(workstreamId, boardId, cycle.PlanningFingerprint, questions,
-            handoff, context, cancellationToken, new AgentLlmSelection(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
+        var currentPlanningDecisions = await EnsurePlanningDecisionsAsync(workstreamId, boardId, questions,
+            handoff, context, cancellationToken);
         if (roleRepair is not null && !roleRepairPublished)
         {
             if (questions.Count > 0)

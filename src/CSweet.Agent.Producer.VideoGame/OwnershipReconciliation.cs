@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using CSweet.Agent.SDK;
 using CSweet.Agent.SDK.VideoGame.Contracts;
 using CSweet.WorkManagement.Contracts;
@@ -87,7 +87,7 @@ public sealed partial class SpecialistAgent
     internal static async Task<ProducerPlanningCycleState> ReconcileOwnershipFindingsAsync(
         GameProductionPlanningCycleV1 cycle, ProducerPlanningCycleState state, ProgressiveEvidence roadmap,
         OwnershipReview ownership, GameTechnicalDeliveryProposalV1 proposal, AgentTeammate specialist,
-        ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken ct, AgentLlmSelection? resolutionModel = null)
+        ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken ct)
     {
         var directory = await context.Platform.Issues.ReadAllAsync(cycle.BoardId, true, ct);
         var source = new WorkApprovedSource(handoff.ArtifactId, handoff.AcceptedRevisionId, handoff.RevisionDigest);
@@ -188,8 +188,8 @@ public sealed partial class SpecialistAgent
             var commissions = directory.Commissions.Where(c => c.IssueIds.Contains(issue.Id) && c.Source == source).ToArray();
             async Task AskManagerAsync(string question)
             {
-                var currentDecisions = await EnsurePlanningDecisionsAsync(cycle.WorkstreamId, cycle.BoardId, cycle.PlanningFingerprint, [question], handoff, context, ct, resolutionModel);
-                var decision = currentDecisions.LastOrDefault(d => d.Summary == question && d.Status != DecisionStatuses.Superseded);
+                var currentDecisions = await EnsurePlanningDecisionsAsync(cycle.WorkstreamId, cycle.BoardId, [question], handoff, context, ct);
+                var decision = CurrentPlanningDecisions([question], currentDecisions, cycle.WorkstreamId, handoff.RevisionDigest).FirstOrDefault();
                 if (decision is null || issue.Links.Any(l => l.Kind == "Decision" && l.Id == decision.Id)) return;
                 var link = new WorkIssueUpdate(issue.ObligationKey, issue.Statement, issue.Detail, issue.ScopeKeys) {
                     IssueId = issue.Id, ExpectedRevision = issue.Revision, Phase = "AwaitingDecision", NextAction = "Incorporate the accountable manager's recorded direction",

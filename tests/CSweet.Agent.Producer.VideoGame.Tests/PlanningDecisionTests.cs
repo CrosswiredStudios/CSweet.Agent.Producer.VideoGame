@@ -23,7 +23,7 @@ public sealed class PlanningDecisionTests
         var runtime = new AgentTestRuntime().RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(
             PlatformCapabilities.DecisionRead, (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([old, answer]));
         // No decision-write capability is registered: reconciliation must retain the owner answer.
-        var current = await SpecialistAgent.EnsurePlanningDecisionsAsync(stream, Guid.NewGuid(), "scope",
+        var current = await SpecialistAgent.EnsurePlanningDecisionsAsync(stream, Guid.NewGuid(),
             [answer.Summary], handoff, runtime.CreateContext(), default);
         Assert.Equal(JsonSerializer.Serialize(answer), JsonSerializer.Serialize(current.Single(x => x.Id == answer.Id)));
         var direction = Assert.Single(SpecialistAgent.ResolvedPlanningDirections(current, stream, "accepted-sha"));
@@ -169,13 +169,15 @@ public sealed class PlanningDecisionTests
         var board = Guid.NewGuid();
         var handoff = new ProducerAcceptedHandoff(stream, Guid.NewGuid(), Guid.NewGuid(), "accepted-sha",
             "handoff", Guid.NewGuid(), Guid.NewGuid(), 2, DateTimeOffset.UtcNow);
-        var first = SpecialistAgent.PlanningDecisionRequests(stream, board, "cycle",
+        var first = SpecialistAgent.PlanningDecisionRequests(stream, board,
             ["Choose browser targets", "Set playtest criteria", "Choose browser targets", " "], handoff);
-        var repeat = SpecialistAgent.PlanningDecisionRequests(stream, board, "cycle",
+        var repeat = SpecialistAgent.PlanningDecisionRequests(stream, board,
             ["Set playtest criteria", " Choose browser targets "], handoff);
         Assert.Equal(2, first.Count);
         Assert.Equal(first.Select(x => x.IdempotencyKey).Order(), repeat.Select(x => x.IdempotencyKey).Order());
         Assert.Equal(2, first.Select(x => x.IdempotencyKey).Distinct().Count());
+        var otherBoard = SpecialistAgent.PlanningDecisionRequests(stream, Guid.NewGuid(), ["Choose browser targets"], handoff);
+        Assert.DoesNotContain(first, r => r.IdempotencyKey == otherBoard.Single().IdempotencyKey);
         foreach (var request in first)
         {
             Assert.Equal(stream, request.WorkstreamId);
@@ -183,19 +185,20 @@ public sealed class PlanningDecisionTests
             Assert.Equal("provide-direction", request.RecommendedOptionId);
             Assert.Null(request.DueAt);
             Assert.Null(request.SupersedesDecisionId);
-            var evidence = Assert.Single(request.Evidence);
+            var evidence = Assert.Single(request.Evidence, e => e.Kind == "artifact");
+            Assert.Equal(board, Assert.Single(request.Evidence, e => e.Kind == "board").ResourceId);
             Assert.Equal(handoff.ArtifactId, evidence.ResourceId);
             Assert.Equal(handoff.AcceptedRevisionId, evidence.RevisionId);
             Assert.Equal(handoff.RevisionDigest, evidence.Digest);
             Assert.Equal("video-game.production-plan.v1", evidence.TypeKey);
-            Assert.Equal(board, request.TypeData!.Value.GetProperty("boardId").GetGuid());
-            Assert.Equal(handoff.PlanningPackageId, request.TypeData.Value.GetProperty("planningPackageId").GetGuid());
+            Assert.Null(request.TypeData);
+            Assert.Contains(request.Summary, new[] { "Choose browser targets", "Set playtest criteria" });
             Assert.Contains(request.Options, x => x.Id == "request-more-evidence");
             Assert.InRange(request.IdempotencyKey.Length, 1, 160);
         }
-        var nextCycle = SpecialistAgent.PlanningDecisionRequests(stream, board, "new-cycle", ["Choose browser targets"], handoff);
+        var nextCycle = SpecialistAgent.PlanningDecisionRequests(stream, board, ["Choose browser targets"], handoff);
         Assert.Contains(nextCycle[0].IdempotencyKey, first.Select(x => x.IdempotencyKey));
-        var revisedBrief = SpecialistAgent.PlanningDecisionRequests(stream, board, "new-cycle", ["Choose browser targets"],
+        var revisedBrief = SpecialistAgent.PlanningDecisionRequests(stream, board, ["Choose browser targets"],
             handoff with { RevisionDigest = "new-accepted-sha" });
         Assert.DoesNotContain(revisedBrief[0].IdempotencyKey, first.Select(x => x.IdempotencyKey));
     }
@@ -221,7 +224,7 @@ public sealed class PlanningDecisionTests
                         request.RecommendedOptionId, null, DecisionStatuses.Pending, null,
                         request.Evidence, null, null, null, 1, now, now));
                 });
-        var recorded = await SpecialistAgent.EnsurePlanningDecisionsAsync(workstream, board, "cycle",
+        var recorded = await SpecialistAgent.EnsurePlanningDecisionsAsync(workstream, board,
             ["Choose browser targets", "Choose browser targets", "Set QA thresholds"], handoff,
             runtime.CreateContext(), default);
         Assert.Equal(2, requested.Count);
@@ -248,7 +251,7 @@ public sealed class PlanningDecisionTests
                 (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([old]))
             .RegisterCapability<DecisionRequest, DecisionRecord>(PlatformCapabilities.DecisionRequest,
                 (request, _) => { submitted = request; return Task.FromResult(old); });
-        await SpecialistAgent.EnsurePlanningDecisionsAsync(workstream, Guid.NewGuid(), "cycle",
+        await SpecialistAgent.EnsurePlanningDecisionsAsync(workstream, Guid.NewGuid(),
             [old.Summary], handoff, runtime.CreateContext(), default);
         Assert.NotNull(submitted);
         Assert.Equal("work-planning", submitted.AuthorityRuleKey);
@@ -300,6 +303,6 @@ public sealed class PlanningDecisionTests
     {
         var handoff = new ProducerAcceptedHandoff(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), "sha",
             "handoff", Guid.NewGuid(), Guid.NewGuid(), 1, DateTimeOffset.UtcNow);
-        Assert.Empty(SpecialistAgent.PlanningDecisionRequests(handoff.WorkstreamId, Guid.NewGuid(), "cycle", [], handoff));
+        Assert.Empty(SpecialistAgent.PlanningDecisionRequests(handoff.WorkstreamId, Guid.NewGuid(), [], handoff));
     }
 }
