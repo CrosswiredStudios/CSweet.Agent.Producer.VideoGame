@@ -36,6 +36,7 @@ public sealed partial class SpecialistAgent
     internal sealed record OutcomeVerification(string Source, bool Planned, bool Verified, IReadOnlyList<Guid> AcceptancePlans);
     internal sealed record ReviewEffects(string? Story, bool DraftAhead, bool KeepDraft, string Guidance, string Basis)
     {
+        public PersonalTodoDependency? Dependency { get; init; }
         public IReadOnlyList<string> AdditionalDrafts { get; init; } = [];
         public string? Disposition { get; init; }
     }
@@ -92,6 +93,9 @@ public sealed partial class SpecialistAgent
                 ? "build-environment" : "direction", d.Id, d.Revision.ToString(), d.Summary + " | " + d.Rationale));
         facts.AddRange(await RefreshReviewProposalsAsync(cycle.WorkstreamId, decisions, context, token));
         facts.AddRange(await ReadDesignAdviceAsync(cycle.WorkstreamId, board, context, token));
+        foreach (var build in resourceContext.Resources.Where(r => r.ResourceType == ResourceCapabilities.BuildToolchain &&
+            r.Status is "Preparing" or "PendingApproval" or "Approved" or "Installing" or "Certifying" or "WaitingDependency").OrderBy(r => r.Id))
+            facts.Add(new("pending-build-resource", build.Id, build.Revision.ToString(), $"{build.ProfileKey} | {build.Status} | {build.Purpose}"));
         var candidateKeys = choices.Select(c => c.ProposalKey).ToArray();
         var completed = sprints.Where(s => s.Status == "Completed").OrderBy(s => s.Sequence).ThenBy(s => s.Id).ToArray();
         var evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
@@ -126,7 +130,7 @@ public sealed partial class SpecialistAgent
                 cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys,
                 holds = (ownership?.Gaps ?? []).Where(g => g.HoldsScope && g.AffectedProposalKeys.Intersect(scope).Any())
                     .Select(g => g.ObligationKey ?? g.Statement).Order(),
-                material = facts.Where(f => f.Kind is not ("item" or "container" or "current-execution" or "build"))
+                material = facts.Where(f => f.Kind is not ("item" or "container" or "current-execution" or "build" or "pending-build-resource"))
                     .OrderBy(f => f.Kind).ThenBy(f => f.Id) }));
         }
         // A pre-refinement receipt cannot decide whether to keep a proposal it never saw.
@@ -200,6 +204,7 @@ public sealed partial class SpecialistAgent
                     Current staffing and resources are supplied separately: Pending is a proposal, Approved is approval, fulfilled
                     roster membership is actual staffing, and only Ready resources establish verified capacity. Keep real declined,
                     revoked or explicit owner restrictions. Propose only the missing capability and keep unaffected planning moving.
+                    If planning must wait for a build resource, cite its pending-build-resource evidence so planning can resume when it settles.
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { brief = acceptedBrief.Content, sprint = sprint?.Goal, candidates = choices.Select(c => new { c.Title,c.Description }),
                     obligations=ownership?.Coverage??roadmap.ScopeCoverage, resourceContext, technicalConstraints,
@@ -208,7 +213,7 @@ public sealed partial class SpecialistAgent
             ], new AgentModelJsonRequest<ReviewChoice>("game planning review") {
                 Options = ResponseOptions(), Normalize = value =>
                 {
-                    ValidateReview(value, choices.Count, roles, evidence, draft is null ? null : Array.IndexOf(candidateKeys, draft.Story.ProposalKey));
+                    value = ValidateReview(value, choices.Count, roles, evidence, draft is null ? null : Array.IndexOf(candidateKeys, draft.Story.ProposalKey));
                     var obligations=ownership?.Coverage??roadmap.ScopeCoverage;
                     if(value.VerifiedSources?.Any(i=>i<0||i>=obligations.Count)==true)
                         throw new AgentModelJsonException("Verified source indexes must refer to supplied approved obligations.");
@@ -252,7 +257,9 @@ public sealed partial class SpecialistAgent
         var current = settled ?? (latest?.Basis == evidenceDigest ? latest : await Decide(key, null));
         var admittingOnly = admissionKey is not null && current.Story == draft!.Story.ProposalKey && current.Decision.Disposition is (null or "select") &&
             current.Decision.KeepDraft && current.Decision.Actions.All(a => a.Kind == "proceed");
-        if (settled is null && !admittingOnly && (await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token)).Fingerprint != resourceContext.Fingerprint)
+        var refreshed = settled is null && !admittingOnly
+            ? await PlanningResourceContext.ReadAsync(context.Platform, cycle.WorkstreamId, cycle.TeamId, token) : null;
+        if (refreshed is not null && refreshed.Fingerprint != resourceContext.Fingerprint)
         {
             // A legitimate staffing decision during inference invalidates the judgment, not the draft.
             // Refresh once in this callback. Continued change waits for the normal durable planning wake.
@@ -261,17 +268,28 @@ public sealed partial class SpecialistAgent
                     await context.Platform.Work.ReadBoardAsync(cycle.BoardId, token),
                     await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token),
                     await context.Platform.Work.ListSprintsAsync(cycle.BoardId, token), roadmap, handoff, context, token, ownership, draft, 1, outlineConstraints);
+            var changedBuild = refreshed.Resources.Where(r => r.ResourceType == ResourceCapabilities.BuildToolchain &&
+                !resourceContext.Resources.Any(previous => previous.Id == r.Id && previous.Revision == r.Revision))
+                .OrderByDescending(r => r.UpdatedAt).ThenBy(r => r.Id).FirstOrDefault();
+            if (changedBuild is not null)
+                return new(null, false, true, "Build capacity changed during review. Gabriel will reassess the retained draft when fulfillment settles.", evidenceDigest) {
+                    Disposition = "wait", Dependency = new(ResourceCapabilities.Changed, changedBuild.Id, "Pending") };
             return new(null, false, true, "Current staffing or resources changed again. The Producer will reassess current facts on the next planning review; the existing draft is retained.", evidenceDigest) { Disposition = "wait" };
         }
         if (admissionKey is not null && settled is null && current.Decision.Disposition is null or "select")
-            await store.MergeAsync<ReviewReceipt>(admissionKey, "game.planning.review.v1", 1, prior => prior ?? current,
-                new Dictionary<string,string>(), "admission:" + ProducerPolicyFingerprint.Digest(admissionKey), token);
-        await ApplyReviewEffectsAsync(current, cycle, roster, handoff, context, token, new(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")));
+            current = (await store.MergeAsync<ReviewReceipt>(admissionKey, "game.planning.review.v1", 1, prior => prior ?? current,
+                new Dictionary<string,string>(), "admission:" + ProducerPolicyFingerprint.Digest(admissionKey), token)).Payload;
+        var returningDraft = admitting && current.Story == draft!.Story.ProposalKey &&
+            current.Decision.Disposition is (null or "select") && !current.Decision.KeepDraft;
+        var pendingBuild = current.Decision.Disposition == "wait" ? current.Evidence.FirstOrDefault(f => f.Kind == "pending-build-resource") : null;
+        await ApplyReviewEffectsAsync(current, cycle, roster, handoff, context, token, new(Settings.GetGuid("llmProviderId")!.Value, Settings.GetString("llmModel")),
+            returningDraft, hasDependency: pendingBuild is not null);
         return new(current.Story, current.Decision.DraftAhead, current.Decision.KeepDraft, current.Decision.NextGoal + " " +
             string.Join(" ", current.Decision.Actions.Select(a => a.Rationale).Append(current.Decision.DraftRevisionReason)).TrimEnd(), current.Digest)
         {
             AdditionalDrafts = (current.Decision.AdditionalDraftCandidates ?? []).Select(i => candidateKeys[i]).ToArray(),
-            Disposition = current.Decision.Disposition
+            Disposition = current.Decision.Disposition,
+            Dependency = pendingBuild is null ? null : new(ResourceCapabilities.Changed, pendingBuild.Id, "Pending")
         };
     }
 
@@ -400,6 +418,11 @@ public sealed partial class SpecialistAgent
             if (a.Kind == "qa-disposition" && !a.EvidenceIndexes.Any(i => evidence[i].Kind is "qa" or "finding"))
                 throw Reject("A qa-disposition must cite a qa or finding evidence index.");
         }
+        // A correction addressed to the supplied draft identifies the same Story even when
+        // the reviewer calls the disposition "refine" and supplies no candidate index.
+        if (value.Disposition == "refine" && !value.KeepDraft && draftCandidate is >= 0 && draftCandidate < candidateCount &&
+            !string.IsNullOrWhiteSpace(value.DraftRevisionReason) && value.Actions.Any(a => a.Kind == "refine"))
+            value = value with { Disposition = "select", NextCandidate = draftCandidate };
         if (value.NextCandidate is int selected && selected == draftCandidate && !value.KeepDraft && string.IsNullOrWhiteSpace(value.DraftRevisionReason))
             throw new AgentModelJsonException("Review the supplied task briefs. Keep a suitable draft, or provide draftRevisionReason naming the affected task or criterion, conflicting evidence and needed correction.");
         if (draftCandidate is not null && value.NextCandidate == draftCandidate && !value.KeepDraft)
@@ -412,9 +435,10 @@ public sealed partial class SpecialistAgent
     }
 
     internal static async Task ApplyReviewEffectsAsync(ReviewReceipt receipt, GameProductionPlanningCycleV1 cycle,
-        AgentTeamContext roster, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, AgentLlmSelection? resolutionModel = null)
+        AgentTeamContext roster, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, AgentLlmSelection? resolutionModel = null,
+        bool returningDraft = false, bool hasDependency = false)
     {
-        if (receipt.Decision.Disposition is "refine" or "wait" && !receipt.Decision.Actions.Any(a => a.Kind is "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
+        if (!hasDependency && receipt.Decision.Disposition is "refine" or "wait" && !receipt.Decision.Actions.Any(a => a.Kind is "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
         {
             // A wait with no declared dependency has no wake path. Assign diagnosis of the named uncertainty,
             // rather than promising to wait for an event that nobody has been asked to produce.
@@ -486,6 +510,8 @@ public sealed partial class SpecialistAgent
                     }
                     if (routed) continue;
                 }
+                // AdvanceProgressivePlanningAsync sends all refinement guidance on the same Story revision.
+                if (returningDraft && action.Kind == "refine" && interrupted.Count == 0) continue;
                 var scope = receipt.Story ?? "project";
                 var questionText = receipt.TechnicalConstraints.Count == 0 ? action.Rationale : action.Rationale +
                     "\nTechnical constraints from the Technical Director's project proposal:\n" + string.Join("\n", receipt.TechnicalConstraints);

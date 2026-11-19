@@ -1,4 +1,8 @@
-# Producer 6.23.12
+# Producer 6.23.13
+
+Gabriel resumes planning when the build resource he is waiting for settles. When a Story needs a correction, Victor receives the feedback in one revision request. The build wake requires the accompanying C-Sweet host update. [Release notes](releases/6.23.13.md)
+
+## Producer 6.23.12
 
 Gabriel now presents planning choices with a short description and a plain-English explanation of their impact. [Release notes](releases/6.23.12.md)
 

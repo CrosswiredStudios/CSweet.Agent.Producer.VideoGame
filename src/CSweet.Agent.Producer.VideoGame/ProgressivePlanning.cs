@@ -42,6 +42,7 @@ public sealed partial class SpecialistAgent
         public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
         // The next move is the Producer's own, so no collaborator's completion will wake this commitment.
         public bool OwnNextStep { get; init; }
+        public PersonalTodoDependency? Dependency { get; init; }
     }
     private static readonly JsonSerializerOptions ProgressiveJson = new(JsonSerializerDefaults.Web);
 
@@ -277,7 +278,7 @@ public sealed partial class SpecialistAgent
                     var liveSprints = await context.Platform.Work.ListSprintsAsync(boardId, token);
                     var returnedDraft = StoryReviewDraft.FromProposal(pending, currentSession.Id, currentArtifact.Digest, current);
                     var decision = await review(progress, eligible, liveBoard, livePlans, liveSprints, returnedDraft);
-                    if (decision.Disposition == "wait") return new(progress, Waiting: decision.Guidance);
+                    if (decision.Disposition == "wait") return new(progress, Waiting: decision.Guidance) { Dependency = decision.Dependency };
                     if (prior.Count > 0 && !HasAcceptedProgressiveIncrements(priorPlan, prior.ToArray(), liveBoard.Items, livePlans, true))
                         return new(progress, Waiting: "The provisional Story still needs its prerequisite acceptance.");
                     if (decision.Story == pending && !decision.KeepDraft)
@@ -340,6 +341,7 @@ public sealed partial class SpecialistAgent
                 evidence.Adaptive ? plans : await context.Platform.Work.ReadDeliveryPlansAsync(new(cycle.WorkstreamId), token), evidence.Adaptive));
             if (!accepted && !evidence.Adaptive)
                 return new(progress, Waiting: "The increment awaits execution and independent aggregate acceptance.");
+            if (assessment?.Dependency is not null) return new(progress, Waiting: assessment.Guidance) { Dependency = assessment.Dependency };
             if (!accepted && assessment?.DraftAhead == false) return new(progress, Waiting: "The Producer deferred speculative planning until the current uncertainty is resolved.");
             if (assessment?.Disposition is "refine" or "wait")
                 return new(progress, Waiting: assessment.Guidance);

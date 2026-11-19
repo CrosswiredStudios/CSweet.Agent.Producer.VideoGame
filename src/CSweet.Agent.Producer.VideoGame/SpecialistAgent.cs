@@ -1016,7 +1016,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 return PersonalTodoResult.RetryLater("Final acceptance needs a completed scope-ownership review: " + ownershipFailure);
             if (advance.Complete) return await ReconcileFinalProductAsync(cycle,handoff,ownership!,context,cancellationToken);
             if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(
-                DateTimeOffset.UtcNow.Add(advance.OwnNextStep ? OwnNextStepDelay : CoordinationReviewDelay), advance.Waiting);
+                DateTimeOffset.UtcNow.Add(advance.OwnNextStep ? OwnNextStepDelay : CoordinationReviewDelay), advance.Waiting, null, advance.Dependency);
             technicalSession = advance.Session!;
             reviewedAuthorityQuestions = advance.ReviewedAuthorityQuestions;
             technicalArtifact = technicalSession.Turns.Last(x => x.SpeakerOrganizationUserId == technicalSession.Target.OrganizationUserId &&
