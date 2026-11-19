@@ -46,7 +46,7 @@ public sealed class OwnEstimateReviewTests
         Assert.Equal(VideoGameRoleKeys.Producer, proposal.RoleKey);
         Assert.Equal(scope.WorkItems[0].WorkItemId, Assert.Single(proposal.Estimates).WorkItemId);
         Assert.True(proposal.Estimates[0].EstimatePoints > 0);
-        Assert.Equal(3,proposal.AvailableSprintCapacity);
+        Assert.Equal(proposal.Estimates.Sum(e => e.EstimatePoints), proposal.AvailableSprintCapacity);
     }
 
     [Fact]

@@ -190,9 +190,7 @@ public sealed partial class ProgressivePlanningTests
         {
             calendarRevision++;
             await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);
-            Assert.Equal(0, starts);
-            Assert.Null(sprints[1].CapacityPoints);
-            await new SpecialistAgent().HandlePersonalTodoAsync(estimate, f.Runtime.CreateContext(), default);
+            Assert.Equal(1, starts);
             Assert.True(sprints[1].CapacityPoints > 0);
         }
         await new SpecialistAgent().HandlePersonalTodoAsync(readiness, f.Runtime.CreateContext(), default);

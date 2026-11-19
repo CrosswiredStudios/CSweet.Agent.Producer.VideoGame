@@ -1,4 +1,8 @@
-# Producer 6.23.15
+# Producer 6.23.16
+
+Gabriel requests technical estimates and treats hired, eligible AI agents as available for every assigned item. Legacy zero or unknown capacity and other projects do not exclude a ticket. The selected estimates determine the total planned points. Technical dependencies, staffing, manager direction and sprint preflight still apply. [Release notes](releases/6.23.16.md)
+
+## Producer 6.23.15
 
 Gabriel resumes scheduling an existing ticket when the manager permits it and the saved hold applies to implementation. The assigned engineer renews the estimate and the existing sprint still goes through preflight. [Release notes](releases/6.23.15.md)
 

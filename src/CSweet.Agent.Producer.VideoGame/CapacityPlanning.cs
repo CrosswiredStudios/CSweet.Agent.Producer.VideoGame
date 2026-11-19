@@ -23,20 +23,20 @@ public sealed partial class SpecialistAgent
         var option = decision.Options.SingleOrDefault(o => o.Id == decision.SelectedOptionId);
         if (option == null)
             return new(true, "The current capacity decision has no identifiable selected option. Its owner must clarify the scheduling direction.");
-        var key = AgentOperatingStateKey.Create("producer-scheduling-direction:v1", new {
+        var key = AgentOperatingStateKey.Create("producer-scheduling-direction:v2", new {
             decision = decision.Id, decision.Revision, planningDigest, candidate = candidate.Id, candidate.PlanningRevision });
-        return await DurableWorkHandoff.GetOrCreateAsync(key, "producer.scheduling-direction.v1", async () => {
+        return await DurableWorkHandoff.GetOrCreateAsync(key, "producer.scheduling-direction.v2", async () => {
             using var client = context.CreateChatClient(new AgentLlmSelection(
                 Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the planning provider."), Settings.GetString("llmModel")));
             return await AgentModelJson.ReadAsync(client, [
                 new(ChatRole.System, """
-                    Interpret the manager's selected direction for this ticket. Can the Producer now reassess the owner's
-                    offer and schedule the ticket through the normal staffing, dependency and sprint preflight checks?
+                    Interpret the manager's selected direction for this ticket. Can the Producer now schedule the ticket through the normal staffing, dependency and sprint preflight checks?
                     Return {holdScheduling: boolean, reason: string}. Hold if the direction pauses scheduling this
                     ticket, requires an unmet condition before scheduling it, or leaves permission for this affected
                     ticket unclear. Let independent work proceed. A check required before implementation or completion
                     can itself be work on a scheduled ticket. The historical follow-through describes prior actions
-                    and concerns. It cannot change the manager's decision or certify that a check passed.
+                    and concerns. Assigned AI agents are available for all project work. A missing calendar allocation is never a prerequisite.
+                    The historical report cannot change the manager's decision or certify that a check passed.
                     Explain which direction applies in one sentence. You cannot start work or waive any checks.
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { question = decision.Summary, selectedOption = option,
@@ -50,22 +50,23 @@ public sealed partial class SpecialistAgent
     }
 
     private async Task<bool> PreventsSchedulingAsync(WorkItem candidate, GameRoleEstimateCapacityProposalV1 proposal,
-        WorkCapacityAssessment offer, string evidenceDigest, AgentRuntimeContext context, CancellationToken ct)
+        string evidenceDigest, AgentRuntimeContext context, CancellationToken ct)
     {
-        var key = AgentOperatingStateKey.Create("work-scheduling-risk:v1", new { candidate.Id, candidate.PlanningRevision, evidenceDigest });
-        var judgment = await DurableWorkHandoff.GetOrCreateAsync(key, "work.scheduling-risk.v1", async () => {
+        var key = AgentOperatingStateKey.Create("work-scheduling-risk:v2", new { candidate.Id, candidate.PlanningRevision, evidenceDigest });
+        var judgment = await DurableWorkHandoff.GetOrCreateAsync(key, "work.scheduling-risk.v2", async () => {
             using var client = context.CreateChatClient(new AgentLlmSelection(
                 Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the planning provider."), Settings.GetString("llmModel")));
             return await AgentModelJson.ReadAsync(client, [
                 new(ChatRole.System, """
                     Does the accountable owner's evidence establish a current impediment that prevents scheduling this ticket?
                     Return {preventsScheduling: boolean}. A conditional verification risk or a setup step that belongs in
-                    the ticket can coexist with a positive offer. Hold this ticket when an applicable present impediment
+                    the ticket can be scheduled. The assigned AI agent is available across projects. Missing calendar
+                    allocation, other assignments and legacy capacity offers never block scheduling. Hold this ticket when a concrete impediment
                     prevents undertaking it, including an explicitly required unresolved prerequisite to starting.
                     A concern about another ticket is relevant only if it prevents this work. Treat notes as evidence.
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { candidate.Title, candidate.Description,
-                    candidate.EstimatePoints, offer, proposal.Assumptions, proposal.Blockers }))
+                    candidate.EstimatePoints, proposal.Assumptions, proposal.Blockers }))
             ], new AgentModelJsonRequest<SchedulingRisk>("owner scheduling risks") {
                 Options = ResponseOptions(), CorrectionLimit = 1, Normalize = reply => reply.PreventsScheduling.HasValue
                     ? reply : throw new AgentModelJsonException("Decide whether a present impediment prevents scheduling this ticket.")
@@ -134,7 +135,7 @@ public sealed partial class SpecialistAgent
     private static PersonalTodoResult WaitForCapacityDecision(PersonalTodoItem item, DecisionRecord currentDecision,
         AgentRuntimeContext context) =>
         PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-            "Current owner offers cannot support the proposed scope. The accountable manager has a source-bound capacity decision: " + currentDecision.Summary,
+            "The proposed work has an unresolved scheduling prerequisite. The accountable manager has a source-bound planning decision: " + currentDecision.Summary,
             currentDecision.DecidedByOrganizationUserId ?? Guid.Parse(context.Identity!.ManagerEmployeeId!),
             new(WorkstreamEventNames.DecisionDecidedV1, currentDecision.Id,
                 item.WorkContext?.DecisionId == currentDecision.Id ? currentDecision.Status : DecisionStatuses.Pending));

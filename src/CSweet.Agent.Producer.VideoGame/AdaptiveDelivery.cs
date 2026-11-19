@@ -46,7 +46,7 @@ public sealed partial class SpecialistAgent
         var sequence = sprints.Select(x => x.Sequence ?? 0).DefaultIfEmpty().Max() + 1;
         await context.Platform.Work.CreateSprintAsync(new CreateWorkSprintRequest(boardId,
             $"Production Sprint {sequence}",
-            $"Draft against accepted scope {digest}. Scope and capacity remain provisional until specialist estimates and readiness checks are recorded.",
+            $"Draft against accepted scope {digest}. Scope remains provisional until specialist estimates and readiness checks are recorded.",
             DateTimeOffset.UtcNow.Date, DateTimeOffset.UtcNow.Date.AddDays(14),
             $"producer-draft-sprint:{boardId:N}:{sequence}") { Sequence = sequence }, token);
     }
