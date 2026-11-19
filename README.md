@@ -1,4 +1,8 @@
-# Producer 6.23.13
+# Producer 6.23.14
+
+Gabriel resumes estimation when QA joins the project team and keeps conditional risks separate from an engineer’s capacity offer. This release uses the accompanying C-Sweet host update for roster and decision waits. [Release notes](releases/6.23.14.md)
+
+## Producer 6.23.13
 
 Gabriel resumes planning when the build resource he is waiting for settles. When a Story needs a correction, Victor receives the feedback in one revision request. The build wake requires the accompanying C-Sweet host update. [Release notes](releases/6.23.13.md)
 

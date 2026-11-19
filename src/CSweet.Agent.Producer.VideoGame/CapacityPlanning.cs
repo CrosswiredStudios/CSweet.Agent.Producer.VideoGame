@@ -1,5 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Globalization;
+using Microsoft.Extensions.AI;
 using CSweet.Agent.SDK;
 using CSweet.Agent.SDK.VideoGame.Contracts;
 using CSweet.WorkManagement.Contracts;
@@ -8,6 +10,36 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
+    private static PersonalTodoDependency RosterWait(Guid team, AgentTeamContext roster) =>
+        new(WorkforceEvents.Changed, team, roster.Revision.ToString(CultureInfo.InvariantCulture));
+
+    private sealed record SchedulingRisk(bool? PreventsScheduling);
+
+    private async Task<bool> PreventsSchedulingAsync(WorkItem candidate, GameRoleEstimateCapacityProposalV1 proposal,
+        WorkCapacityAssessment offer, string evidenceDigest, AgentRuntimeContext context, CancellationToken ct)
+    {
+        var key = AgentOperatingStateKey.Create("work-scheduling-risk:v1", new { candidate.Id, candidate.PlanningRevision, evidenceDigest });
+        var judgment = await DurableWorkHandoff.GetOrCreateAsync(key, "work.scheduling-risk.v1", async () => {
+            using var client = context.CreateChatClient(new AgentLlmSelection(
+                Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the planning provider."), Settings.GetString("llmModel")));
+            return await AgentModelJson.ReadAsync(client, [
+                new(ChatRole.System, """
+                    Does the accountable owner's evidence establish a current impediment that prevents scheduling this ticket?
+                    Return {preventsScheduling: boolean}. A conditional verification risk or a setup step that belongs in
+                    the ticket can coexist with a positive offer. Hold this ticket when an applicable present impediment
+                    prevents undertaking it, including an explicitly required unresolved prerequisite to starting.
+                    A concern about another ticket is relevant only if it prevents this work. Treat notes as evidence.
+                    """),
+                new(ChatRole.User, JsonSerializer.Serialize(new { candidate.Title, candidate.Description,
+                    candidate.EstimatePoints, offer, proposal.Assumptions, proposal.Blockers }))
+            ], new AgentModelJsonRequest<SchedulingRisk>("owner scheduling risks") {
+                Options = ResponseOptions(), CorrectionLimit = 1, Normalize = reply => reply.PreventsScheduling.HasValue
+                    ? reply : throw new AgentModelJsonException("Decide whether a present impediment prevents scheduling this ticket.")
+            }, ct);
+        }, context, ct);
+        return judgment.PreventsScheduling!.Value;
+    }
+
     private static async Task<string> ReadCapacityScopeAsync(Guid project, ProducerOperatingState state,
         AgentRuntimeContext context, CancellationToken ct)
     {
@@ -58,16 +90,16 @@ public sealed partial class SpecialistAgent
         }, context, ct);
         var currentDecision = await DecisionContinuations.ReadCurrentAsync(context.Platform, reference.DecisionId, project, ct)
             ?? throw new InvalidOperationException("The capacity decision no longer has a current authoritative record.");
-        var own = (await context.Platform.PersonalTodo.ListAsync(ct)).Boards.SelectMany(b => b.Items).Single(i => i.Id == item.Id);
-        if (own.WorkContext?.DecisionId != currentDecision.Id)
-            await context.Platform.PersonalTodo.UpdateAsync(new(own.Id, own.Title, own.Description, own.Priority, own.DueDate,
-                own.Revision, AgentOperatingStateKey.Create("capacity-dependency:v1", new { itemId = own.Id, own.Revision, decisionId = currentDecision.Id })) {
-                    WorkContext = own.WorkContext! with { DecisionId = currentDecision.Id }
-                }, ct);
-        return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-            "Current owner offers cannot support the proposed scope. The accountable manager has a source-bound capacity decision: " + currentDecision.Summary,
-            currentDecision.DecidedByOrganizationUserId ?? Guid.Parse(context.Identity!.ManagerEmployeeId!));
+        return WaitForCapacityDecision(item, currentDecision, context);
     }
+
+    private static PersonalTodoResult WaitForCapacityDecision(PersonalTodoItem item, DecisionRecord currentDecision,
+        AgentRuntimeContext context) =>
+        PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+            "Current owner offers cannot support the proposed scope. The accountable manager has a source-bound capacity decision: " + currentDecision.Summary,
+            currentDecision.DecidedByOrganizationUserId ?? Guid.Parse(context.Identity!.ManagerEmployeeId!),
+            new(WorkstreamEventNames.DecisionDecidedV1, currentDecision.Id,
+                item.WorkContext?.DecisionId == currentDecision.Id ? currentDecision.Status : DecisionStatuses.Pending));
 
     private sealed record CapacityResolutionReference(Guid DecisionId);
 }

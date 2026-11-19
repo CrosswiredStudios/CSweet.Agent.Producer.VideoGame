@@ -18,7 +18,7 @@ public sealed class CapacityPlanningTests
         var own = JsonSerializer.Deserialize<PersonalTodoItem>("{}")! with { Id = Guid.NewGuid(), Title = "Prepare the next increment", Description = "Plan scope", Priority = "High",
             Status = "Running", Revision = 1, WorkContext = new(project, BoardId: board, SourceFingerprint: "planning") };
         var states = new Dictionary<string, AgentOperatingStateResponse>();
-        var modelCalls = 0; var decisionCalls = 0; var dependencyWrites = 0; DecisionRecord? decision = null;
+        var modelCalls = 0; var decisionCalls = 0; DecisionRecord? decision = null;
         var draft = new RequirementDecisionDraft("Which existing commitment should take priority?", "Only the affected increment waits.",
             [new("Prioritize the existing investigation", "Defer this increment", "Record the responsible owner's priority and revisit availability") { Impact = "The investigation goes first. The new work waits." },
              new("Make room for the next increment", "Resequence existing work within authority", "Obtain a fresh accountable-owner offer after the competing commitment changes") { Impact = "The team checks which work can move before setting a start date." }], 1);
@@ -44,22 +44,17 @@ public sealed class CapacityPlanningTests
                     TypeData = r.TypeData, Options = r.Options, Status = "Pending", Revision = 1 });
             })
             .RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead,
-                (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([decision!]))
-            .RegisterCapability<object, PersonalTodoDirectory>(PersonalTodoCapabilities.Read,
-                (_, _) => Task.FromResult(new PersonalTodoDirectory([new(Guid.NewGuid(), employee, "Owner", manager, "Manager", 1, [own])], employee)))
-            .RegisterCapability<UpdatePersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Update, (r, _) => {
-                dependencyWrites++; Assert.Equal(own.Id, r.ItemId); Assert.Equal(own.Revision, r.ExpectedRevision);
-                return Task.FromResult(own = own with { WorkContext = r.WorkContext, Revision = own.Revision + 1 });
-            });
+                (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([decision!]));
         var context = runtime.CreateContext(identity: new(employee.ToString(), "Owner", null, null, null, [], null, manager.ToString(), "Manager"));
         var agent = new SpecialistAgent();
         await agent.ExecuteCapabilityAsync(new(Guid.NewGuid(), AgentConfigurationCapabilities.Update, JsonSerializer.SerializeToElement(new UpdateAgentConfigurationRequest(
             new Dictionary<string, JsonElement> { ["llmProviderId"] = JsonSerializer.SerializeToElement(Guid.NewGuid()), ["llmModel"] = JsonSerializer.SerializeToElement("test") }))), context, default);
         var facts = JsonSerializer.SerializeToElement(new { capacity = new WorkCapacityAssessment(capacity, "Existing commitment needs priority resolution", capacity is null ? "Confirm priority" : null) });
-        await agent.ResolveCapacityShortfallAsync(own, project, board, "planning", state, facts, context, default);
-        await agent.ResolveCapacityShortfallAsync(own, project, board, "planning", state, facts, context, default);
-        Assert.Equal(1, modelCalls); Assert.Equal(1, decisionCalls); Assert.Equal(1, dependencyWrites);
-        Assert.Equal(decision!.Id, own.WorkContext!.DecisionId);
+        var first = await agent.ResolveCapacityShortfallAsync(own, project, board, "planning", state, facts, context, default);
+        var replay = await agent.ResolveCapacityShortfallAsync(own, project, board, "planning", state, facts, context, default);
+        Assert.Equal(1, modelCalls); Assert.Equal(1, decisionCalls);
+        Assert.Equal(new PersonalTodoDependency(WorkstreamEventNames.DecisionDecidedV1, decision!.Id, DecisionStatuses.Pending), first.Dependency);
+        Assert.Equal(first.Dependency, replay.Dependency);
         Assert.Equal("Running", own.Status);
         Assert.True(RequirementDecisions.IsGrounded(decision));
     }

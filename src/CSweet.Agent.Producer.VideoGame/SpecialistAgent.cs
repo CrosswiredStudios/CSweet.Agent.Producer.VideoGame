@@ -1188,12 +1188,15 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         {
             var staffing = await ProposeCoverageAsync(workstreamId, boardId, roster, neededAuthors, context, cancellationToken);
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                $"The draft awaits accountable owners or a dependency-consistent alternative. {staffing?.Status} {staffing?.DecisionComment}");
+                $"The draft awaits accountable owners or a dependency-consistent alternative. {staffing?.Status} {staffing?.DecisionComment}",
+                null, neededAuthors.Count > 0 ? RosterWait(teamId, roster) : null);
         }
 
         var planningRevision = candidates.Max(x => x.PlanningRevision);
         var planningDigest = source.SourceFingerprint;
         var capacityDirection = await ReadCapacityDirectionAsync(item, workstreamId, boardId, planningDigest, context, cancellationToken);
+        if (capacityDirection is { Status: DecisionStatuses.Pending })
+            return WaitForCapacityDecision(item, capacityDirection, context);
         if (capacityDirection is { Status: DecisionStatuses.Decided })
         {
             var follow = await RequirementDecisions.FollowThroughAsync(capacityDirection,
@@ -1312,7 +1315,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var actual = await ReadManagerTeamAsync(teamId, context, cancellationToken, workstreamId);
         if (actual is null || actual.Revision != roster.Revision)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                "Staffing changed during estimation. Reconcile the draft against the current team.");
+                "Staffing changed during estimation. Reconcile the draft against the current team.", null, RosterWait(teamId, roster));
         board = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var estimated = candidates.ToDictionary(c => c.Id);
         candidates = board.Items.Where(t => estimated.TryGetValue(t.Id, out var prior) &&
@@ -1339,9 +1342,20 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (missing.Length == 0) staffed.Add(candidate);
             else gaps.AddRange(missing);
         }
-        var eligible = EligibleCandidateScope(staffed, board.Items);
+        var schedulable = new List<WorkItem>();
+        foreach (var candidate in staffed)
+        {
+            var assigned = PrimaryExecutionAssignment(candidate)!;
+            var owner = roleProposals.Single(p => p.Author.AgentInstallationId == assigned.AgentInstallationId &&
+                p.Proposal.RoleKey == assigned.Requirements!.RequiredRoleKey);
+            if (owner.Capacity.OfferedPoints > 0 && owner.Proposal.Blockers.Count > 0 &&
+                await PreventsSchedulingAsync(candidate, owner.Proposal, owner.Capacity, owner.Evidence.Digest, context, cancellationToken))
+                continue;
+            schedulable.Add(candidate);
+        }
+        var eligible = EligibleCandidateScope(schedulable, board.Items);
         var selectedCandidates = SelectCapacityBoundedScope(eligible, roleProposals.ToDictionary(x => (x.Proposal.RoleKey, (Guid?)x.Author.AgentInstallationId),
-            x => x.Proposal.Blockers.Count == 0 ? x.Capacity.OfferedPoints ?? 0 : 0));
+            x => x.Capacity.OfferedPoints ?? 0));
         if (selectedCandidates.Count == 0)
         {
             if (gaps.Count == 0 && unspecified.Count > 0)
@@ -1357,7 +1371,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 context, cancellationToken);
             var gapText = string.Join(" ", gaps.Select(g => g.Rationale).Distinct());
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
-                $"Sprint staffing: {gapText} {request?.Status} {request?.DecisionComment} Recheck the actual roster or revise draft scope.");
+                $"Sprint staffing: {gapText} {request?.Status} {request?.DecisionComment} Recheck the actual roster or revise draft scope.",
+                null, RosterWait(teamId, actual));
         }
         var structuralIssues=WorkPlanningReadiness.Validate(selectedCandidates);
         if(structuralIssues.Count>0)
