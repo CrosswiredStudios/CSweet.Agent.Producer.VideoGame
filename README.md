@@ -1,6 +1,6 @@
-# Producer 6.23.11
+# Producer 6.23.12
 
-Gabriel submits the team's original planning question and carries the manager's recorded answer into specialist planning. [Release notes](releases/6.23.11.md)
+Gabriel now presents planning choices with a short description and a plain-English explanation of their impact. [Release notes](releases/6.23.12.md)
 
 Gabriel carries Victor's technical decision into Story admission and distinguishes provider selection from runtime requirements. [Release notes](releases/6.23.10.md)
 

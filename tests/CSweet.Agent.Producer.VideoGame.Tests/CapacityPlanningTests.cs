@@ -20,8 +20,8 @@ public sealed class CapacityPlanningTests
         var states = new Dictionary<string, AgentOperatingStateResponse>();
         var modelCalls = 0; var decisionCalls = 0; var dependencyWrites = 0; DecisionRecord? decision = null;
         var draft = new RequirementDecisionDraft("Which existing commitment should take priority?", "Only the affected increment waits.",
-            [new("Prioritize the existing investigation", "Defer this increment", "Record the responsible owner's priority and revisit availability"),
-             new("Make room for the next increment", "Resequence existing work within authority", "Obtain a fresh accountable-owner offer after the competing commitment changes")], 1);
+            [new("Prioritize the existing investigation", "Defer this increment", "Record the responsible owner's priority and revisit availability") { Impact = "The investigation goes first. The new work waits." },
+             new("Make room for the next increment", "Resequence existing work within authority", "Obtain a fresh accountable-owner offer after the competing commitment changes") { Impact = "The team checks which work can move before setting a start date." }], 1);
         var runtime = new AgentTestRuntime()
             .RegisterCapability<AgentOperatingStateReadRequest, AgentOperatingStateReadResponse>(PlatformCapabilities.AgentOperatingStateRead,
                 (r, _) => Task.FromResult(new AgentOperatingStateReadResponse(states.GetValueOrDefault(r.StateKey))))
