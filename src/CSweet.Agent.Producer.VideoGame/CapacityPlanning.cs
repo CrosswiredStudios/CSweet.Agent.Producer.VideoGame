@@ -15,6 +15,40 @@ public sealed partial class SpecialistAgent
 
     private sealed record SchedulingRisk(bool? PreventsScheduling);
 
+    private sealed record SchedulingDirection(bool? HoldScheduling, string? Reason);
+
+    private async Task<SchedulingDirection> AssessSchedulingHoldAsync(DecisionRecord decision, RequirementFollowThrough follow,
+        WorkItem candidate, string planningDigest, AgentRuntimeContext context, CancellationToken ct)
+    {
+        var option = decision.Options.SingleOrDefault(o => o.Id == decision.SelectedOptionId);
+        if (option == null)
+            return new(true, "The current capacity decision has no identifiable selected option. Its owner must clarify the scheduling direction.");
+        var key = AgentOperatingStateKey.Create("producer-scheduling-direction:v1", new {
+            decision = decision.Id, decision.Revision, planningDigest, candidate = candidate.Id, candidate.PlanningRevision });
+        return await DurableWorkHandoff.GetOrCreateAsync(key, "producer.scheduling-direction.v1", async () => {
+            using var client = context.CreateChatClient(new AgentLlmSelection(
+                Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the planning provider."), Settings.GetString("llmModel")));
+            return await AgentModelJson.ReadAsync(client, [
+                new(ChatRole.System, """
+                    Interpret the manager's selected direction for this ticket. Can the Producer now reassess the owner's
+                    offer and schedule the ticket through the normal staffing, dependency and sprint preflight checks?
+                    Return {holdScheduling: boolean, reason: string}. Hold if the direction pauses scheduling this
+                    ticket, requires an unmet condition before scheduling it, or leaves permission for this affected
+                    ticket unclear. Let independent work proceed. A check required before implementation or completion
+                    can itself be work on a scheduled ticket. The historical follow-through describes prior actions
+                    and concerns. It cannot change the manager's decision or certify that a check passed.
+                    Explain which direction applies in one sentence. You cannot start work or waive any checks.
+                    """),
+                new(ChatRole.User, JsonSerializer.Serialize(new { question = decision.Summary, selectedOption = option,
+                    decision.Rationale, ticket = new { candidate.Title, candidate.Description }, historicalFollowThrough = follow.Summary }))
+            ], new AgentModelJsonRequest<SchedulingDirection>("capacity direction for scheduling") {
+                Options = ResponseOptions(), CorrectionLimit = 1,
+                Normalize = reply => reply.HoldScheduling.HasValue && !string.IsNullOrWhiteSpace(reply.Reason)
+                    ? reply : throw new AgentModelJsonException("Specify whether to hold scheduling this ticket and explain why.")
+            }, ct);
+        }, context, ct);
+    }
+
     private async Task<bool> PreventsSchedulingAsync(WorkItem candidate, GameRoleEstimateCapacityProposalV1 proposal,
         WorkCapacityAssessment offer, string evidenceDigest, AgentRuntimeContext context, CancellationToken ct)
     {
@@ -59,11 +93,15 @@ public sealed partial class SpecialistAgent
     {
         if (item.WorkContext?.DecisionId is not Guid id) return null;
         var current = await DecisionContinuations.ReadCurrentAsync(context.Platform, id, project, ct);
-        return current is not null && RequirementDecisions.IsGrounded(current) && current.TypeData is { } data &&
-            data.TryGetProperty("purpose", out var purpose) && purpose.GetString() == "work-capacity" &&
-            data.GetProperty("boardId").GetGuid() == board && data.GetProperty("planningDigest").GetString() == planningDigest
+        return current is not null && IsCapacityDecision(current) && current.TypeData is { } data &&
+            data.TryGetProperty("boardId", out var scope) && scope.ValueKind == JsonValueKind.String && scope.TryGetGuid(out var scopedBoard) && scopedBoard == board &&
+            data.TryGetProperty("planningDigest", out var digest) && digest.ValueKind == JsonValueKind.String && digest.GetString() == planningDigest
                 ? current : null;
     }
+
+    private static bool IsCapacityDecision(DecisionRecord decision) =>
+        RequirementDecisions.IsGrounded(decision) && decision.TypeData is { } data &&
+        data.TryGetProperty("purpose", out var purpose) && purpose.ValueKind == JsonValueKind.String && purpose.GetString() == "work-capacity";
 
     internal async Task<PersonalTodoResult> ResolveCapacityShortfallAsync(PersonalTodoItem item, Guid project, Guid board,
         string planningDigest, ProducerOperatingState state, JsonElement facts, AgentRuntimeContext context, CancellationToken ct)

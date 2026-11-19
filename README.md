@@ -1,4 +1,8 @@
-# Producer 6.23.14
+# Producer 6.23.15
+
+Gabriel resumes scheduling an existing ticket when the manager permits it and the saved hold applies to implementation. The assigned engineer renews the estimate and the existing sprint still goes through preflight. [Release notes](releases/6.23.15.md)
+
+## Producer 6.23.14
 
 Gabriel resumes estimation when QA joins the project team and keeps conditional risks separate from an engineer’s capacity offer. This release uses the accompanying C-Sweet host update for roster and decision waits. [Release notes](releases/6.23.14.md)
 

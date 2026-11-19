@@ -9,7 +9,13 @@ public sealed partial class SpecialistAgent
     internal sealed record SprintPreparation(string Scope, string Digest)
     {
         public IReadOnlyList<CapacitySource> CapacitySources { get; init; } = [];
+        public Guid? CapacityDecisionId { get; init; }
+        public long? CapacityDecisionRevision { get; init; }
     }
+    private static async Task<bool> CapacityDirectionCurrentAsync(Guid id, long? revision, Guid project,
+        AgentRuntimeContext context, CancellationToken ct) =>
+        await DecisionContinuations.ReadCurrentAsync(context.Platform, id, project, ct) is { Status: DecisionStatuses.Decided } current &&
+        current.Id == id && current.Revision == revision;
     internal sealed record CapacitySource(Guid EmployeeId, Guid InstallationId, IReadOnlyList<Guid> ProposedItems, string AvailabilityBasis);
 
     private static async Task<bool> CapacitySourcesCurrentAsync(Guid board, IReadOnlyList<CapacitySource> sources,

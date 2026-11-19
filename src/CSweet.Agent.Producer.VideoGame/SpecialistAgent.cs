@@ -1192,11 +1192,21 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 null, neededAuthors.Count > 0 ? RosterWait(teamId, roster) : null);
         }
 
-        var planningRevision = candidates.Max(x => x.PlanningRevision);
         var planningDigest = source.SourceFingerprint;
         var capacityDirection = await ReadCapacityDirectionAsync(item, workstreamId, boardId, planningDigest, context, cancellationToken);
+        if (source.DecisionId is Guid linkedId && capacityDirection is null)
+        {
+            var linked = (await context.Platform.ReadDecisionsAsync(new(linkedId), cancellationToken))
+                .SingleOrDefault(d => d.Id == linkedId && d.WorkstreamId == workstreamId);
+            if (linked is null || IsCapacityDecision(linked))
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                    "The linked capacity direction is unavailable for the current planning scope. Its owner must reconcile the decision.");
+        }
         if (capacityDirection is { Status: DecisionStatuses.Pending })
             return WaitForCapacityDecision(item, capacityDirection, context);
+        if (capacityDirection is { Status: not DecisionStatuses.Decided })
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "The linked capacity decision has no current scheduling direction.");
         if (capacityDirection is { Status: DecisionStatuses.Decided })
         {
             var follow = await RequirementDecisions.FollowThroughAsync(capacityDirection,
@@ -1205,9 +1215,22 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                 context, new(Settings.GetGuid("llmProviderId") ?? throw new InvalidOperationException("Configure the planning provider."),
                     Settings.GetString("llmModel")), ResponseOptions(), cancellationToken);
             if (follow.HoldAffectedWork)
-                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), follow.Summary,
-                    capacityDirection.DecidedByOrganizationUserId);
+            {
+                var schedulableUnderDirection = new List<WorkItem>();
+                var held = new List<string>();
+                foreach (var candidate in candidates)
+                {
+                    var direction = await AssessSchedulingHoldAsync(capacityDirection, follow, candidate, planningDigest, context, cancellationToken);
+                    if (direction.HoldScheduling == false) schedulableUnderDirection.Add(candidate);
+                    else held.Add($"{candidate.Identifier ?? candidate.Title}: {direction.Reason}");
+                }
+                candidates = EligibleCandidateScope(schedulableUnderDirection, board.Items, estimationOnly: true).ToList();
+                if (candidates.Count == 0)
+                    return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                        "Sprint scheduling awaits the manager's direction for " + string.Join(" ", held), capacityDirection.DecidedByOrganizationUserId);
+            }
         }
+        var planningRevision = candidates.Max(x => x.PlanningRevision);
         var roleProposals = new List<(AgentCoordinationSession? Session, AgentCoordinationParticipant Author, EstimateProposalEvidence Evidence,
             GameRoleEstimateCapacityProposalV1 Proposal, WorkCapacityAssessment Capacity)>();
         var pendingRoles = new List<string>();
@@ -1418,6 +1441,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
 
         var beforeCommit = await context.Platform.Work.ReadBoardAsync(boardId, cancellationToken);
         var teamBeforeCommit = await ReadManagerTeamAsync(teamId, context, cancellationToken, workstreamId);
+        if (capacityDirection is not null && !await CapacityDirectionCurrentAsync(capacityDirection.Id, capacityDirection.Revision,
+            workstreamId, context, cancellationToken))
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "The manager's capacity direction changed during preparation. Reassess the current decision.");
         if (teamBeforeCommit?.Revision != actual.Revision || selectedCandidates.Any(t => !beforeCommit.Items.Any(now =>
             now.Id == t.Id && now.Revision == t.Revision && now.PlanningRevision == t.PlanningRevision)) ||
             !await CapacitySourcesCurrentAsync(boardId, capacitySources, actual, context, cancellationToken))
@@ -1474,6 +1501,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (currentCycle.AdaptivePlanning)
         {
             var receipt = new SprintPreparation(PreparedScope(selectedCandidates, actual.Revision), readinessDigest) {
+                CapacityDecisionId = capacityDirection?.Id, CapacityDecisionRevision = capacityDirection?.Revision,
                 CapacitySources = capacitySources.Where(s => selectedCandidates.Any(c => PrimaryExecutionAssignment(c)?.AgentInstallationId == s.InstallationId)).ToArray()
             };
             await new RevisionSafeProjectState(context.Platform).MergeAsync<SprintPreparation>(PreparationKey(sprint.Id),
@@ -1529,22 +1557,27 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             !CanPrepareWithPlanningDecisions(x, cycle)))
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 "Sprint scope includes implementation that still depends on an unresolved planning decision.");
+        SprintPreparation? preparation = null;
         if (cycle.AdaptivePlanning && item.WorkContext.TeamId is Guid teamId)
         {
             var team = await ReadManagerTeamAsync(teamId, context, cancellationToken, project);
             var receipt = await context.Platform.ReadOperatingStateAsync<SprintPreparation>(PreparationKey(sprintId), cancellationToken);
+            preparation = receipt?.Payload;
             var scope = current.Items.Where(t => t.SprintId == sprintId && t.ExecutionMode == WorkItemExecutionModes.Executable).ToArray();
             if (team is null) return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "Waiting for the current project roster.");
             if (scope.Length == 0 || receipt?.Payload.Scope != PreparedScope(scope, team.Revision) ||
                 scope.Any(t => MissingSprintStaff(t, team, current.Board.ManagerOrganizationUserId, true).Count != 0) ||
+                (receipt.Payload.CapacityDecisionId is Guid decisionId && !await CapacityDirectionCurrentAsync(decisionId,
+                    receipt.Payload.CapacityDecisionRevision, project, context, cancellationToken)) ||
                 !await CapacitySourcesCurrentAsync(boardId, receipt.Payload.CapacitySources, team, context, cancellationToken))
             {
                 var renewed = await context.Platform.Work.SetSprintCapacityAsync(new(boardId, sprintId, null, sprint.Revision,
                     $"reassess-staff:{sprintId:N}:{sprint.Revision}"), cancellationToken);
                 await EnsureCommitmentAsync(SprintEstimationCorrelation(boardId, cycle.ReconciledDigest!, renewed.Sequence ?? 1) + ":" + renewed.Revision,
                     "Reassess staffing and scope", "Reconcile the current estimates, team and selected work before readiness.", WorkPriorities.Critical,
-                    item.WorkContext with { SprintId = null, SourceFingerprint = cycle.ReconciledDigest }, context, cancellationToken);
-                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "The roster or selected work changed. Sprint staffing is being reassessed.");
+                    item.WorkContext with { SprintId = null, SourceFingerprint = cycle.ReconciledDigest,
+                        DecisionId = receipt?.Payload.CapacityDecisionId ?? item.WorkContext.DecisionId }, context, cancellationToken);
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay), "The sprint preparation evidence changed. Reassess the selected work and staffing.");
             }
         }
         var deliveryWait = await FinalizeSprintDeliveriesAsync(item, boardId, sprintId, context, cancellationToken);
@@ -1556,6 +1589,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         if (!preflight.IsValid)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
                 "Sprint preflight is waiting: " + string.Join("; ", preflight.Errors.Select(x => x.Message)));
+        if (preparation?.CapacityDecisionId is Guid selectedDirection && !await CapacityDirectionCurrentAsync(selectedDirection,
+            preparation.CapacityDecisionRevision, project, context, cancellationToken))
+            return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                "The manager's capacity direction changed during preflight. Reassess before starting the sprint.");
         _ = await context.Platform.Work.StartSprintExecutionAsync(start, cancellationToken);
         return PersonalTodoResult.Completed($"Started sprint {sprint.Name} after authoritative preflight passed.");
     }
