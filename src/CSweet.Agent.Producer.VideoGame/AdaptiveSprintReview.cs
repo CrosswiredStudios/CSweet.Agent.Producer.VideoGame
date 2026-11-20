@@ -9,11 +9,18 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
-    internal sealed record ReviewFact(string Kind, Guid Id, string Revision, string Detail);
+    internal sealed record ReviewFact(string Kind, Guid Id, string Revision, string Detail)
+    {
+        public WorkItem? Ticket { get; init; }
+        public bool AwaitingResult { get; init; }
+    }
     internal sealed record ReviewAction(string Kind, string Rationale, string? Capability, IReadOnlyList<int> EvidenceIndexes);
     internal sealed record StoryReviewDraft(Guid SessionId, string ArtifactDigest, GameProposedWorkItemV1 Story, IReadOnlyList<GameProposedWorkItemV1> Tasks)
     {
         internal IReadOnlyList<string> TechnicalConstraints { get; init; } = [];
+        internal bool CopiesWholeStory => Tasks is [var task] && Story.AcceptanceCriteria.Count > 1 &&
+            string.Equals(task.Title.Trim(), Story.Title.Trim(), StringComparison.OrdinalIgnoreCase) &&
+            Story.AcceptanceCriteria.All(c => task.AcceptanceCriteria.Contains(c, StringComparer.Ordinal));
         internal static StoryReviewDraft FromProposal(string storyKey, Guid sessionId, string digest, GameTechnicalDeliveryProposalV1 proposal) =>
             new(sessionId, digest, proposal.DeliveryItems.Single(i => i.ProposalKey == storyKey && IsScopeContainer(i)),
                 proposal.DeliveryItems.Where(i => i.ParentProposalKey == storyKey && !IsScopeContainer(i)).ToArray())
@@ -26,6 +33,7 @@ public sealed partial class SpecialistAgent
         public string? Disposition { get; init; }
         public IReadOnlyList<int>? VerifiedSources { get; init; }
         public string? DraftRevisionReason { get; init; }
+        public string? SingleDeliverableReason { get; init; }
     }
     internal sealed record ReviewReceipt(string Digest, string? Story, ReviewChoice Decision,
         IReadOnlyList<ReviewFact> Evidence, IReadOnlyList<string> Roles, DateTimeOffset ReviewedAt, string Basis)
@@ -58,9 +66,6 @@ public sealed partial class SpecialistAgent
         roster = resourceContext.Roster ?? roster with { Members = [], RoleCoverage = [], TotalMemberCount = 0, HasMore = false };
         var roles = CoverageRoleCatalog(roster);
         var facts = new List<ReviewFact> { new("brief", handoff.ArtifactId, handoff.RevisionDigest, "Accepted production brief") };
-        foreach (var item in board.Items.Where(i => i.ProposalProvenance != null).OrderBy(i => i.Id))
-            facts.Add(new(item.ExecutionMode == WorkItemExecutionModes.Executable ? "item" : "container", item.Id,
-                item.PlanningRevision.ToString(), item.Title + " | " + item.Status));
         foreach (var plan in plans.OrderBy(p => p.Id))
         {
             if (plan.Status == "Completed") facts.Add(new("acceptance", plan.Id, plan.ScopeRevision.ToString(), plan.Name));
@@ -74,19 +79,28 @@ public sealed partial class SpecialistAgent
             }
         }
         var currentExecution = new List<object>();
+        var activeStages = new Dictionary<(Guid Sprint, Guid Item), string>();
         foreach (var active in sprints.Where(s => s.Status == "Active").OrderBy(s => s.Id))
         {
             var execution = await context.Platform.Work.ReadOrchestrationAsync(new(cycle.BoardId, active.Id), token);
             foreach (var task in execution?.Items ?? [])
             {
                 var stage = task.Stages.SingleOrDefault(s => s.StageKey == task.CurrentStageKey && s.Traversal == task.Traversal);
+                if (stage is not null) activeStages[(active.Id, task.WorkItemId)] = stage.Status;
                 var author = task.Stages.LastOrDefault(s => s.StageKey is "specialist-execution" or "development" && s.LatestOutcome is not null);
                 currentExecution.Add(new { task.WorkItemId, task.Status, stage?.Id, stage?.StageKey, stage?.LastOutcomeCode,
                     stage?.LastSummary, stage?.LastError, currentOutcome = stage?.LatestOutcome, delivered = author?.LatestOutcome });
                 if (stage is not null) facts.Add(new("current-execution", task.WorkItemId,
-                    stage.Id.ToString("N") + ":" + stage.Status, JsonSerializer.Serialize(currentExecution.Last())));
+                    stage.Id.ToString("N") + ":" + stage.Status, JsonSerializer.Serialize(currentExecution.Last()))
+                    { AwaitingResult = stage.Status is "Running" or "Dispatching" });
             }
         }
+        foreach (var item in board.Items.OrderBy(i => i.Id))
+            facts.Add(new(item.ExecutionMode == WorkItemExecutionModes.Executable ? "item" : "container", item.Id,
+                item.PlanningRevision.ToString(), item.Title + " | " + item.Status) { Ticket = item,
+                AwaitingResult = item.SprintId is { } sprint && activeStages.TryGetValue((sprint, item.Id), out var status)
+                    ? status is "Running" or "Dispatching" : item.Status == "Running" });
+        facts.AddRange(await ReadPlanningAnswersAsync(cycle, board, context, token));
         foreach (var d in decisions.Where(d => d.WorkstreamId == cycle.WorkstreamId && d.Status == DecisionStatuses.Decided &&
             d.SupersededByDecisionId == null).OrderBy(d => d.Id))
             facts.Add(new(d.TypeKey == VideoGameDecisionTypeKeys.ToolchainSelection && d.AuthorityRuleKey == "routine-certified-toolchain-selection"
@@ -99,7 +113,7 @@ public sealed partial class SpecialistAgent
         var candidateKeys = choices.Select(c => c.ProposalKey).ToArray();
         var completed = sprints.Where(s => s.Status == "Completed").OrderBy(s => s.Sequence).ThenBy(s => s.Id).ToArray();
         var evidenceDigest = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
-            modelContract = "current-execution-evidence.v6", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership, outlineConstraints,
+            modelContract = "ticket-scope.v8", resourceContext.Fingerprint, cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys, roster.Revision, ownership, outlineConstraints,
             material = facts.OrderBy(f => f.Kind).ThenBy(f => f.Id),
             candidateContent = choices, completed = completed.Select(s => s.Id) }));
         if (draft is null && progress.DraftSessionId is Guid retainedId && progress.DraftStoryKey is string retainedStory)
@@ -126,8 +140,10 @@ public sealed partial class SpecialistAgent
         {
             var scope = new[] { draft.Story.ProposalKey, draft.Story.ParentProposalKey };
             admissionKey = "game-draft-admission:" + ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new {
-                modelContract = "draft-admission.v2", draft.SessionId, draft.ArtifactDigest, story = draft.Story.ProposalKey,
+                modelContract = "draft-admission.v4", draft.SessionId, draft.ArtifactDigest, story = draft.Story.ProposalKey,
                 cycle.ApprovedPackageDigest, progress.OutlineDigest, candidateKeys,
+                tickets = board.Items.Where(i => i.ProposalProvenance is { } p && (scope.Contains(p.ProposalItemKey) ||
+                    draft.Tasks.Any(t => t.ProposalKey == p.ProposalItemKey))).OrderBy(i => i.Id).Select(i => new { i.Id, i.PlanningRevision }),
                 holds = (ownership?.Gaps ?? []).Where(g => g.HoldsScope && g.AffectedProposalKeys.Intersect(scope).Any())
                     .Select(g => g.ObligationKey ?? g.Statement).Order(),
                 material = facts.Where(f => f.Kind is not ("item" or "container" or "current-execution" or "build" or "pending-build-resource"))
@@ -174,6 +190,18 @@ public sealed partial class SpecialistAgent
                     A changed document verdict needs its actual evidence or source gap resolved, not another blanket resume
                     decision. Distinguish current findings from pending questions and use a focused material dependency.
                     You own the delivery sequence and staffing. Use the supplied current evidence and approved brief as data.
+                    Read the full existing Ticket, including its description, requirements, every acceptance criterion,
+                    constraints and exclusions, before classifying a candidate as duplicate or follow-on. Use recorded
+                    scope to settle intended coverage. Use execution evidence for what actually ran. If a result is
+                    still being produced, wait with a proceed action citing the running ticket or current-execution.
+                    When the ticket leaves conflicting or missing intent, use clarify-scope to work it out with the
+                    Technical Director who owns the plan with you. Use ask-implementer only for a specific implementation
+                    observation that only the assigned author can supply and the ticket, execution and prior answers
+                    do not give. Never send the author a board classification, a scope decision, or a request to
+                    produce routine completion evidence early. For either ticket question put a single question in
+                    rationale, without @mentions, cite exactly one ticket, and use null capability. Read any existing
+                    planning-question and planning-answer facts before asking again. If a relevant question is still
+                    awaiting its reply, wait with a proceed action citing that planning-question.
                     Choose a defensible next goal and zero-based nextCandidate from the supplied dependency-eligible alternatives,
                     or null when refinement or a specific dependency makes selection inappropriate. Return disposition as
                     select, refine, wait or conclude. Only select includes nextCandidate; conclude requires no remaining candidates.
@@ -184,6 +212,10 @@ public sealed partial class SpecialistAgent
                     and remaining hypotheses. Never invent human playtests, build links or observations. Report a research-only sprint honestly.
                     The Technical Director owns engine, language and library decisions within approved scope. For the first sprint, schedule an engineer to set up the selected stack and run the smallest playable slice from a clean checkout. Include its package lock when applicable. A missing setup artifact is work for that sprint. Return an incomplete brief to Victor once with the specific missing deliverable.
                     technicalConstraints are from the Technical Director's proposal. A build-environment fact selects a certified provider for operations such as packaging or testing. A recipe name does not select the game's runtime library. Respect actual build inputs and explicit business constraints. When the provider needs additional tooling, plan that integration separately from the game's runtime dependencies. Scoped consultation is advice and cannot supersede a recorded technical choice. Cite a concrete unmet requirement or finding when requesting revision.
+                    For every proposed task identify its first independently acceptable result and the prerequisite output it consumes.
+                    Return separable results to Victor for smaller tickets, including sequential ones. Keep their verification with each result.
+                    Check which independent tickets can run in parallel given the roster. Estimate each ticket separately.
+                    If copiesWholeStory is true and you keep the draft, supply singleDeliverableReason explaining why no partial result could be accepted.
                     Examine the provisional Story, its assumptions and current evidence. Set keepDraft true when the same draft remains suitable.
                     When you select the supplied draft's Story but its briefs need revision, set keepDraft false and include
                     draftRevisionReason naming the affected task or criterion, the conflicting evidence and the correction Victor should make.
@@ -192,7 +224,7 @@ public sealed partial class SpecialistAgent
                     verifies the approved wording and applicable constraints. Existing tickets being done is insufficient.
                     The sprint snapshot is historical; other collected facts describe current observations/direction.
                     Do not backdate newer management direction, later findings or observations to sprint completion.
-                    Use proceed, resequence, refine, consult, hire, spend, qa-disposition, escalate or ceo-hold. Cite evidence by zero-based index.
+                    Use proceed, resequence, refine, clarify-scope, ask-implementer, consult, hire, spend, qa-disposition, escalate or ceo-hold. Cite evidence by zero-based index.
                     Prefer one proceed for ordinary success. Assess rules uncertainty, overlapping mechanics, content load, evidence and capacity.
                     A consultation needs one bounded question. A hire needs a sustained gap and its deliverable. For consult or hire,
                     select capability by its supplied Capability name, never by position. Other actions use null capability.
@@ -208,12 +240,14 @@ public sealed partial class SpecialistAgent
                     """),
                 new(ChatRole.User, JsonSerializer.Serialize(new { brief = acceptedBrief.Content, sprint = sprint?.Goal, candidates = choices.Select(c => new { c.Title,c.Description }),
                     obligations=ownership?.Coverage??roadmap.ScopeCoverage, resourceContext, technicalConstraints,
-                    provisionalStory = draft?.Story.ProposalKey, storyDefinition = draft?.Story, provisional = draft?.Tasks,
+                    provisionalStory = draft?.Story.ProposalKey, storyDefinition = draft?.Story, provisional = draft?.Tasks, copiesWholeStory = draft?.CopiesWholeStory == true,
                     evidence, roles, roster = roster.Members.Select(m => new { m.DisplayName, m.DeclaredRoleKeys,m.SpecializationKeys,m.IsAvailable }) }))
             ], new AgentModelJsonRequest<ReviewChoice>("game planning review") {
                 Options = ResponseOptions(), Normalize = value =>
                 {
                     value = ValidateReview(value, choices.Count, roles, evidence, draft is null ? null : Array.IndexOf(candidateKeys, draft.Story.ProposalKey));
+                    if (value.KeepDraft && draft?.CopiesWholeStory == true && string.IsNullOrWhiteSpace(value.SingleDeliverableReason))
+                        throw new AgentModelJsonException("The only task copies the whole Story. Return a revision naming independently verifiable results, or explain in singleDeliverableReason why the result is indivisible.");
                     var obligations=ownership?.Coverage??roadmap.ScopeCoverage;
                     if(value.VerifiedSources?.Any(i=>i<0||i>=obligations.Count)==true)
                         throw new AgentModelJsonException("Verified source indexes must refer to supplied approved obligations.");
@@ -224,7 +258,8 @@ public sealed partial class SpecialistAgent
                 sprintId = sprint?.Id, candidates = candidateKeys, choice.NextCandidate, choice.DraftAhead, choice.KeepDraft,
                 pending = draft?.Story.ProposalKey, draftSessionId = draft?.SessionId, proposalDigest = draft?.ArtifactDigest, choice.RevisitWhen }, token);
             var used = choice.Actions.SelectMany(a => a.EvidenceIndexes).Distinct().Order().ToArray();
-            var compact = used.Select(index => evidence[index]).ToArray();
+            // Receipts retain the cited identity and planning revision. Ticket bodies are read afresh for each judgment.
+            var compact = used.Select(index => evidence[index] with { Ticket = null }).ToArray();
             var remap = used.Select((index, offset) => (index, offset)).ToDictionary(x => x.index, x => x.offset);
             choice = choice with { Actions = choice.Actions.Select(a => a with {
                 EvidenceIndexes = a.EvidenceIndexes.Select(index => remap[index]).ToArray() }).ToArray() };
@@ -404,8 +439,8 @@ public sealed partial class SpecialistAgent
         if (value.Actions is not { Count: > 0 }) throw Reject("Give at least one action.");
         foreach (var a in value.Actions)
         {
-            if (a == null || a.Kind is not ("proceed" or "resequence" or "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
-                throw Reject("Each action kind must be proceed, resequence, refine, consult, hire, spend, qa-disposition, escalate or ceo-hold.");
+            if (a == null || a.Kind is not ("proceed" or "resequence" or "refine" or "clarify-scope" or "ask-implementer" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
+                throw Reject("Choose a supported review action such as proceed, refine, clarify-scope, ask-implementer or consult.");
             if (string.IsNullOrWhiteSpace(a.Rationale)) throw Reject($"The {a.Kind} action needs a rationale.");
             if (a.EvidenceIndexes is not { Count: > 0 } || a.EvidenceIndexes.Any(i => i < 0 || i >= evidence.Count))
                 throw Reject($"The {a.Kind} action must cite evidenceIndexes within 0..{evidence.Count - 1} of the supplied evidence.");
@@ -415,6 +450,16 @@ public sealed partial class SpecialistAgent
                     : $"The {a.Kind} action uses null capability; only consult and hire name one.");
             if (a.Kind == "ceo-hold" && !a.EvidenceIndexes.Any(i => evidence[i].Kind == "item"))
                 throw Reject("A ceo-hold must cite the evidence index of at least one otherwise ready board item it holds.");
+            if (a.Kind == "consult" && roles.Any(r => r.Capability == a.Capability && RoleTaxonomy.SatisfiesRole([r.RoleKey], VideoGameRoleKeys.Engineer)))
+                throw Reject("Read the full ticket and criteria for scope. Use clarify-scope for conflicting intent, wait for running work, or ask-implementer for an observation only the assigned author can supply.");
+            if (a.Kind is "clarify-scope" or "ask-implementer")
+            {
+                var tickets = a.EvidenceIndexes.Distinct().Select(i => evidence[i]).Where(f => f.Kind is "item" or "container").ToArray();
+                if (tickets.Length != 1 || a.Kind == "ask-implementer" && tickets[0].Kind != "item")
+                    throw Reject("Cite exactly one source ticket for the question. An implementation question requires an executable ticket.");
+                if (a.Rationale.Contains('@') || a.Rationale.Length > 6000)
+                    throw Reject("Provide one bounded ticket question without @mentions. The assigned recipient is selected from current records.");
+            }
             if (a.Kind == "qa-disposition" && !a.EvidenceIndexes.Any(i => evidence[i].Kind is "qa" or "finding"))
                 throw Reject("A qa-disposition must cite a qa or finding evidence index.");
         }
@@ -438,7 +483,8 @@ public sealed partial class SpecialistAgent
         AgentTeamContext roster, ProducerAcceptedHandoff handoff, AgentRuntimeContext context, CancellationToken token, AgentLlmSelection? resolutionModel = null,
         bool returningDraft = false, bool hasDependency = false)
     {
-        if (!hasDependency && receipt.Decision.Disposition is "refine" or "wait" && !receipt.Decision.Actions.Any(a => a.Kind is "refine" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
+        var awaitingResult = receipt.Decision.Disposition == "wait" && receipt.Evidence.Any(f => f.AwaitingResult);
+        if (!hasDependency && !awaitingResult && receipt.Decision.Disposition is "refine" or "wait" && !receipt.Decision.Actions.Any(a => a.Kind is "refine" or "clarify-scope" or "ask-implementer" or "consult" or "hire" or "spend" or "qa-disposition" or "escalate" or "ceo-hold"))
         {
             // A wait with no declared dependency has no wake path. Assign diagnosis of the named uncertainty,
             // rather than promising to wait for an event that nobody has been asked to produce.
@@ -485,6 +531,12 @@ public sealed partial class SpecialistAgent
                     [new("specialist-execution", role!, ["work.execution.run"], null, true, action.Rationale)],
                     context, token, handoff.RevisionDigest);
                 if (staffing != null) await Record(staffing.Id, staffing.Status);
+            }
+            else if (action.Kind is "clarify-scope" or "ask-implementer")
+            {
+                var ticket = refs.Where(f => f.Kind is "item" or "container").DistinctBy(f => f.Id).Single();
+                var comment = await AskPlanningQuestionAsync(action, ticket, cycle, roster, context, token);
+                await Record(comment.Id, "Asked");
             }
             else if (action.Kind is "consult" or "refine")
             {
@@ -610,7 +662,9 @@ public sealed partial class SpecialistAgent
         AgentTeamContext roster, AgentRuntimeContext context, AgentLlmSelection? selection, CancellationToken token, string? previousRejection = null)
     {
         var identity = context.Identity ?? throw new InvalidOperationException("Consultation requires the current employee identity.");
-        var candidates = ConsultationRouting.Candidates(roster.Members, identity.EmployeeId);
+        var candidates = ConsultationRouting.Candidates(roster.Members, identity.EmployeeId).Where(m => action.Kind == "refine"
+            ? RoleTaxonomy.SatisfiesRole(m.DeclaredRoleKeys, VideoGameRoleKeys.TechnicalDirector)
+            : !RoleTaxonomy.SatisfiesRole(m.DeclaredRoleKeys, VideoGameRoleKeys.Engineer)).ToList();
         var key = actionKey + ":recipient:v1";
         var retained = await context.Platform.ReadOperatingStateAsync<ConsultationRecipient>(key, token);
         if (retained is not null && candidates.SingleOrDefault(p => p.EmployeeId == retained.Payload.EmployeeId.ToString() &&
@@ -618,9 +672,8 @@ public sealed partial class SpecialistAgent
         if (candidates.Count == 0) return null;
         AgentTeammate? member;
         string reason;
-        if (selection is null && action.Kind == "refine")
+        if (action.Kind == "refine")
         {
-            // Compatibility for deterministic callers without a configured model.
             member = SelectRoleMember(roster with { Members = candidates }, VideoGameRoleKeys.TechnicalDirector);
             reason = "Available technical refinement contributor.";
         }

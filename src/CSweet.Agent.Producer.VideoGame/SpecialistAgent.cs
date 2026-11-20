@@ -1838,6 +1838,10 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             .GroupBy(x => x.Key!, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.OrderByDescending(x => x.Item.Revision).First().Item,
                 StringComparer.Ordinal);
+        var assignedLoad = board.Items.Where(item => item.ExecutionMode == WorkItemExecutionModes.Executable &&
+                item.Status is not ("Done" or "Completed" or "Cancelled"))
+            .Select(item => PrimaryExecutionAssignment(item)?.AgentInstallationId).OfType<Guid>()
+            .GroupBy(id => id).ToDictionary(group => group.Key, group => group.Count());
         var remaining = proposals.Where(x => !byKey.ContainsKey(x.ProposalKey)).ToList();
         var package = new ArtifactPackageDigest(cycle.ApprovedPackageId, cycle.ApprovedPackageVersion,
             cycle.ApprovedPackageDigest, DateTimeOffset.UtcNow, memberDigests);
@@ -1859,10 +1863,14 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                     var requirements = new WorkAssignmentRequirements(proposal.AccountableRoleKey,
                         proposal.RequiredSpecializationKeys, proposal.PreferredSpecializationKeys,
                         proposal.RequiredCapabilityKeys.Append("work.execution.run").Distinct(StringComparer.Ordinal).ToList());
-                    var selected = RoleTaxonomy.SelectAssignment(roster.Members, requirements);
+                    var idle = roster.Members.Where(m => m.AgentInstallationId is Guid id && assignedLoad.GetValueOrDefault(id) == 0);
+                    var selected = RoleTaxonomy.SelectAssignment(idle, requirements)
+                        ?? RoleTaxonomy.SelectAssignment(roster.Members, requirements, assignedLoad);
                     if (selected is not null && Guid.TryParse(selected.Teammate.EmployeeId, out var userId))
                     {
                         accountable = userId;
+                        var installation = selected.Teammate.AgentInstallationId!.Value;
+                        assignedLoad[installation] = assignedLoad.GetValueOrDefault(installation) + 1;
                         var matched = requirements.RequiredSpecializationKeys.Concat(
                                 requirements.PreferredSpecializationKeys.Where(key =>
                                     selected.Teammate.SpecializationKeys.Contains(key, StringComparer.Ordinal)))

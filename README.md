@@ -1,4 +1,8 @@
-# Producer 6.23.16
+# Producer 6.23.18
+
+Gabriel reads the full ticket and its acceptance criteria during planning review. He discusses ambiguous scope with the Technical Director and directs implementation questions to the assigned author on the ticket. [Release notes](releases/6.23.18.md)
+
+## Producer 6.23.16
 
 Gabriel requests technical estimates and treats hired, eligible AI agents as available for every assigned item. Legacy zero or unknown capacity and other projects do not exclude a ticket. The selected estimates determine the total planned points. Technical dependencies, staffing, manager direction and sprint preflight still apply. [Release notes](releases/6.23.16.md)
 
