@@ -24,6 +24,7 @@ public sealed partial class SpecialistAgent
         IReadOnlyList<string> DetailedStoryKeys, IReadOnlyList<ProgressiveCoverage> ScopeCoverage)
     {
         public bool Adaptive { get; init; }
+        public IReadOnlyDictionary<string, string[]>? TaskConstraints { get; init; }
         public string? ReviewedDirectionsDigest { get; init; }
         public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
     }

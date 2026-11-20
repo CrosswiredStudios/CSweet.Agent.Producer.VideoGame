@@ -82,7 +82,10 @@ public sealed class BacklogRevisionRecoveryTests
         var roster = new AgentTeamContext(cycle.TeamId.ToString(), "team", "Team", 1, person.OrganizationUserId.ToString(), "Producer", [teammate], [], 1, false);
         for (var replay = 0; replay < 2; replay++)
             Assert.Equal(2, await SpecialistAgent.PublishCanonicalBacklogAsync(boardId, roster, cycle, [], session, artifact,
-                designer, session, artifact, technical, runtime.CreateContext(), default, preserveConstraints ? ["Original immutable audio constraint"] : null));
+                designer, session, artifact, technical, runtime.CreateContext(), default, preserveConstraints ? [
+                    oldItem with { Planning = oldItem.Planning! with { Constraints = ["Original immutable audio constraint"] } },
+                    foundation with { Planning = foundation.Planning! with { Constraints = ["Foundation-only constraint"] } }
+                ] : null));
         Assert.Single(revisions);
         Assert.Equal(oldItem.Id, item.Id);
         Assert.Equal(artifact.Digest, item.ProposalProvenance!.ArtifactDigest);

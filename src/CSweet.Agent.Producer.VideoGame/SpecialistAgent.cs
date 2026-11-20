@@ -1057,7 +1057,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             : await PublishCanonicalBacklogAsync(boardId, roster, cycle, memberDigests,
             designerSession, designerArtifact!, designerProposal,
             technicalSession, technicalArtifact!, technicalProposal,
-            context, cancellationToken, RetainedRoleRepairConstraints(roleRepair), ledger, ownership);
+            context, cancellationToken, roleRepair?.OriginalItems, ledger, ownership);
         if (adaptive && priorCycle.FirstExecutableTicketAt == null &&
             technicalProposal.DeliveryItems.Any(i => !IsScopeContainer(i) && !OwnershipHolds(technicalProposal.DeliveryItems, ownership).Contains(i.ProposalKey)))
         {
@@ -1796,25 +1796,31 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         AgentCoordinationArtifact technicalArtifact,
         GameTechnicalDeliveryProposalV1 technical,
         AgentRuntimeContext context,
-        CancellationToken cancellationToken, IReadOnlyList<string>? retainedConstraints = null,
+        CancellationToken cancellationToken, IReadOnlyList<WorkItem>? originalItems = null,
         IReadOnlyList<GameOutcomeSource>? outcomes = null, OwnershipReview? ownership = null)
     {
         var evidence = ReadProgressiveEvidence(technicalArtifact);
         var approved = (outcomes ?? []).ToDictionary(o => o.Key, StringComparer.Ordinal);
-        var owners = technical.DeliveryItems.ToDictionary(i => i.ProposalKey, StringComparer.Ordinal);
+        var retainedByKey = (originalItems ?? []).Where(i => i.Status != "Cancelled" && ProposalKey(i) is not null)
+            .ToLookup(i => ProposalKey(i)!, StringComparer.Ordinal);
         IEnumerable<string> Constraints(GameProposedWorkItemV1 item)
         {
-            var constraints = designer.DesignConstraints.Concat(technical.TechnicalConstraints).Concat(retainedConstraints ?? [])
-                .Concat(TicketVerification.ApprovedCriterionEvidence(item));
-            if (evidence?.Adaptive != true || approved.Count == 0 && ownership is null) return constraints.Distinct();
-            var root = item;
-            // Game planning containers have two levels above a leaf.
-            for (var level = 0; level < 2 && root.ParentProposalKey is string parent && owners.TryGetValue(parent, out var ancestor); level++)
-                root = ancestor;
+            var shared = designer.DesignConstraints.Concat(technical.TechnicalConstraints);
+            if (evidence?.Adaptive == true && !IsScopeContainer(item))
+            {
+                // The brief and its acceptance criteria travel with the ticket, including for older proposals.
+                // Only separately assigned technical rules belong in its constraints.
+                var selected = evidence.TaskConstraints?.GetValueOrDefault(item.ProposalKey) ?? [];
+                shared = shared.Where(rule => selected.Contains(rule, StringComparer.Ordinal) ||
+                    item.AcceptanceCriteria.Contains(rule, StringComparer.Ordinal));
+            }
+            var retained = retainedByKey[item.ProposalKey].SelectMany(i => i.Planning?.Constraints ?? []);
+            var constraints = shared.Concat(retained).Concat(TicketVerification.ApprovedCriterionEvidence(item));
+            if (evidence?.Adaptive != true) return constraints.Distinct();
             if (ownership != null)
-                return constraints.Concat(ownership.Commitments.Where(c => c.Owners.Any(o => o.ScopeKeys.Contains(root.ProposalKey)))
+                return constraints.Concat(ownership.Commitments.Where(c => c.Owners.Any(o => o.ScopeKeys.Contains(item.ProposalKey)))
                     .Select(c => c.Statement)).Distinct();
-            var obligations = evidence.ScopeCoverage.Where(s => s.ProposalKeys.Contains(root.ProposalKey) && approved.ContainsKey(s.SourceKey))
+            var obligations = evidence.ScopeCoverage.Where(s => s.ProposalKeys.Contains(item.ProposalKey) && approved.ContainsKey(s.SourceKey))
                 .Select(s => approved[s.SourceKey]).Select(o => $"Approved {o.Key} ({o.AuthorRole}): {o.ApprovedText}");
             return constraints.Concat(obligations).Distinct();
         }

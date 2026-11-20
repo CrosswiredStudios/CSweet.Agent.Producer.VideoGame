@@ -1,6 +1,6 @@
-# Producer 6.23.18
+# Producer 6.23.19
 
-Gabriel reads the full ticket and its acceptance criteria during planning review. He discusses ambiguous scope with the Technical Director and directs implementation questions to the assigned author on the ticket. [Release notes](releases/6.23.18.md)
+Gabriel publishes each task with its own technical constraints and keeps roadmap commitments with the work that owns them. [Release notes](releases/6.23.19.md)
 
 ## Producer 6.23.16
 
