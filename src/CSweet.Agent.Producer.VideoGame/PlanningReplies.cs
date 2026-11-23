@@ -7,6 +7,23 @@ namespace CSweet.Agent.Producer.VideoGame;
 
 public sealed partial class SpecialistAgent
 {
+    internal static string StoppedPlanningDescription(params AgentCoordinationSession[] sessions)
+    {
+        var stopped = sessions.DistinctBy(s => s.Id)
+            .Where(s => s.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled);
+        var reports = stopped.Select(s =>
+        {
+            var turn = s.Turns.Where(t => t.Disposition == "Blocked")
+                .OrderByDescending(t => t.Ordinal).FirstOrDefault();
+            var source = $"Session {s.Id:D}" + (turn is null ? "" : $", turn {turn.Ordinal} ({turn.Id:D})");
+            var reason = s.Status == AgentCoordinationStatuses.Cancelled ? s.FinalSummary : turn?.Content ?? s.FinalSummary;
+            return $"{s.Target.DisplayName}'s {s.Subject} is {s.Status.ToLowerInvariant()}. " +
+                $"{(string.IsNullOrWhiteSpace(reason) ? "The session gives no reason." : reason)} ({source})";
+        });
+        return $"{PlanningRecoveryMarker}: Planning is waiting on the following work. " +
+            string.Join("\n", reports) + "\nThe Producer owns clarification of the cause and delivery impact.";
+    }
+
     internal static AgentCoordinationArtifactSubmission PlanningArtifact(GameProductionPlanningCycleV1 cycle,
         IReadOnlyList<ArtifactPackageMemberDigest> members) => CollaborationActions.WithDocuments(
             new("video-game.production.planning-cycle.v1", "1.0", cycle.PlanningFingerprint, 1, true,

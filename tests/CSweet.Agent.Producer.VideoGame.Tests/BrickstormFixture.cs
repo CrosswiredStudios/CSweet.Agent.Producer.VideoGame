@@ -18,7 +18,7 @@ internal sealed class BrickstormFixture
     public List<StartBoardCoordinationRequest> Requests { get; } = [];
     public Dictionary<string, AgentCoordinationSession> AcceptedSessions { get; } = [];
 
-    public BrickstormFixture(bool loseFirstRetryResponse = false)
+    public BrickstormFixture(bool loseFirstRetryResponse = false, string failure = SpecialistFailure, string stoppedStatus = "Blocked")
     {
         var web = new JsonSerializerOptions(JsonSerializerDefaults.Web);
         var producer = Guid.NewGuid();
@@ -78,8 +78,8 @@ internal sealed class BrickstormFixture
                     return Task.FromResult(existing);
                 var failed = AcceptedSessions.Count == 0;
                 var session = new AgentCoordinationSession(Guid.NewGuid(), Guid.NewGuid(), Guid.Empty, Guid.Empty, Guid.Empty, self, participant,
-                    "Planning", "Plan", [], failed ? "Blocked" : "Active", 1, 1, victor, failed, failed ? SpecialistFailure : null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-                    failed ? [new(Guid.NewGuid(), 1, victor, "Blocked", SpecialistFailure, DateTimeOffset.UtcNow)] : []) { BoardSource = new(boardId), SourceKind = "Board" };
+                    "Planning", "Plan", [], failed ? stoppedStatus : "Active", 1, 1, victor, failed, failed ? failure : null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                    failed ? [new(Guid.NewGuid(), 1, victor, stoppedStatus, failure, DateTimeOffset.UtcNow)] : []) { BoardSource = new(boardId), SourceKind = "Board" };
                 sessions[session.Id] = session;
                 AcceptedSessions.Add(request.IdempotencyKey, session);
                 if (!failed && loseFirstRetryResponse)

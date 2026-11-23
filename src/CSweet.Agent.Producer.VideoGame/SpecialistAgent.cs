@@ -912,7 +912,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             technicalSession.Status is AgentCoordinationStatuses.Blocked or AgentCoordinationStatuses.Cancelled)
             return PersonalTodoResult.Blocked(IsTechnicalPlanningGenerationBlock(technicalSession)
                 ? TechnicalPlanningBlockDescription(technicalSession)
-                : $"{PlanningRecoveryMarker}: Designer / Technical Director planning reached a terminal conflict requiring Video Game Director authority.");
+                : StoppedPlanningDescription(designerSession, technicalSession));
         if (designerSession.Status != AgentCoordinationStatuses.Completed ||
             technicalSession.Status != AgentCoordinationStatuses.Completed)
             return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),

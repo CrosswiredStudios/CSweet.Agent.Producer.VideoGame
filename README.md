@@ -1,6 +1,6 @@
-# Producer 6.23.19
+# Producer 6.23.20
 
-Gabriel publishes each task with its own technical constraints and keeps roadmap commitments with the work that owns them. [Release notes](releases/6.23.19.md)
+Gabriel reports which planning session stopped and why, and answers colleagues’ questions about delivery evidence. [Release notes](releases/6.23.20.md)
 
 ## Producer 6.23.16
 
