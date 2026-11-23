@@ -7,6 +7,28 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 public sealed class BrickstormDeliveryTests
 {
     [Theory, Trait("Category", "AgentHarness")]
+    [InlineData("Cancelled")]
+    [InlineData("Blocked")]
+    public async Task One_stopped_planning_session_carries_its_reason_into_Gabriels_ticket(string status)
+    {
+        const string reason = "A target-device measurement is missing.";
+        var fixture = new BrickstormFixture(failure: reason, stoppedStatus: status);
+        var queue = new PlanningCard(fixture.Card, fixture.Runtime);
+        var wake = new PersonalTodoAvailableEvent(fixture.Card.OwnerOrganizationUserId, fixture.Card.BoardId, fixture.Card.Id);
+        var eventId = Guid.NewGuid();
+        for (var i = 0; i < 2; ++i)
+        {
+            var host = new AgentTestHost(new SpecialistAgent(), fixture.Runtime, fixture.Identity, fixture.BusinessId);
+            var result = await host.DeliverEventAsync(PersonalTodoEvents.Available, wake, eventId);
+            Assert.True(result.Succeeded, result.Error);
+        }
+        var stopped = Assert.Single(fixture.AcceptedSessions).Value;
+        Assert.Equal(PersonalTodoStatuses.Blocked, queue.Card.Status);
+        Assert.Equal(2, queue.Card.BlockReason!.Split(stopped.Id.ToString("D")).Length);
+        Assert.Contains(reason, queue.Card.BlockReason);
+        Assert.DoesNotContain("conflict", queue.Card.BlockReason);
+    }
+    [Theory, Trait("Category", "AgentHarness")]
     [InlineData(false)]
     [InlineData(true)]
     public async Task Roadmap_failure_is_deferred_and_one_fresh_session_survives_restart_and_redelivery(bool loseFirstRetryResponse)
@@ -69,6 +91,13 @@ public sealed class BrickstormDeliveryTests
         public PlanningCard(PersonalTodoItem seed, AgentTestRuntime runtime)
         {
             Card = seed;
+            runtime.RegisterCapability<BlockPersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Block, (request, _) =>
+            {
+                CheckClaim(request.ItemId, request.EventId, request.ExpectedRevision);
+                _claim = null;
+                Card = Card with { Revision = Card.Revision + 1, Status = PersonalTodoStatuses.Blocked, BlockReason = request.Reason };
+                return Task.FromResult(Card);
+            });
             runtime.RegisterCapability<ClaimPersonalTodoItemRequest, PersonalTodoClaim>(
                 PersonalTodoCapabilities.Claim, (request, _) => Task.FromResult(Claim(request)));
             runtime.RegisterCapability<DeferPersonalTodoItemRequest, PersonalTodoItem>(
