@@ -1,6 +1,6 @@
-# Producer 6.23.20
+# Producer 6.23.21
 
-Gabriel reports which planning session stopped and why, and answers colleagues’ questions about delivery evidence. [Release notes](releases/6.23.20.md)
+Gabriel resumes blocked planning with the recorded correction and sends the revised request to the original specialist. [Release notes](releases/6.23.21.md)
 
 ## Producer 6.23.16
 

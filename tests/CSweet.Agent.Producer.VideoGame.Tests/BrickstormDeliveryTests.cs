@@ -1,3 +1,4 @@
+using System.Text.Json;
 using CSweet.Agent.SDK;
 using CSweet.Agent.Testing;
 using CSweet.WorkManagement.Contracts;
@@ -6,6 +7,78 @@ namespace CSweet.Agent.Producer.VideoGame.Tests;
 
 public sealed class BrickstormDeliveryTests
 {
+    [Theory, Trait("Category", "AgentHarness")]
+    [InlineData("current", true)]
+    [InlineData("stale-brief", false)]
+    [InlineData("different-board", false)]
+    [InlineData("superseded", false)]
+    public async Task Approved_correction_wakes_the_blocked_planning_card_and_reaches_its_specialist_once(string scenario, bool wakes)
+    {
+        const string failure = "Planning direction requires an explicit scope amendment: The Producer's direction mandates planning with procedural mode while preserving quality and licensing. Since the asset strategy decision 28924480 revision 2 specifies procedural mode and the current brief (sourceIndex 2) mandates 'procedural for particles' but also mentions 'hand-authored pixel-art sprites for bricks and paddle', the conflict requires explicit Director confirmation that procedural visual generation will fully satisfy the accepted 'production-ready, coherent' quality bar without a specialist. This authority check must be resolved before finalizing the proposal; otherwise, procedural asset implementation by the game-engineer within existing Epics risks violating the accepted scope.";
+        const string direction = "Use code-made visuals for the bricks and paddle. Keep the existing quality bar.";
+        var fixture = new BrickstormFixture(failure: failure);
+        var queue = new PlanningCard(fixture.Card, fixture.Runtime);
+        queue.ConnectCorrectionWake(fixture.Runtime);
+        var wake = new PersonalTodoAvailableEvent(fixture.Card.OwnerOrganizationUserId, fixture.Card.BoardId, fixture.Card.Id);
+        var source = fixture.Handoff;
+        AgentTestHost Start() => new(new SpecialistAgent(), fixture.Runtime, fixture.Identity, fixture.BusinessId);
+        var first = await Start().DeliverEventAsync(PersonalTodoEvents.Available, wake);
+        Assert.True(first.Succeeded, first.Error);
+        Assert.Equal(PersonalTodoStatuses.Blocked, queue.Card.Status);
+        Assert.Contains(failure, queue.Card.BlockReason);
+        var stopped = Assert.Single(fixture.AcceptedSessions).Value;
+
+        var decidedAt = queue.Card.UpdatedAt.AddSeconds(1);
+        var decision = new DecisionRecord(Guid.NewGuid(), source.WorkstreamId, "video-game.management-direction.v1", "Art-method correction",
+            "work-planning", [new("provide-direction", "Provide direction", "Use the approved correction")], "provide-direction",
+            "provide-direction", DecisionStatuses.Decided, direction,
+            [new("artifact", source.ArtifactId, scenario == "stale-brief" ? Guid.NewGuid() : source.AcceptedRevisionId,
+                source.RevisionDigest, "video-game.production-plan.v1", "Accepted"),
+             new("board", scenario == "different-board" ? Guid.NewGuid() : fixture.Card.WorkContext!.BoardId!.Value,
+                null, null, WorkBoardCapabilities.Read, "Current"), new("coordination", stopped.Id, null, null, "coordination", "Blocked")],
+            null, scenario == "superseded" ? Guid.NewGuid() : null, null, 2, decidedAt, decidedAt);
+        fixture.Runtime
+            .RegisterCapability<ReadDecisionRequest, IReadOnlyList<DecisionRecord>>(PlatformCapabilities.DecisionRead,
+                (_, _) => Task.FromResult<IReadOnlyList<DecisionRecord>>([decision]))
+            .RegisterCapability<ReadManagementIncidents, ManagementIncidentPage>(ProjectHealthCapabilities.Incidents,
+                (_, _) => Task.FromResult(new ManagementIncidentPage([], null)))
+            .RegisterCapability<ReadPortfolioRequest, PortfolioResponse>(PlatformCapabilities.PortfolioRead,
+                (_, _) => Task.FromResult(new PortfolioResponse([])));
+        var signal = new GenericResourceEvent(Guid.NewGuid(), decidedAt,
+            new(Guid.Parse(fixture.BusinessId), source.WorkstreamId, null, null, null, null, null, Guid.NewGuid(), null, null),
+            "Decision", decision.Id, decision.Revision, decision.TypeKey, "decided", JsonSerializer.SerializeToElement(new { decision.Id }));
+
+        for (var delivery = 0; delivery < 2; delivery++)
+        {
+            var result = await Start().DeliverEventAsync(WorkstreamEventNames.DecisionDecidedV1, signal, signal.EventId);
+            Assert.True(result.Succeeded, result.Error);
+        }
+        Assert.Equal(wakes ? PersonalTodoStatuses.Ready : PersonalTodoStatuses.Blocked, queue.Card.Status);
+        if (!wakes)
+        {
+            Assert.Single(fixture.Requests);
+            Assert.Empty(queue.Requeues);
+            return;
+        }
+
+        var retry = Assert.Single(queue.Requeues);
+        Assert.Equal(fixture.Card.Id, retry.ItemId);
+        Assert.True(retry.ReconcileOnly);
+        var pickup = Guid.NewGuid();
+        for (var delivery = 0; delivery < 2; delivery++)
+        {
+            var result = await Start().DeliverEventAsync(PersonalTodoEvents.Available, wake, pickup);
+            Assert.True(result.Succeeded, result.Error);
+        }
+        Assert.Equal(2, fixture.AcceptedSessions.Count);
+        Assert.Single(queue.Requeues);
+        var request = Assert.Single(fixture.Requests.Skip(1));
+        Assert.Equal(stopped.Target.OrganizationUserId, request.TargetOrganizationUserId);
+        Assert.Contains(direction, request.InitialMessage);
+        Assert.Contains(decision.Id.ToString("D"), request.InitialMessage);
+        Assert.Single(fixture.Sprints);
+    }
+
     [Theory, Trait("Category", "AgentHarness")]
     [InlineData("Cancelled")]
     [InlineData("Blocked")]
@@ -86,6 +159,7 @@ public sealed class BrickstormDeliveryTests
     private sealed class PlanningCard
     {
         public PersonalTodoItem Card { get; private set; }
+        public List<RequeuePersonalTodoItemRequest> Requeues { get; } = [];
         private Guid? _claim;
 
         public PlanningCard(PersonalTodoItem seed, AgentTestRuntime runtime)
@@ -128,6 +202,21 @@ public sealed class BrickstormDeliveryTests
             _claim = request.EventId;
             Card = Card with { Revision = Card.Revision + 1, Status = PersonalTodoStatuses.Running };
             return new(Card);
+        }
+
+        public void ConnectCorrectionWake(AgentTestRuntime runtime)
+        {
+            runtime.RegisterCapability<object, PersonalTodoDirectory>(PersonalTodoCapabilities.Read, (_, _) => Task.FromResult(
+                new PersonalTodoDirectory([new(Card.BoardId, Card.OwnerOrganizationUserId, "Gabriel", null, null, 1, [Card])],
+                    Card.OwnerOrganizationUserId)));
+            runtime.RegisterCapability<RequeuePersonalTodoItemRequest, PersonalTodoItem>(PersonalTodoCapabilities.Requeue, (request, _) =>
+            {
+                Assert.Equal(Card.Id, request.ItemId);
+                Assert.Equal(Card.Revision, request.ExpectedRevision);
+                Assert.Equal(PersonalTodoStatuses.Blocked, Card.Status);
+                Requeues.Add(request);
+                return Task.FromResult(Card = Card with { Status = PersonalTodoStatuses.Ready, Revision = Card.Revision + 1, BlockReason = null });
+            });
         }
 
         private void CheckClaim(Guid itemId, Guid eventId, long expectedRevision)

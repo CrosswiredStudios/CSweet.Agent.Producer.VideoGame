@@ -14,6 +14,7 @@ internal sealed class BrickstormFixture
     public AgentIdentity Identity { get; }
     public AgentTestRuntime Runtime { get; }
     public PersonalTodoItem Card { get; }
+    public ProducerAcceptedHandoff Handoff { get; }
     public List<WorkSprint> Sprints { get; } = [];
     public List<StartBoardCoordinationRequest> Requests { get; } = [];
     public Dictionary<string, AgentCoordinationSession> AcceptedSessions { get; } = [];
@@ -36,7 +37,7 @@ internal sealed class BrickstormFixture
         var roster = new AgentTeamContext(team.ToString(), "video-game-team", "Video Game Team", 1, director.ToString(), "Marcus", [
             new(victor.ToString(), "Victor", "Agent", null, null, "Peer", "Online") { AgentInstallationId = victorInstallation, IsAvailable = true,
                 RuntimeEligibility = "Eligible", DeclaredRoleKeys = ["game-technical-director"], EffectiveCapabilities = ["work.execution.run"] }], [], 1, false);
-        var handoff = new ProducerAcceptedHandoff(project, Guid.NewGuid(), Guid.NewGuid(), "brief-digest", "handoff-digest", Guid.NewGuid(), packageId, 1, DateTimeOffset.UtcNow);
+        var handoff = Handoff = new ProducerAcceptedHandoff(project, Guid.NewGuid(), Guid.NewGuid(), "brief-digest", "handoff-digest", Guid.NewGuid(), packageId, 1, DateTimeOffset.UtcNow);
         var portfolio = new ProducerOperatingState {
             AcceptedHandoffs = new Dictionary<Guid, ProducerAcceptedHandoff> { [project] = handoff },
             PlanningCycles = new Dictionary<Guid, ProducerPlanningCycleState> {

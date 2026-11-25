@@ -52,6 +52,49 @@ public sealed partial class SpecialistAgent
                 .OrderBy(x => x.Id).Select(x => new { x.Id, x.Revision, x.Status, x.SelectedOptionId, x.Rationale })
         }));
 
+    private static async Task RequeuePlanningAfterDirectionAsync(ProducerOperatingState state, AgentRuntimeContext context,
+        CancellationToken token)
+    {
+        if (!Guid.TryParse(context.Identity?.EmployeeId, out var owner) ||
+            !state.PlanningCycles.Values.Any(cycle => cycle.TechnicalDirectorSessionId is not null)) return;
+        var directory = await context.Platform.PersonalTodo.ListAsync(token);
+        foreach (var item in directory.Boards.Where(b => b.OwnerOrganizationUserId == owner).SelectMany(b => b.Items))
+        {
+            if (item.ArchivedAt is not null || !IsSettledPlanningBlock(item, item.CorrelationId ?? "") ||
+                item.BlockReason!.StartsWith("Repeated issue:", StringComparison.Ordinal) ||
+                item.WorkContext?.WorkstreamId is not Guid project || !state.AcceptedHandoffs.TryGetValue(project, out var handoff) ||
+                !state.PlanningCycles.TryGetValue(project, out var cycle) || cycle.TechnicalDirectorSessionId is not Guid session ||
+                cycle.BoardId != item.WorkContext.BoardId || cycle.TeamId != item.WorkContext.TeamId ||
+                cycle.PlanningFingerprint != item.WorkContext.SourceFingerprint) continue;
+
+            var decisions = await context.Platform.ReadDecisionsAsync(new ReadDecisionRequest(WorkstreamId: project), token);
+            var corrections = decisions.Where(d => IsPlanningDirection(d, project, handoff.RevisionDigest) &&
+                AppliesToBoard(d, cycle.BoardId) && d.Status == DecisionStatuses.Decided && d.UpdatedAt > item.UpdatedAt &&
+                d.SelectedOptionId is not (null or "request-more-evidence") && !string.IsNullOrWhiteSpace(d.Rationale) &&
+                d.Evidence.Any(e => e.Kind == "artifact" && e.ResourceId == handoff.ArtifactId && e.RevisionId == handoff.AcceptedRevisionId &&
+                    e.TypeKey == "video-game.production-plan.v1" && e.Digest == handoff.RevisionDigest && e.Status == "Accepted") &&
+                (d.SelectedOptionId == "provide-direction" || d.Evidence.Any(e =>
+                    e.Kind == "work-item" && e.ResourceId == item.Id || e.Kind == "coordination" && e.ResourceId == session)))
+                .OrderBy(d => d.Id).Select(d => new { d.Id, d.Revision }).ToArray();
+            if (corrections.Length == 0) continue;
+            var stopped = await context.Platform.Communication.ReadCoordinationAsync(session, token);
+            if (stopped.Status != AgentCoordinationStatuses.Blocked || stopped.Initiator.OrganizationUserId != owner ||
+                stopped.BoardSource?.BoardId != cycle.BoardId || IsTechnicalPlanningGenerationBlock(stopped)) continue;
+
+            var fingerprint = ProducerPolicyFingerprint.Digest(JsonSerializer.Serialize(new { session, corrections }));
+            if (!await AuthorizeContinuationRecoveryAsync(item, fingerprint, context, token)) continue;
+            try
+            {
+                await context.Platform.PersonalTodo.RequeueAsync(new(item.Id, item.Revision,
+                    $"planning-direction:{item.Id:N}:{fingerprint}") { ReconcileOnly = true }, token);
+            }
+            catch (PlatformCapabilityException error) when (error.Code == PlatformCapabilityErrorCode.Conflict)
+            {
+                // The current owner, ticket or revision changed. A later wake rereads it before acting.
+            }
+        }
+    }
+
     private static async Task<bool> PlanningDecisionsUnchangedAsync(PersonalTodoItem item,
         PersonalTodoWorkContext source, AgentRuntimeContext context, CancellationToken token)
     {

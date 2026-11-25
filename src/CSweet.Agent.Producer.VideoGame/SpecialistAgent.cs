@@ -268,6 +268,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         await RecoverDiscussionAsync(context, cancellationToken);
         var accepted = await context.Platform.ReadOperatingStateAsync<ProducerOperatingState>(
             ProjectStateKeys.Portfolio("producer"), cancellationToken);
+        if (accepted is not null)
+            await RequeuePlanningAfterDirectionAsync(accepted.Payload, context, cancellationToken);
         // Accepted commitments survive invocations; the host still filters them against current visibility.
         var portfolio = await context.Platform.ReadPortfolioAsync(
             new ReadPortfolioRequest(), cancellationToken);
