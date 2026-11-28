@@ -532,7 +532,7 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return;
         }
         if (message.EventType is ResourceCapabilities.Changed or "com.csweet.project-approval.decided.v1" or "com.csweet.workforce.changed.v1" or "com.csweet.hiring-recommendation.fulfilled.v1" or
-            "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1" or
+            "com.csweet.workstream.changed.v2" or "com.csweet.work.item.changed.v1" or WorkIssueEvents.Changed or
             "sprint.completed" or WorkstreamEventNames.DecisionDecidedV1 or WorkstreamEventNames.SprintChangedV1 or
             WorkstreamEventNames.ExecutionChangedV1 or WorkDeliveryCapabilities.Changed or SourceControlEvents.RepositoryProvisioningChanged or ManagementEvents.ResourceChangeDecided or
             "com.csweet.workstream.project-setup.v1")
@@ -923,7 +923,8 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
         var designerArtifact = designerSession.Turns.LastOrDefault(x =>
             x.Artifact?.Type == "video-game.production.designer-backlog-proposal.v1")?.Artifact;
         var technicalArtifact = technicalSession.Turns.LastOrDefault(x =>
-            x.Artifact?.Type == "video-game.production.technical-delivery-proposal.v1")?.Artifact;
+            x.SpeakerOrganizationUserId == technicalSession.Target.OrganizationUserId &&
+            x.Artifact is { Type: "video-game.production.technical-delivery-proposal.v1", IsFinalPage: true })?.Artifact;
         var technicalProposal = technicalArtifact?.Payload.Deserialize<GameTechnicalDeliveryProposalV1>();
         // An accepted creative brief supplies design constraints when no dedicated designer is justified.
         // All published leaves still have technical-authority provenance and exact role requirements.
@@ -947,6 +948,20 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             return PersonalTodoResult.Blocked("Adaptive game planning needs the Technical Director release with Epic roadmap support. Update the installed agent, then reconcile the accepted brief.");
         var authorityReviewDirectionsDigest = ReadProgressiveEvidence(technicalArtifact!) is { } reviewEvidence
             ? reviewEvidence.ReviewedDirectionsDigest ?? reviewEvidence.DirectionsDigest : null;
+        var hasPlanningFollowUps = false;
+        if (progressiveMode)
+        {
+            try
+            {
+                hasPlanningFollowUps = await ReconcilePlanningFollowUpsAsync(cycle, handoff, technicalProposal,
+                    ReadProgressiveEvidence(technicalArtifact!)?.PlanningFollowUps ?? [], context, cancellationToken);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                hasPlanningFollowUps = true;
+                await context.ReportProgressAsync(new { planningChecks = "reconciliation pending", boardId, reason = error.Message }, cancellationToken);
+            }
+        }
         IReadOnlyList<string>? reviewedAuthorityQuestions = null;
         OwnershipReview? ownership = null;
         string? ownershipFailure = null;
@@ -1016,6 +1031,9 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
             if (advance.Blocker is not null) return PersonalTodoResult.Blocked(advance.Blocker);
             if (advance.Complete && ownershipFailure is not null)
                 return PersonalTodoResult.RetryLater("Final acceptance needs a completed scope-ownership review: " + ownershipFailure);
+            if (advance.Complete && hasPlanningFollowUps)
+                return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
+                    "Open planning checks need recorded evidence and follow-through before final product acceptance.");
             if (advance.Complete) return await ReconcileFinalProductAsync(cycle,handoff,ownership!,context,cancellationToken);
             if (advance.Waiting is not null) return PersonalTodoResult.WaitingUntil(
                 DateTimeOffset.UtcNow.Add(advance.OwnNextStep ? OwnNextStepDelay : CoordinationReviewDelay), advance.Waiting, null, advance.Dependency);
@@ -1650,14 +1668,15 @@ public sealed partial class SpecialistAgent : VideoGameManagerAgentBase
                     "Required and preferred skills are explicit; estimates are not invented."],
                 message, sessionKey, roleRepair is null ? PlanningArtifact(cycle, members) : RoleRepairArtifact(cycle, members, roleRepair));
         if (directionReview)
-            start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + ":direction-review-v1"),
+            start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + ":direction-review-v2"),
                 InitialMessage = "Review the recorded direction against the existing frozen scope. Do not regenerate containers, dependencies, coverage or task briefs. " + start.InitialMessage,
                 Artifact = ProgressiveRequestArtifact(cycle, members, new("Direction", retainedProgress!.DirectionsDigest,
                     retainedProgress.ScopeKey, retainedProgress.OutlineDigest, DetailedStoryKeys: [], ReviewDirectionsDigest: reviewDigest, ManagerDirections: managerDirections, Adaptive: adaptive)) };
         else if (progressivePlanning)
-            start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + (adaptive ? ":adaptive-v1" : ":progressive-v1")),
+            start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + (adaptive ? ":adaptive-v2" : ":progressive-v2")),
                 InitialMessage = "Publish the complete approved scope as an outline first. Do not detail the entire game. " + start.InitialMessage,
-                Artifact = ProgressiveRequestArtifact(cycle, members, new("Outline", reviewDigest, Adaptive: adaptive)) };
+                Artifact = ProgressiveRequestArtifact(cycle, members, new("Outline", reviewDigest,
+                    ManagerDirections: managerDirections.Count == 0 ? null : managerDirections, Adaptive: adaptive)) };
         // After a failed generation the same request key would return the same failed session forever.
         if (generationRetry > 0)
             start = start with { IdempotencyKey = BoundedMutationKey(start.IdempotencyKey + ":generation-retry-" + generationRetry) };
