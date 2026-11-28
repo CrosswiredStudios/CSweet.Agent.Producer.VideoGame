@@ -10,7 +10,8 @@ public sealed partial class SpecialistAgent
     private sealed record MissingWorkIntent(Guid SessionId, string Key, WorkRefinementRequest Request);
     private sealed record MissingWorkPublication(IReadOnlyList<Guid> ItemIds);
     private async Task<PersonalTodoResult> RefineRemainingApprovedWorkAsync(GameProductionPlanningCycleV1 cycle,
-        ProducerAcceptedHandoff handoff, string basis, string reason, AgentRuntimeContext context, CancellationToken ct)
+        ProducerAcceptedHandoff handoff, string basis, string reason, AgentRuntimeContext context, CancellationToken ct,
+        Func<IReadOnlyList<Guid>, Task>? onPublished = null)
     {
         var roster = await ReadManagerTeamAsync(cycle.TeamId, context, ct, cycle.WorkstreamId);
         var contributor = roster is null ? null : SelectRoleMember(roster, VideoGameRoleKeys.TechnicalDirector);
@@ -67,6 +68,7 @@ public sealed partial class SpecialistAgent
         if (!judgment.WithinApprovedScope) return PersonalTodoResult.Blocked("The retained refinement needs reconciliation with its owner: " + judgment.Reason);
         var publication = await DurableWorkHandoff.GetOrCreateAsync(AgentOperatingStateKey.Create("remaining-work-publication:v1", new { key, artifact.Digest }), "work.refinement-publication.v1", async () =>
             new MissingWorkPublication(await ScopedWorkRefinement.PublishAsync(inputRequest, draft, key + ":" + artifact.Digest, context, ct, new(current.Id, artifact.Digest, key))), context, ct);
+        if (onPublished is not null) await onPublished(publication.ItemIds);
         return PersonalTodoResult.WaitingUntil(DateTimeOffset.UtcNow.Add(CoordinationReviewDelay),
             "Published a versioned additive refinement with " + publication.ItemIds.Count + " work items. Current estimation, staffing and delivery checks will schedule the approaching work.");
     }

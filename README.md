@@ -1,6 +1,6 @@
-# Producer 6.23.21
+# Producer 6.23.22
 
-Gabriel resumes blocked planning with the recorded correction and sends the revised request to the original specialist. [Release notes](releases/6.23.21.md)
+Gabriel tracks evidence needed to resolve future planning concerns and links the responsible work. [Release notes](releases/6.23.22.md)
 
 ## Producer 6.23.16
 

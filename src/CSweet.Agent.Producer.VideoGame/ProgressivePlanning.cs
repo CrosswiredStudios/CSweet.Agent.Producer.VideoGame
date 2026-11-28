@@ -27,6 +27,7 @@ public sealed partial class SpecialistAgent
         public IReadOnlyDictionary<string, string[]>? TaskConstraints { get; init; }
         public string? ReviewedDirectionsDigest { get; init; }
         public IReadOnlyList<string>? ReviewedAuthorityQuestions { get; init; }
+        public IReadOnlyList<PlanningFollowUp>? PlanningFollowUps { get; init; }
     }
     private sealed record ProgressiveScopePlan(IReadOnlyList<GameProposedWorkItemV1> DeliveryItems,
         IReadOnlyList<string> FeasibilityFindings, IReadOnlyList<string> TechnicalConstraints, IReadOnlyList<string> OpenFeasibilityDecisions)
